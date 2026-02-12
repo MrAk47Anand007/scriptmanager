@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Script {
+  id              String      @id @default(uuid())
+  name            String      @unique
+  filename        String
+  description     String      @default("")
+  language        String      @default("python")
+  interpreter     String?
+  webhookToken    String?     @unique @map("webhook_token")
+  scheduleCron    String?     @map("schedule_cron")
+  scheduleEnabled Boolean     @default(false) @map("schedule_enabled")
+  gistId          String?     @map("gist_id")
+  gistUrl         String?     @map("gist_url")
+  syncToGist      Boolean     @default(false) @map("sync_to_gist")
+  gistFilename    String?     @map("gist_filename")
+  collectionId    String?     @map("collection_id")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  lastRun         DateTime?   @map("last_run")
+
+  collection      Collection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  builds          Build[]
+
+  @@map("scripts")
+}
+
+model Build {
+  id              String    @id @default(uuid())
+  scriptId        String    @map("script_id")
+  status          String    @default("pending")
+  triggeredBy     String    @default("manual") @map("triggered_by")
+  logFile         String?   @map("log_file")
+  startedAt       DateTime? @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+  exitCode        Int?      @map("exit_code")
+  webhookPayload  String?   @map("webhook_payload")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  script          Script    @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+
+  @@map("builds")
+}
+
+model Collection {
+  id          String    @id @default(uuid())
+  name        String
+  description String    @default("")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  scripts     Script[]
+
+  @@map("collections")
+}
+
+model Setting {
+  key       String    @id
+  value     String?
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
