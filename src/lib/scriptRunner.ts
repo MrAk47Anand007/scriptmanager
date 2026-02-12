@@ -14,8 +14,11 @@ interface ScriptInfo {
   interpreter?: string | null
 }
 
-function getScriptsDir(): string {
-  const dir = process.env.SCRIPTS_DIR ?? path.join(process.cwd(), 'user_scripts')
+async function getScriptsDir(): Promise<string> {
+  const setting = await prisma.setting.findUnique({
+    where: { key: 'script_storage_path' }
+  })
+  const dir = setting?.value ?? process.env.SCRIPTS_DIR ?? path.join(process.cwd(), 'user_scripts')
   if (!path.isAbsolute(dir)) return path.join(process.cwd(), dir)
   return dir
 }
@@ -52,12 +55,13 @@ export async function executeScriptAsync(buildId: string, script: ScriptInfo): P
   const emitter = new EventEmitter()
   buildEmitters.set(buildId, emitter)
 
-  const scriptsDir = getScriptsDir()
+  const scriptsDir = await getScriptsDir()
   const buildsDir = getBuildsDir()
   const scriptPath = path.join(scriptsDir, script.filename)
   const buildScriptDir = path.join(buildsDir, script.filename.replace(/[^a-zA-Z0-9_.-]/g, '_'))
   const logFile = path.join(buildScriptDir, `${buildId}.log`)
 
+  // ... (rest of the function remains mostly the same, ensuring async correctness)
   fs.mkdirSync(buildScriptDir, { recursive: true })
 
   const [cmd, args] = resolveInterpreter(script.language, script.interpreter, scriptPath)
@@ -140,7 +144,7 @@ export async function executeScriptAsync(buildId: string, script: ScriptInfo): P
     await prisma.build.update({
       where: { id: buildId },
       data: { status: 'failure', exitCode: -1, finishedAt: new Date() }
-    }).catch(() => {})
+    }).catch(() => { })
     emitter.emit('line', errMsg)
     emitter.emit('done')
   }
@@ -150,11 +154,13 @@ export function getBuildEmitter(buildId: string): EventEmitter | undefined {
   return buildEmitters.get(buildId)
 }
 
-export function getScriptFilePath(filename: string): string {
-  return path.join(getScriptsDir(), filename)
+export async function getScriptFilePath(filename: string): Promise<string> {
+  const scriptsDir = await getScriptsDir()
+  return path.join(scriptsDir, filename)
 }
 
-export function ensureScriptsDirExists(): void {
-  fs.mkdirSync(getScriptsDir(), { recursive: true })
+export async function ensureScriptsDirExists(): Promise<void> {
+  const scriptsDir = await getScriptsDir()
+  fs.mkdirSync(scriptsDir, { recursive: true })
   fs.mkdirSync(getBuildsDir(), { recursive: true })
 }

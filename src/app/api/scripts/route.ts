@@ -42,14 +42,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
 
-  ensureScriptsDirExists()
+  await ensureScriptsDirExists()
 
   let script = id ? await prisma.script.findUnique({ where: { id }, include: { collection: true } }) : null
 
   if (script) {
     // Update existing script
     const filename = script.filename
-    const filePath = getScriptFilePath(filename)
+    const filePath = await getScriptFilePath(filename)
 
     if (content !== undefined) {
       fs.writeFileSync(filePath, content, 'utf8')
@@ -72,7 +72,7 @@ export async function POST(req: Request) {
       ? name
       : `${name}.py`
 
-    const filePath = getScriptFilePath(filename)
+    const filePath = await getScriptFilePath(filename)
 
     // Check if name already taken
     const existing = await prisma.script.findUnique({ where: { name } })

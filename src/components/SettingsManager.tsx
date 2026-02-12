@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Loader2, Save, Github } from 'lucide-react';
+import { Loader2, Save, Github, FolderIcon } from 'lucide-react';
 
 export const SettingsManager = () => {
     const dispatch = useAppDispatch();
@@ -17,6 +17,7 @@ export const SettingsManager = () => {
 
     const [githubToken, setGithubToken] = useState('');
     const [gistSyncEnabled, setGistSyncEnabled] = useState(false);
+    const [scriptPath, setScriptPath] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [saveMessage, setSaveMessage] = useState('');
 
@@ -30,6 +31,7 @@ export const SettingsManager = () => {
         if (status === 'succeeded') {
             setGithubToken(settings['github_token'] || '');
             setGistSyncEnabled(settings['gist_sync_enabled'] === 'true');
+            setScriptPath(settings['script_storage_path'] || '');
         }
     }, [settings, status]);
 
@@ -40,6 +42,7 @@ export const SettingsManager = () => {
             await dispatch(saveSettings({
                 'github_token': githubToken,
                 'gist_sync_enabled': String(gistSyncEnabled),
+                'script_storage_path': scriptPath,
             })).unwrap();
             setSaveMessage('Settings saved successfully!');
             setTimeout(() => setSaveMessage(''), 3000);
@@ -74,6 +77,31 @@ export const SettingsManager = () => {
                     <AlertDescription>{saveMessage}</AlertDescription>
                 </Alert>
             )}
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><FolderIcon className="h-5 w-5" /> Local Storage</CardTitle>
+                    <CardDescription>
+                        Configure where scripts are stored on the server.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="script_path">Script Directory Path</Label>
+                        <Input
+                            id="script_path"
+                            placeholder="./user_scripts"
+                            value={scriptPath}
+                            onChange={(e) => setScriptPath(e.target.value)}
+                        />
+                        <p className="text-xs text-slate-500">
+                            Absolute path or relative to the application root.
+                            <br />
+                            <span className="text-amber-600 font-medium">Warning:</span> Changing this will not move existing scripts.
+                        </p>
+                    </div>
+                </CardContent>
+            </Card>
 
             <Card>
                 <CardHeader>

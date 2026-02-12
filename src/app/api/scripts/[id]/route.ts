@@ -14,7 +14,7 @@ export async function GET(
     return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   }
 
-  const filePath = getScriptFilePath(script.filename)
+  const filePath = await getScriptFilePath(script.filename)
   let content = ''
   if (fs.existsSync(filePath)) {
     content = fs.readFileSync(filePath, 'utf8')

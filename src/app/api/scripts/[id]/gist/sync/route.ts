@@ -19,7 +19,7 @@ export async function POST(
     return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   }
 
-  const filePath = getScriptFilePath(script.filename)
+  const filePath = await getScriptFilePath(script.filename)
   if (!fs.existsSync(filePath)) {
     return NextResponse.json({ error: 'Script file not found on disk' }, { status: 404 })
   }

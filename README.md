@@ -2,49 +2,62 @@
 
 A self-hosted, local-first script manager for writing, running, scheduling, and organizing scripts — like n8n but for scripts.
 
+![ScriptManager UI](/screenshot.png)
+
 ## Features
 
-- **Script Editor** — Write Python, JavaScript (Node), Shell, or custom interpreter scripts
-- **Run & Stream** — Execute scripts with real-time console output streaming
-- **Collections** — Organize scripts in named folders with drag-and-drop
-- **Webhooks** — Trigger scripts via HTTP POST to a unique URL
-- **Cron Scheduling** — Run scripts automatically on a cron schedule
-- **GitHub Gist Sync** — Sync scripts to private GitHub Gists for backup/sharing
-- **Build History** — Track all script executions with logs
+- **Script Editor** — Professional styling with **Monaco Editor** (VS Code), supporting Python, JavaScript (Node), Shell, and custom interpreters.
+- **Integrated Terminal** — Full-featured web terminal (PowerShell/Bash) to install packages (`npm`, `pip`), run git commands, or manage your system alongside your scripts.
+- **Run & Stream** — Execute scripts with real-time console output streaming via WebSockets.
+- **File Management** — Organize scripts in named collections. **Configurable storage path** allows you to save scripts anywhere on your disk.
+- **Webhooks** — Trigger any script via a unique HTTP POST URL (great for IFTTT/Zapier integrations).
+- **Cron Scheduling** — Built-in cron scheduler to run scripts automatically.
+- **GitHub Gist Sync** — Backup and share scripts privately or publicly via GitHub Gists.
+- **Build History** — Persistent logs for every execution (success/failure status, duration, output).
+- **Dark Mode UI** — Sleek, responsive interface built with Shadcn UI and Tailwind CSS.
 
 ## Tech Stack
 
-- **Next.js 15** (App Router) — Full-stack, single server
-- **Prisma + SQLite** — Zero-setup local database
-- **Redux Toolkit** — Frontend state management
-- **React** + **Tailwind CSS** + **Radix UI** — UI
+- **Framework**: Next.js 15 (App Router)
+- **Database**: SQLite + Prisma (Zero config, local file)
+- **State Management**: Redux Toolkit
+- **Terminal**: xterm.js + node-pty
+- **UI**: React + Tailwind CSS + Lucide Icons + Radix UI
 
 ## Quick Start
 
 ### Prerequisites
 
-- Node.js 18+
-- Python 3 (for running Python scripts)
+- **Node.js 18+**
+- **Python 3** (if running Python scripts)
+- **Windows/Linux/Mac** supported
 
-### Setup
+### Installation
 
-```bash
-# 1. Install dependencies
-npm install
+1.  **Install dependencies**
+    ```bash
+    npm install
+    # On Windows, if you encounter errors with node-pty, ensure you have build tools:
+    # npm install --global --production windows-build-tools
+    ```
 
-# 2. Generate Prisma client
-npm run db:generate
+2.  **Setup Database**
+    ```bash
+    # Generate Prisma Client
+    npm run db:generate
 
-# 3. Run database migrations (creates data/scriptmanager.db)
-npm run db:migrate
+    # Run Migrations (creates ./data/scriptmanager.db)
+    npm run db:migrate
+    ```
 
-# 4. Start the development server
-npm run dev
-```
+3.  **Start Server**
+    ```bash
+    npm run dev
+    ```
 
-Open [http://localhost:3000](http://localhost:3000)
+    Open [http://localhost:3000](http://localhost:3000)
 
-### Production
+### Production Build
 
 ```bash
 npm run build
@@ -53,51 +66,43 @@ npm start
 
 ## Configuration
 
-Edit `.env.local` to customize:
+You can configure the application via the **Settings** tab in the UI, or by setting environment variables in `.env`.
 
+### UI Settings
+- **GitHub Token**: For Gist syncing.
+- **Script Storage Path**: Choose a custom folder on your disk to store scripts (defaults to `./user_scripts`).
+
+### Environment Variables (.env)
 ```env
-# Database path
+# Database connection
 DATABASE_URL="file:./data/scriptmanager.db"
 
-# Where user scripts are stored
-SCRIPTS_DIR="./user_scripts"
-
-# Where build logs are stored
-BUILDS_DIR="./builds"
-
-# Server port (default 3000)
+# Server Port
 PORT=3000
 ```
 
-## Webhook Usage
+## Usage Guide
 
-Trigger a script via HTTP:
+### Running Scripts
+- Click **Run** to execute immediately.
+- Output streams in real-time to the Console Output pane.
+- View past runs in the **Build History** sidebar.
 
-```bash
-curl -X POST http://localhost:3000/api/webhooks/<your-webhook-token>
+### Using the Terminal
+- Click **Open Terminal** in the Console Output header.
+- A fully functional terminal will appear below the editor.
+- Use it to install dependencies: `pip install pandas` or `npm install axios`.
+- Minimize it to keep it running in the background.
 
-# With JSON payload
-curl -X POST http://localhost:3000/api/webhooks/<token> \
-  -H "Content-Type: application/json" \
-  -d '{"key": "value"}'
-```
+### Webhooks
+- Every script has a unique **Webhook URL** shown in the sidebar.
+- Send a `POST` request to trigger it.
+- **Payloads**: Any JSON body sent to the webhook is available to the script via environment variables or arguments (depending on implementation).
 
-## GitHub Gist Sync
-
-1. Generate a GitHub Personal Access Token with the `gist` scope at [github.com/settings/tokens](https://github.com/settings/tokens)
-2. Paste it in **Settings → GitHub Integration**
-3. Toggle the **Gist** switch in the script editor toolbar to sync
-
-## Multi-Language Support
-
-ScriptManager supports multiple interpreters per script:
-
-| Language | Interpreter |
-|---|---|
-| Python | `python3` (or `python` on Windows) |
-| JavaScript | `node` |
-| Shell/Bash | `bash` (or `cmd` on Windows) |
-| Custom | Any interpreter path (e.g. `/usr/bin/ruby`, `deno run`) |
+### Scheduling
+- Enable the **Schedule** toggle.
+- Enter a standard cron expression (e.g., `*/15 * * * *` for every 15 mins).
+- The server will run the script automatically as long as it's running.
 
 ## License
 
