@@ -103,8 +103,18 @@ export async function executeScriptAsync(
       }
     }
 
+    // Load per-script env vars from DB
+    const scriptEnvVarsFromDB = await prisma.scriptEnvVar.findMany({
+      where: { scriptId: script.id },
+    })
+    const scriptEnv: Record<string, string> = {}
+    for (const ev of scriptEnvVarsFromDB) {
+      scriptEnv[ev.key] = ev.value
+    }
+
     const child = spawn(cmd, args, {
-      env: { ...process.env, ...paramEnv },
+      // Precedence: process.env < script env vars < param values (most specific wins)
+      env: { ...process.env, ...scriptEnv, ...paramEnv },
       stdio: ['ignore', 'pipe', 'pipe']
     })
 

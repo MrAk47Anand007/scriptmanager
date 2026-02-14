@@ -14,9 +14,11 @@ import {
     updateActiveScriptContent, appendBuildOutput, clearBuildOutput,
     regenerateWebhook, fetchSchedule, saveSchedule,
     moveScript, addTagToScript, removeTagFromScript, fetchAllTags,
+    fetchEnvVars, upsertEnvVar, deleteEnvVar,
 } from '@/features/scripts/scriptsSlice';
 import type { Script } from '@/features/scripts/scriptsSlice';
 import { TagsInput } from './TagsInput';
+import { EnvVarsPanel } from './EnvVarsPanel';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Github, Loader2, SlidersHorizontal } from 'lucide-react';
@@ -46,7 +48,7 @@ const LANGUAGE_OPTIONS = [
 
 export const ScriptsManager = () => {
     const dispatch = useAppDispatch();
-    const { items: scripts, collections, activeScriptId, activeScriptContent, builds, currentBuildOutput, saveStatus, schedule, contentStatus, runStatus, allTags } = useAppSelector((state) => state.scripts);
+    const { items: scripts, collections, activeScriptId, activeScriptContent, builds, currentBuildOutput, saveStatus, schedule, contentStatus, runStatus, allTags, envVars } = useAppSelector((state) => state.scripts);
     const { settings } = useAppSelector((state) => state.settings);
     const consoleRef = useRef<HTMLDivElement>(null);
     const eventSourceRef = useRef<EventSource | null>(null);
@@ -71,6 +73,7 @@ export const ScriptsManager = () => {
             dispatch(fetchScriptContent(activeScriptId));
             dispatch(fetchBuilds(activeScriptId));
             dispatch(fetchSchedule(activeScriptId));
+            dispatch(fetchEnvVars(activeScriptId));
 
             if (eventSourceRef.current) {
                 eventSourceRef.current.close();
@@ -419,6 +422,17 @@ export const ScriptsManager = () => {
                                 </div>
                             )
                         })()}
+
+                        {/* Env Vars section */}
+                        {activeScriptId && (
+                            <div>
+                                <EnvVarsPanel
+                                    envVars={envVars}
+                                    onAdd={(key, value, isSecret) => dispatch(upsertEnvVar({ scriptId: activeScriptId, key, value, isSecret }))}
+                                    onDelete={(key) => dispatch(deleteEnvVar({ scriptId: activeScriptId, key }))}
+                                />
+                            </div>
+                        )}
                     </div>
                 )}
 

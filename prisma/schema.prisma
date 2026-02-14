@@ -30,6 +30,7 @@ model Script {
   collection      Collection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
   builds          Build[]
   tags            ScriptTag[]
+  envVars         ScriptEnvVar[]
 
   @@map("scripts")
 }
@@ -54,6 +55,19 @@ model ScriptTag {
 
   @@id([scriptId, tagId])
   @@map("script_tags")
+}
+
+model ScriptEnvVar {
+  id        String  @id @default(uuid())
+  scriptId  String  @map("script_id")
+  key       String
+  value     String  @default("")
+  isSecret  Boolean @default(false) @map("is_secret")
+
+  script    Script  @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+
+  @@unique([scriptId, key])
+  @@map("script_env_vars")
 }
 
 model Build {

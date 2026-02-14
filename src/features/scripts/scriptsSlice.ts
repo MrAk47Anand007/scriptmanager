@@ -34,6 +34,13 @@ export interface Script {
 
 export type { ScriptParameter }
 
+export interface EnvVar {
+    id: string
+    key: string
+    value: string
+    is_secret: boolean
+}
+
 export interface Build {
     id: string
     script_id: string
@@ -70,6 +77,8 @@ interface ScriptsState {
     templates: ScriptTemplate[];
     templatesStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
     allTags: Tag[];
+    envVars: EnvVar[];
+    envVarsStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
     activeScriptId: string | null;
     activeScriptContent: string;
     builds: Build[];
@@ -93,6 +102,8 @@ const initialState: ScriptsState = {
     templates: [],
     templatesStatus: 'idle',
     allTags: [],
+    envVars: [],
+    envVarsStatus: 'idle',
     activeScriptId: null,
     activeScriptContent: '',
     builds: [],
@@ -248,6 +259,23 @@ export const moveScript = createAsyncThunk('scripts/moveScript', async ({ script
     return { scriptId, collectionId: response.data.collection_id }
 })
 
+// --- Env Var Thunks ---
+
+export const fetchEnvVars = createAsyncThunk('scripts/fetchEnvVars', async (scriptId: string) => {
+    const response = await axios.get(`/api/scripts/${scriptId}/env`)
+    return response.data as EnvVar[]
+})
+
+export const upsertEnvVar = createAsyncThunk('scripts/upsertEnvVar', async ({ scriptId, key, value, isSecret }: { scriptId: string; key: string; value: string; isSecret: boolean }) => {
+    const response = await axios.post(`/api/scripts/${scriptId}/env`, { key, value, is_secret: isSecret })
+    return response.data as EnvVar
+})
+
+export const deleteEnvVar = createAsyncThunk('scripts/deleteEnvVar', async ({ scriptId, key }: { scriptId: string; key: string }) => {
+    await axios.delete(`/api/scripts/${scriptId}/env?key=${encodeURIComponent(key)}`)
+    return key
+})
+
 // --- Tag Thunks ---
 
 export const fetchAllTags = createAsyncThunk('scripts/fetchAllTags', async () => {
@@ -275,6 +303,8 @@ const scriptsSlice = createSlice({
             state.currentBuildOutput = ''
             state.builds = []
             state.schedule = { cron: '', enabled: false, nextRun: null, status: 'idle' }
+            state.envVars = []
+            state.envVarsStatus = 'idle'
         },
         updateActiveScriptContent(state, action: PayloadAction<string>) {
             state.activeScriptContent = action.payload
@@ -427,6 +457,28 @@ const scriptsSlice = createSlice({
             })
             .addCase(deleteTemplate.fulfilled, (state, action) => {
                 state.templates = state.templates.filter(t => t.id !== action.payload)
+            })
+            .addCase(fetchEnvVars.pending, (state) => {
+                state.envVarsStatus = 'loading'
+            })
+            .addCase(fetchEnvVars.fulfilled, (state, action) => {
+                state.envVars = action.payload
+                state.envVarsStatus = 'succeeded'
+            })
+            .addCase(fetchEnvVars.rejected, (state) => {
+                state.envVarsStatus = 'failed'
+            })
+            .addCase(upsertEnvVar.fulfilled, (state, action) => {
+                const idx = state.envVars.findIndex(v => v.key === action.payload.key)
+                if (idx !== -1) {
+                    state.envVars[idx] = action.payload
+                } else {
+                    state.envVars.push(action.payload)
+                    state.envVars.sort((a, b) => a.key.localeCompare(b.key))
+                }
+            })
+            .addCase(deleteEnvVar.fulfilled, (state, action) => {
+                state.envVars = state.envVars.filter(v => v.key !== action.payload)
             })
             .addCase(fetchAllTags.fulfilled, (state, action) => {
                 state.allTags = action.payload
