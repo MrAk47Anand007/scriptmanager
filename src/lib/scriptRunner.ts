@@ -8,11 +8,14 @@ import type { ScriptParameter } from '@/lib/types'
 // Module-level map: buildId -> EventEmitter (Node.js equivalent of Python's _output_queues dict)
 const buildEmitters = new Map<string, EventEmitter>()
 
+const DEFAULT_TIMEOUT_MS = 30_000 // 30 seconds
+
 interface ScriptInfo {
   id: string
   filename: string
   language: string
   interpreter?: string | null
+  timeoutMs?: number | null
 }
 
 async function getScriptsDir(): Promise<string> {
@@ -103,10 +106,39 @@ export async function executeScriptAsync(
       }
     }
 
+    // Load per-script env vars from DB
+    const scriptEnvVarsFromDB = await prisma.scriptEnvVar.findMany({
+      where: { scriptId: script.id },
+    })
+    const scriptEnv: Record<string, string> = {}
+    for (const ev of scriptEnvVarsFromDB) {
+      scriptEnv[ev.key] = ev.value
+    }
+
+    // Determine timeout: per-script override → global setting → hardcoded default
+    let timeoutMs = script.timeoutMs ?? null
+    if (!timeoutMs) {
+      const globalTimeoutSetting = await prisma.setting.findUnique({ where: { key: 'execution_timeout_ms' } })
+      timeoutMs = globalTimeoutSetting?.value ? parseInt(globalTimeoutSetting.value, 10) : DEFAULT_TIMEOUT_MS
+    }
+
     const child = spawn(cmd, args, {
-      env: { ...process.env, ...paramEnv },
+      // Precedence: process.env < script env vars < param values (most specific wins)
+      env: { ...process.env, ...scriptEnv, ...paramEnv },
       stdio: ['ignore', 'pipe', 'pipe']
     })
+
+    let timedOut = false
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true
+      const msg = `\n[ScriptManager] Execution timed out after ${timeoutMs! / 1000}s. Killing process...\n`
+      logStream.write(msg)
+      emitter.emit('line', msg)
+      child.kill('SIGTERM')
+      setTimeout(() => {
+        if (!child.killed) child.kill('SIGKILL')
+      }, 2000)
+    }, timeoutMs)
 
     const onData = (chunk: Buffer) => {
       const line = chunk.toString()
@@ -118,6 +150,7 @@ export async function executeScriptAsync(
     child.stderr.on('data', onData)
 
     child.on('error', async (err) => {
+      clearTimeout(timeoutHandle)
       const errMsg = `\nError starting process: ${err.message}\nMake sure '${cmd}' is installed and accessible.\n`
       logStream.write(errMsg)
       logStream.end()
@@ -132,15 +165,17 @@ export async function executeScriptAsync(
     })
 
     child.on('close', async (code) => {
+      clearTimeout(timeoutHandle)
       const exitCode = code ?? -1
       logStream.end()
       emitter.emit('done')
       buildEmitters.delete(buildId)
 
+      const finalStatus = timedOut ? 'timeout' : (exitCode === 0 ? 'success' : 'failure')
       await prisma.build.update({
         where: { id: buildId },
         data: {
-          status: exitCode === 0 ? 'success' : 'failure',
+          status: finalStatus,
           exitCode,
           finishedAt: new Date()
         }

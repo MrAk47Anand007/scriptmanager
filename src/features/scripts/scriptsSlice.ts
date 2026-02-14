@@ -2,6 +2,12 @@ import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
 import axios from 'axios'
 import type { ScriptParameter } from '@/lib/types'
 
+export interface Tag {
+    id: string
+    name: string
+    color: string
+}
+
 export interface Script {
     id: string
     name: string
@@ -22,17 +28,37 @@ export interface Script {
     gist_id?: string
     gist_url?: string
     sync_to_gist?: boolean
+    // Tags
+    tags?: Tag[]
+    // Timeout override
+    timeout_ms?: number | null
+    // Webhook HMAC
+    require_webhook_signature?: boolean
+    webhook_secret_set?: boolean
 }
 
 export type { ScriptParameter }
 
+export interface EnvVar {
+    id: string
+    key: string
+    value: string
+    is_secret: boolean
+}
+
 export interface Build {
     id: string
     script_id: string
-    status: 'pending' | 'running' | 'success' | 'failure'
+    status: 'pending' | 'running' | 'success' | 'failure' | 'timeout'
     started_at: string
     completed_at?: string
     triggered_by: string
+}
+
+export interface ScriptVersionMeta {
+    id: string
+    snapshot_number: number
+    saved_at: string
 }
 
 export interface Collection {
@@ -43,9 +69,29 @@ export interface Collection {
     created_at: string;
 }
 
+export interface ScriptTemplate {
+    id: string
+    name: string
+    description: string
+    category: string
+    language: string
+    interpreter?: string | null
+    content: string
+    parameters: ScriptParameter[]
+    is_built_in: boolean
+    created_at: string
+}
+
 interface ScriptsState {
     items: Script[];
     collections: Collection[];
+    templates: ScriptTemplate[];
+    templatesStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
+    allTags: Tag[];
+    envVars: EnvVar[];
+    envVarsStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
+    versions: ScriptVersionMeta[];
+    versionsStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
     activeScriptId: string | null;
     activeScriptContent: string;
     builds: Build[];
@@ -66,6 +112,13 @@ interface ScriptsState {
 const initialState: ScriptsState = {
     items: [],
     collections: [],
+    templates: [],
+    templatesStatus: 'idle',
+    allTags: [],
+    envVars: [],
+    envVarsStatus: 'idle',
+    versions: [],
+    versionsStatus: 'idle',
     activeScriptId: null,
     activeScriptContent: '',
     builds: [],
@@ -93,18 +146,63 @@ export const fetchScriptContent = createAsyncThunk('scripts/fetchScriptContent',
     return response.data
 })
 
-export const createScript = createAsyncThunk('scripts/createScript', async (payload: string | { name: string, syncToGist?: boolean }) => {
+export const createScript = createAsyncThunk('scripts/createScript', async (payload: string | {
+    name: string
+    syncToGist?: boolean
+    content?: string
+    language?: string
+    interpreter?: string | null
+    parameters?: ScriptParameter[]
+}) => {
     const name = typeof payload === 'string' ? payload : payload.name
     const syncToGist = typeof payload === 'string' ? undefined : payload.syncToGist
+    const content = typeof payload === 'string' ? undefined : payload.content
+    const language = typeof payload === 'string' ? undefined : payload.language
+    const interpreter = typeof payload === 'string' ? undefined : payload.interpreter
+    const parameters = typeof payload === 'string' ? undefined : payload.parameters
     const response = await axios.post('/api/scripts', {
         name,
-        content: '# New script\nprint("Hello World")',
-        sync_to_gist: syncToGist
+        content: content ?? '# New script\nprint("Hello World")',
+        sync_to_gist: syncToGist,
+        language,
+        interpreter,
+        parameters,
     })
     return response.data
 })
 
-export const saveScript = createAsyncThunk('scripts/saveScript', async (data: { id: string; name: string; content: string; sync_to_gist?: boolean; language?: string; interpreter?: string | null; parameters?: ScriptParameter[] }) => {
+export const fetchTemplates = createAsyncThunk('scripts/fetchTemplates', async () => {
+    const response = await axios.get('/api/templates')
+    return response.data
+})
+
+export const saveAsTemplate = createAsyncThunk(
+    'scripts/saveAsTemplate',
+    async (payload: {
+        name: string
+        description: string
+        category: string
+        language: string
+        interpreter?: string | null
+        content: string
+        parameters?: ScriptParameter[]
+    }, { rejectWithValue }) => {
+        try {
+            const response = await axios.post('/api/templates', payload)
+            return response.data
+        } catch (err: unknown) {
+            const axiosErr = err as { response?: { data?: unknown } }
+            return rejectWithValue(axiosErr.response?.data ?? { error: 'Unknown error' })
+        }
+    }
+)
+
+export const deleteTemplate = createAsyncThunk('scripts/deleteTemplate', async (id: string) => {
+    await axios.delete(`/api/templates/${id}`)
+    return id
+})
+
+export const saveScript = createAsyncThunk('scripts/saveScript', async (data: { id: string; name: string; content: string; sync_to_gist?: boolean; language?: string; interpreter?: string | null; parameters?: ScriptParameter[]; timeout_ms?: number | null }) => {
     const response = await axios.post('/api/scripts', data)
     return response.data
 })
@@ -127,6 +225,21 @@ export const fetchBuildOutput = createAsyncThunk('scripts/fetchBuildOutput', asy
 export const regenerateWebhook = createAsyncThunk('scripts/regenerateWebhook', async (scriptId: string) => {
     const response = await axios.post(`/api/scripts/${scriptId}/webhook/regenerate`)
     return { scriptId, token: response.data.webhook_token }
+})
+
+export const regenerateWebhookSecret = createAsyncThunk('scripts/regenerateWebhookSecret', async (scriptId: string) => {
+    const response = await axios.post(`/api/scripts/${scriptId}/webhook/secret`)
+    return { scriptId, secret: response.data.webhook_secret as string }
+})
+
+export const toggleWebhookSignature = createAsyncThunk('scripts/toggleWebhookSignature', async ({ scriptId, requireSignature }: { scriptId: string; requireSignature: boolean }) => {
+    const response = await axios.put(`/api/scripts/${scriptId}/webhook/secret`, { require_signature: requireSignature })
+    return {
+        scriptId,
+        require_webhook_signature: response.data.require_webhook_signature as boolean,
+        // new secret if auto-generated
+        webhook_secret: response.data.webhook_secret as string | undefined,
+    }
 })
 
 export const fetchSchedule = createAsyncThunk('scripts/fetchSchedule', async (scriptId: string) => {
@@ -154,6 +267,13 @@ export const deleteGist = createAsyncThunk('scripts/deleteGist', async (scriptId
     return scriptId
 })
 
+// --- Duplication Thunk ---
+
+export const duplicateScript = createAsyncThunk('scripts/duplicateScript', async (id: string) => {
+    const response = await axios.post(`/api/scripts/${id}/duplicate`)
+    return response.data as Script
+})
+
 // --- Collection Thunks ---
 
 export const fetchCollections = createAsyncThunk('scripts/fetchCollections', async () => {
@@ -176,6 +296,55 @@ export const moveScript = createAsyncThunk('scripts/moveScript', async ({ script
     return { scriptId, collectionId: response.data.collection_id }
 })
 
+// --- Env Var Thunks ---
+
+export const fetchEnvVars = createAsyncThunk('scripts/fetchEnvVars', async (scriptId: string) => {
+    const response = await axios.get(`/api/scripts/${scriptId}/env`)
+    return response.data as EnvVar[]
+})
+
+export const upsertEnvVar = createAsyncThunk('scripts/upsertEnvVar', async ({ scriptId, key, value, isSecret }: { scriptId: string; key: string; value: string; isSecret: boolean }) => {
+    const response = await axios.post(`/api/scripts/${scriptId}/env`, { key, value, is_secret: isSecret })
+    return response.data as EnvVar
+})
+
+export const deleteEnvVar = createAsyncThunk('scripts/deleteEnvVar', async ({ scriptId, key }: { scriptId: string; key: string }) => {
+    await axios.delete(`/api/scripts/${scriptId}/env?key=${encodeURIComponent(key)}`)
+    return key
+})
+
+// --- Version History Thunks ---
+
+export const fetchVersions = createAsyncThunk('scripts/fetchVersions', async (scriptId: string) => {
+    const response = await axios.get(`/api/scripts/${scriptId}/versions`)
+    return response.data as ScriptVersionMeta[]
+})
+
+export const fetchVersionContent = createAsyncThunk(
+    'scripts/fetchVersionContent',
+    async ({ scriptId, versionId }: { scriptId: string; versionId: string }) => {
+        const response = await axios.get(`/api/scripts/${scriptId}/versions/${versionId}`)
+        return response.data as { id: string; snapshot_number: number; content: string; saved_at: string }
+    }
+)
+
+// --- Tag Thunks ---
+
+export const fetchAllTags = createAsyncThunk('scripts/fetchAllTags', async () => {
+    const response = await axios.get('/api/tags')
+    return response.data as Tag[]
+})
+
+export const addTagToScript = createAsyncThunk('scripts/addTagToScript', async ({ scriptId, name, color }: { scriptId: string; name: string; color?: string }) => {
+    const response = await axios.post(`/api/scripts/${scriptId}/tags`, { name, color })
+    return { scriptId, tag: response.data as Tag }
+})
+
+export const removeTagFromScript = createAsyncThunk('scripts/removeTagFromScript', async ({ scriptId, tagId }: { scriptId: string; tagId: string }) => {
+    await axios.delete(`/api/scripts/${scriptId}/tags?tagId=${tagId}`)
+    return { scriptId, tagId }
+})
+
 const scriptsSlice = createSlice({
     name: 'scripts',
     initialState,
@@ -186,6 +355,10 @@ const scriptsSlice = createSlice({
             state.currentBuildOutput = ''
             state.builds = []
             state.schedule = { cron: '', enabled: false, nextRun: null, status: 'idle' }
+            state.envVars = []
+            state.envVarsStatus = 'idle'
+            state.versions = []
+            state.versionsStatus = 'idle'
         },
         updateActiveScriptContent(state, action: PayloadAction<string>) {
             state.activeScriptContent = action.payload
@@ -323,6 +496,111 @@ const scriptsSlice = createSlice({
                     script.sync_to_gist = false
                 }
             })
+            .addCase(fetchTemplates.pending, (state) => {
+                state.templatesStatus = 'loading'
+            })
+            .addCase(fetchTemplates.fulfilled, (state, action) => {
+                state.templates = action.payload
+                state.templatesStatus = 'succeeded'
+            })
+            .addCase(fetchTemplates.rejected, (state) => {
+                state.templatesStatus = 'failed'
+            })
+            .addCase(saveAsTemplate.fulfilled, (state, action) => {
+                state.templates.push(action.payload)
+            })
+            .addCase(deleteTemplate.fulfilled, (state, action) => {
+                state.templates = state.templates.filter(t => t.id !== action.payload)
+            })
+            .addCase(fetchEnvVars.pending, (state) => {
+                state.envVarsStatus = 'loading'
+            })
+            .addCase(fetchEnvVars.fulfilled, (state, action) => {
+                state.envVars = action.payload
+                state.envVarsStatus = 'succeeded'
+            })
+            .addCase(fetchEnvVars.rejected, (state) => {
+                state.envVarsStatus = 'failed'
+            })
+            .addCase(upsertEnvVar.fulfilled, (state, action) => {
+                const idx = state.envVars.findIndex(v => v.key === action.payload.key)
+                if (idx !== -1) {
+                    state.envVars[idx] = action.payload
+                } else {
+                    state.envVars.push(action.payload)
+                    state.envVars.sort((a, b) => a.key.localeCompare(b.key))
+                }
+            })
+            .addCase(deleteEnvVar.fulfilled, (state, action) => {
+                state.envVars = state.envVars.filter(v => v.key !== action.payload)
+            })
+            .addCase(fetchAllTags.fulfilled, (state, action) => {
+                state.allTags = action.payload
+            })
+            .addCase(addTagToScript.fulfilled, (state, action) => {
+                const { scriptId, tag } = action.payload
+                const script = state.items.find(s => s.id === scriptId)
+                if (script) {
+                    if (!script.tags) script.tags = []
+                    if (!script.tags.find(t => t.id === tag.id)) {
+                        script.tags.push(tag)
+                    }
+                }
+                // Also add to allTags if not present
+                if (!state.allTags.find(t => t.id === tag.id)) {
+                    state.allTags.push(tag)
+                }
+            })
+            .addCase(removeTagFromScript.fulfilled, (state, action) => {
+                const { scriptId, tagId } = action.payload
+                const script = state.items.find(s => s.id === scriptId)
+                if (script && script.tags) {
+                    script.tags = script.tags.filter(t => t.id !== tagId)
+                }
+            })
+            .addCase(duplicateScript.fulfilled, (state, action) => {
+                // Insert duplicate next to original in items list
+                const originalIdx = state.items.findIndex(s => s.id === action.meta.arg)
+                if (originalIdx !== -1) {
+                    state.items.splice(originalIdx + 1, 0, action.payload)
+                } else {
+                    state.items.push(action.payload)
+                }
+                // Automatically switch to the new duplicate
+                state.activeScriptId = action.payload.id
+                state.contentStatus = 'idle'
+                state.builds = []
+                state.envVars = []
+                state.envVarsStatus = 'idle'
+                state.versions = []
+                state.versionsStatus = 'idle'
+            })
+            .addCase(regenerateWebhookSecret.fulfilled, (state, action) => {
+                const { scriptId } = action.payload
+                const script = state.items.find(s => s.id === scriptId)
+                if (script) {
+                    script.webhook_secret_set = true
+                }
+            })
+            .addCase(toggleWebhookSignature.fulfilled, (state, action) => {
+                const { scriptId, require_webhook_signature, webhook_secret } = action.payload
+                const script = state.items.find(s => s.id === scriptId)
+                if (script) {
+                    script.require_webhook_signature = require_webhook_signature
+                    if (webhook_secret) script.webhook_secret_set = true
+                }
+            })
+            .addCase(fetchVersions.pending, (state) => {
+                state.versionsStatus = 'loading'
+            })
+            .addCase(fetchVersions.fulfilled, (state, action) => {
+                state.versions = action.payload
+                state.versionsStatus = 'succeeded'
+            })
+            .addCase(fetchVersions.rejected, (state) => {
+                state.versionsStatus = 'failed'
+            })
+            // fetchVersionContent doesn't need to update global state — used locally in the component
     }
 })
 

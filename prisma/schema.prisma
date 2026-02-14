@@ -15,6 +15,8 @@ model Script {
   language        String      @default("python")
   interpreter     String?
   webhookToken    String?     @unique @map("webhook_token")
+  webhookSecret   String?     @map("webhook_secret")
+  requireWebhookSignature Boolean @default(false) @map("require_webhook_signature")
   scheduleCron    String?     @map("schedule_cron")
   scheduleEnabled Boolean     @default(false) @map("schedule_enabled")
   parameters      String      @default("[]")
@@ -23,14 +25,65 @@ model Script {
   syncToGist      Boolean     @default(false) @map("sync_to_gist")
   gistFilename    String?     @map("gist_filename")
   collectionId    String?     @map("collection_id")
+  timeoutMs       Int?        @map("timeout_ms")
   createdAt       DateTime    @default(now()) @map("created_at")
   updatedAt       DateTime    @updatedAt @map("updated_at")
   lastRun         DateTime?   @map("last_run")
 
   collection      Collection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
   builds          Build[]
+  tags            ScriptTag[]
+  envVars         ScriptEnvVar[]
+  versions        ScriptVersion[]
 
   @@map("scripts")
+}
+
+model Tag {
+  id        String      @id @default(uuid())
+  name      String      @unique
+  color     String      @default("#6366f1")
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  scripts   ScriptTag[]
+
+  @@map("tags")
+}
+
+model ScriptTag {
+  scriptId  String  @map("script_id")
+  tagId     String  @map("tag_id")
+
+  script    Script  @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([scriptId, tagId])
+  @@map("script_tags")
+}
+
+model ScriptEnvVar {
+  id        String  @id @default(uuid())
+  scriptId  String  @map("script_id")
+  key       String
+  value     String  @default("")
+  isSecret  Boolean @default(false) @map("is_secret")
+
+  script    Script  @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+
+  @@unique([scriptId, key])
+  @@map("script_env_vars")
+}
+
+model ScriptVersion {
+  id             String   @id @default(uuid())
+  scriptId       String   @map("script_id")
+  content        String
+  snapshotNumber Int      @map("snapshot_number")
+  savedAt        DateTime @default(now()) @map("saved_at")
+
+  script         Script   @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+
+  @@map("script_versions")
 }
 
 model Build {
@@ -67,4 +120,19 @@ model Setting {
   updatedAt DateTime  @updatedAt @map("updated_at")
 
   @@map("settings")
+}
+
+model ScriptTemplate {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String   @default("")
+  category    String   @default("general")
+  language    String   @default("python")
+  interpreter String?
+  content     String
+  parameters  String   @default("[]")
+  isBuiltIn   Boolean  @default(false) @map("is_built_in")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("script_templates")
 }

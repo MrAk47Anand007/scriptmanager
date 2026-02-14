@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "A standalone self-hosted script manager - write, run, schedule, and organize scripts",
+  "bin": {
+    "sm": "./cli/sm.mjs"
+  },
   "scripts": {
     "dev": "ts-node -r tsconfig-paths/register --project tsconfig.server.json server.ts",
     "build": "next build",
@@ -10,7 +13,8 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "next:dev": "next dev"
+    "next:dev": "next dev",
+    "cli": "node ./cli/sm.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

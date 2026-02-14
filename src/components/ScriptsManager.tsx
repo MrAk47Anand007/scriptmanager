@@ -13,12 +13,18 @@ import {
     fetchScriptContent, saveScript, runScript, fetchBuilds, fetchBuildOutput,
     updateActiveScriptContent, appendBuildOutput, clearBuildOutput,
     regenerateWebhook, fetchSchedule, saveSchedule,
-    moveScript
+    moveScript, addTagToScript, removeTagFromScript, fetchAllTags,
+    fetchEnvVars, upsertEnvVar, deleteEnvVar,
+    fetchVersions,
+    regenerateWebhookSecret, toggleWebhookSignature,
 } from '@/features/scripts/scriptsSlice';
 import type { Script } from '@/features/scripts/scriptsSlice';
+import { VersionHistoryPanel } from './VersionHistoryPanel';
+import { TagsInput } from './TagsInput';
+import { EnvVarsPanel } from './EnvVarsPanel';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Github, Loader2, SlidersHorizontal } from 'lucide-react';
+import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Github, Loader2, SlidersHorizontal, Download, ShieldCheck, KeyRound } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -45,7 +51,7 @@ const LANGUAGE_OPTIONS = [
 
 export const ScriptsManager = () => {
     const dispatch = useAppDispatch();
-    const { items: scripts, collections, activeScriptId, activeScriptContent, builds, currentBuildOutput, saveStatus, schedule, contentStatus, runStatus } = useAppSelector((state) => state.scripts);
+    const { items: scripts, collections, activeScriptId, activeScriptContent, builds, currentBuildOutput, saveStatus, schedule, contentStatus, runStatus, allTags, envVars } = useAppSelector((state) => state.scripts);
     const { settings } = useAppSelector((state) => state.settings);
     const consoleRef = useRef<HTMLDivElement>(null);
     const eventSourceRef = useRef<EventSource | null>(null);
@@ -61,15 +67,24 @@ export const ScriptsManager = () => {
     const [scriptParameters, setScriptParameters] = useState<ScriptParameter[]>([]);
     const [showRunDialog, setShowRunDialog] = useState(false);
 
+    // Timeout state (empty string = use global default)
+    const [timeoutSecs, setTimeoutSecs] = useState<string>('');
+
+    // Webhook HMAC state
+    const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+
     // Initial data fetching is centralized in page.tsx
 
     useEffect(() => {
         if (activeScriptId) {
             setShowRunDialog(false);
+            setRevealedSecret(null);
 
             dispatch(fetchScriptContent(activeScriptId));
             dispatch(fetchBuilds(activeScriptId));
             dispatch(fetchSchedule(activeScriptId));
+            dispatch(fetchEnvVars(activeScriptId));
+            dispatch(fetchVersions(activeScriptId));
 
             if (eventSourceRef.current) {
                 eventSourceRef.current.close();
@@ -83,6 +98,7 @@ export const ScriptsManager = () => {
                 setScriptLanguage(script.language || 'python');
                 setCustomInterpreter(script.interpreter || '');
                 setScriptParameters(script.parameters || []);
+                setTimeoutSecs(script.timeout_ms ? String(script.timeout_ms / 1000) : '');
             }
         }
     }, [activeScriptId, dispatch]);
@@ -95,6 +111,7 @@ export const ScriptsManager = () => {
                 setScriptLanguage(script.language || 'python');
                 setCustomInterpreter(script.interpreter || '');
                 setScriptParameters(script.parameters || []);
+                setTimeoutSecs(script.timeout_ms ? String(script.timeout_ms / 1000) : '');
             }
         }
     }, [scripts, activeScriptId]);
@@ -114,7 +131,8 @@ export const ScriptsManager = () => {
         if (activeScriptId) {
             const script = scripts.find(s => s.id === activeScriptId);
             if (script) {
-                await dispatch(saveScript({
+                const timeoutMs = timeoutSecs.trim() ? Math.round(parseFloat(timeoutSecs) * 1000) : null;
+                const result = await dispatch(saveScript({
                     id: activeScriptId,
                     name: script.name,
                     content: activeScriptContent,
@@ -122,7 +140,12 @@ export const ScriptsManager = () => {
                     language: scriptLanguage,
                     interpreter: scriptLanguage === 'custom' ? customInterpreter : null,
                     parameters: scriptParameters,
+                    timeout_ms: timeoutMs,
                 }));
+                if (saveScript.fulfilled.match(result)) {
+                    // Refresh version list after save
+                    dispatch(fetchVersions(activeScriptId));
+                }
             }
         }
     };
@@ -295,6 +318,19 @@ export const ScriptsManager = () => {
                                     <Label htmlFor="gist-sync-toggle" className="text-[10px] text-slate-500 cursor-pointer">Gist</Label>
                                 </div>
 
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs gap-1"
+                                    title="Export script as JSON"
+                                    onClick={() => {
+                                        if (activeScriptId) {
+                                            window.open(`/api/scripts/${activeScriptId}/export`, '_blank')
+                                        }
+                                    }}
+                                >
+                                    <Download className="h-3 w-3" />
+                                </Button>
                                 <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleSave} disabled={saveStatus === 'saving'}>
                                     <Save className="h-3 w-3" />
                                     {saveStatus === 'saving' ? 'Saving...' : 'Save'}
@@ -367,6 +403,58 @@ export const ScriptsManager = () => {
                                 {webhookUrl}
                             </div>
                             <p className="text-[10px] text-slate-400 mt-1">POST to this URL to trigger the script</p>
+
+                            {/* HMAC Signature Verification */}
+                            <div className="mt-2 border-t pt-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                                        <ShieldCheck className="h-3 w-3" />
+                                        Require Signature
+                                    </span>
+                                    <Switch
+                                        checked={activeScript?.require_webhook_signature ?? false}
+                                        onCheckedChange={async (checked) => {
+                                            if (!activeScriptId) return
+                                            const result = await dispatch(toggleWebhookSignature({ scriptId: activeScriptId, requireSignature: checked }))
+                                            if (toggleWebhookSignature.fulfilled.match(result) && result.payload.webhook_secret) {
+                                                setRevealedSecret(result.payload.webhook_secret)
+                                            }
+                                        }}
+                                        className="scale-75 origin-right"
+                                    />
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-1.5">
+                                    <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                                        <KeyRound className="h-3 w-3" />
+                                        {activeScript?.webhook_secret_set ? 'Secret configured' : 'No secret set'}
+                                    </span>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-4 text-[9px] text-blue-500 hover:text-blue-700 px-1"
+                                        onClick={async () => {
+                                            if (!activeScriptId) return
+                                            const result = await dispatch(regenerateWebhookSecret(activeScriptId))
+                                            if (regenerateWebhookSecret.fulfilled.match(result)) {
+                                                setRevealedSecret(result.payload.secret)
+                                            }
+                                        }}
+                                    >
+                                        {activeScript?.webhook_secret_set ? 'Rotate' : 'Generate'}
+                                    </Button>
+                                </div>
+                                {revealedSecret && (
+                                    <div className="mt-1.5">
+                                        <p className="text-[9px] text-amber-600 mb-1">⚠ Copy now — shown once only</p>
+                                        <div className="bg-amber-50 border border-amber-200 p-1.5 rounded text-[9px] font-mono break-all text-amber-800 select-all">
+                                            {revealedSecret}
+                                        </div>
+                                        <p className="text-[9px] text-slate-400 mt-1">
+                                            Header: <code>X-Hub-Signature-256: sha256=&#123;HMAC_SHA256(secret, body)&#125;</code>
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <div>
@@ -395,6 +483,26 @@ export const ScriptsManager = () => {
                             )}
                         </div>
 
+                        {/* Timeout section */}
+                        <div>
+                            <div className="flex items-center gap-1 mb-1.5">
+                                <Clock className="h-3 w-3 text-slate-400" />
+                                <h3 className="text-xs font-semibold text-slate-500 uppercase">Timeout</h3>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Input
+                                    className="h-7 text-xs w-20"
+                                    type="number"
+                                    min="1"
+                                    placeholder="30"
+                                    value={timeoutSecs}
+                                    onChange={(e) => setTimeoutSecs(e.target.value)}
+                                    title="Execution timeout in seconds (empty = global default)"
+                                />
+                                <span className="text-[10px] text-slate-400">seconds (empty = global default)</span>
+                            </div>
+                        </div>
+
                         {/* Parameters section */}
                         <div>
                             <ParametersPanel
@@ -402,6 +510,47 @@ export const ScriptsManager = () => {
                                 onChange={setScriptParameters}
                             />
                         </div>
+
+                        {/* Tags section */}
+                        {activeScriptId && (() => {
+                            const activeScript = scripts.find(s => s.id === activeScriptId)
+                            return (
+                                <div>
+                                    <TagsInput
+                                        scriptId={activeScriptId}
+                                        tags={activeScript?.tags ?? []}
+                                        allTags={allTags}
+                                        onAdd={(name) => dispatch(addTagToScript({ scriptId: activeScriptId, name }))}
+                                        onRemove={(tagId) => dispatch(removeTagFromScript({ scriptId: activeScriptId, tagId }))}
+                                    />
+                                </div>
+                            )
+                        })()}
+
+                        {/* Env Vars section */}
+                        {activeScriptId && (
+                            <div>
+                                <EnvVarsPanel
+                                    envVars={envVars}
+                                    onAdd={(key, value, isSecret) => dispatch(upsertEnvVar({ scriptId: activeScriptId, key, value, isSecret }))}
+                                    onDelete={(key) => dispatch(deleteEnvVar({ scriptId: activeScriptId, key }))}
+                                />
+                            </div>
+                        )}
+
+                        {/* Version History section */}
+                        {activeScriptId && (
+                            <div>
+                                <VersionHistoryPanel
+                                    scriptId={activeScriptId}
+                                    currentContent={activeScriptContent}
+                                    language={scriptLanguage}
+                                    onRestore={(content) => {
+                                        dispatch(updateActiveScriptContent(content));
+                                    }}
+                                />
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -422,6 +571,7 @@ export const ScriptsManager = () => {
                                     <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full uppercase tracking-wide",
                                         build.status === 'success' ? "bg-green-100 text-green-700" :
                                             build.status === 'failure' ? "bg-red-100 text-red-700" :
+                                                build.status === 'timeout' ? "bg-orange-100 text-orange-700" :
                                                 "bg-yellow-100 text-yellow-700"
                                     )}>{build.status}</span>
                                 </div>

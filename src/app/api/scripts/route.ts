@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from 'uuid'
 export async function GET() {
   const scripts = await prisma.script.findMany({
     orderBy: { name: 'asc' },
-    include: { collection: true }
+    include: { collection: true, tags: { include: { tag: true } } }
   })
 
   // Map to camelCase → snake_case for frontend compatibility
@@ -30,6 +30,10 @@ export async function GET() {
     gist_id: s.gistId,
     gist_url: s.gistUrl,
     sync_to_gist: s.syncToGist,
+    tags: s.tags.map(st => ({ id: st.tag.id, name: st.tag.name, color: st.tag.color })),
+    timeout_ms: s.timeoutMs,
+    require_webhook_signature: s.requireWebhookSignature,
+    webhook_secret_set: !!s.webhookSecret,
   }))
 
   return NextResponse.json(result)
@@ -37,7 +41,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const data = await req.json()
-  const { id, name, content, sync_to_gist, language, interpreter, parameters } = data
+  const { id, name, content, sync_to_gist, language, interpreter, parameters, timeout_ms } = data
 
   // Serialize parameters to JSON string for storage
   let parametersJson = '[]'
@@ -60,6 +64,28 @@ export async function POST(req: Request) {
 
     if (content !== undefined) {
       fs.writeFileSync(filePath, content, 'utf8')
+
+      // Snapshot version history (keep last 10)
+      const MAX_VERSIONS = 10
+      const latestVersion = await prisma.scriptVersion.findFirst({
+        where: { scriptId: id },
+        orderBy: { snapshotNumber: 'desc' },
+        select: { snapshotNumber: true }
+      })
+      const nextSnapshotNumber = (latestVersion?.snapshotNumber ?? 0) + 1
+      await prisma.scriptVersion.create({
+        data: { scriptId: id!, content, snapshotNumber: nextSnapshotNumber }
+      })
+      // Prune old versions beyond the last MAX_VERSIONS
+      const allVersions = await prisma.scriptVersion.findMany({
+        where: { scriptId: id },
+        orderBy: { snapshotNumber: 'desc' },
+        select: { id: true }
+      })
+      if (allVersions.length > MAX_VERSIONS) {
+        const toDelete = allVersions.slice(MAX_VERSIONS).map(v => v.id)
+        await prisma.scriptVersion.deleteMany({ where: { id: { in: toDelete } } })
+      }
     }
 
     script = await prisma.script.update({
@@ -70,6 +96,7 @@ export async function POST(req: Request) {
         interpreter: language === 'custom' ? (interpreter ?? null) : null,
         syncToGist: sync_to_gist ?? script.syncToGist,
         parameters: parametersJson,
+        timeoutMs: timeout_ms !== undefined ? (timeout_ms || null) : script.timeoutMs,
         updatedAt: new Date()
       },
       include: { collection: true }
@@ -140,5 +167,6 @@ export async function POST(req: Request) {
     gist_id: script.gistId,
     gist_url: script.gistUrl,
     sync_to_gist: script.syncToGist,
+    timeout_ms: script.timeoutMs,
   })
 }
