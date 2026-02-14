@@ -68,3 +68,18 @@ model Setting {
 
   @@map("settings")
 }
+
+model ScriptTemplate {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String   @default("")
+  category    String   @default("general")
+  language    String   @default("python")
+  interpreter String?
+  content     String
+  parameters  String   @default("[]")
+  isBuiltIn   Boolean  @default(false) @map("is_built_in")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("script_templates")
+}

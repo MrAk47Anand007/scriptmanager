@@ -43,9 +43,24 @@ export interface Collection {
     created_at: string;
 }
 
+export interface ScriptTemplate {
+    id: string
+    name: string
+    description: string
+    category: string
+    language: string
+    interpreter?: string | null
+    content: string
+    parameters: ScriptParameter[]
+    is_built_in: boolean
+    created_at: string
+}
+
 interface ScriptsState {
     items: Script[];
     collections: Collection[];
+    templates: ScriptTemplate[];
+    templatesStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
     activeScriptId: string | null;
     activeScriptContent: string;
     builds: Build[];
@@ -66,6 +81,8 @@ interface ScriptsState {
 const initialState: ScriptsState = {
     items: [],
     collections: [],
+    templates: [],
+    templatesStatus: 'idle',
     activeScriptId: null,
     activeScriptContent: '',
     builds: [],
@@ -93,15 +110,60 @@ export const fetchScriptContent = createAsyncThunk('scripts/fetchScriptContent',
     return response.data
 })
 
-export const createScript = createAsyncThunk('scripts/createScript', async (payload: string | { name: string, syncToGist?: boolean }) => {
+export const createScript = createAsyncThunk('scripts/createScript', async (payload: string | {
+    name: string
+    syncToGist?: boolean
+    content?: string
+    language?: string
+    interpreter?: string | null
+    parameters?: ScriptParameter[]
+}) => {
     const name = typeof payload === 'string' ? payload : payload.name
     const syncToGist = typeof payload === 'string' ? undefined : payload.syncToGist
+    const content = typeof payload === 'string' ? undefined : payload.content
+    const language = typeof payload === 'string' ? undefined : payload.language
+    const interpreter = typeof payload === 'string' ? undefined : payload.interpreter
+    const parameters = typeof payload === 'string' ? undefined : payload.parameters
     const response = await axios.post('/api/scripts', {
         name,
-        content: '# New script\nprint("Hello World")',
-        sync_to_gist: syncToGist
+        content: content ?? '# New script\nprint("Hello World")',
+        sync_to_gist: syncToGist,
+        language,
+        interpreter,
+        parameters,
     })
     return response.data
+})
+
+export const fetchTemplates = createAsyncThunk('scripts/fetchTemplates', async () => {
+    const response = await axios.get('/api/templates')
+    return response.data
+})
+
+export const saveAsTemplate = createAsyncThunk(
+    'scripts/saveAsTemplate',
+    async (payload: {
+        name: string
+        description: string
+        category: string
+        language: string
+        interpreter?: string | null
+        content: string
+        parameters?: ScriptParameter[]
+    }, { rejectWithValue }) => {
+        try {
+            const response = await axios.post('/api/templates', payload)
+            return response.data
+        } catch (err: unknown) {
+            const axiosErr = err as { response?: { data?: unknown } }
+            return rejectWithValue(axiosErr.response?.data ?? { error: 'Unknown error' })
+        }
+    }
+)
+
+export const deleteTemplate = createAsyncThunk('scripts/deleteTemplate', async (id: string) => {
+    await axios.delete(`/api/templates/${id}`)
+    return id
 })
 
 export const saveScript = createAsyncThunk('scripts/saveScript', async (data: { id: string; name: string; content: string; sync_to_gist?: boolean; language?: string; interpreter?: string | null; parameters?: ScriptParameter[] }) => {
@@ -322,6 +384,22 @@ const scriptsSlice = createSlice({
                     script.gist_url = undefined
                     script.sync_to_gist = false
                 }
+            })
+            .addCase(fetchTemplates.pending, (state) => {
+                state.templatesStatus = 'loading'
+            })
+            .addCase(fetchTemplates.fulfilled, (state, action) => {
+                state.templates = action.payload
+                state.templatesStatus = 'succeeded'
+            })
+            .addCase(fetchTemplates.rejected, (state) => {
+                state.templatesStatus = 'failed'
+            })
+            .addCase(saveAsTemplate.fulfilled, (state, action) => {
+                state.templates.push(action.payload)
+            })
+            .addCase(deleteTemplate.fulfilled, (state, action) => {
+                state.templates = state.templates.filter(t => t.id !== action.payload)
             })
     }
 })
