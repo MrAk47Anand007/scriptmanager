@@ -21,7 +21,7 @@ import { TagsInput } from './TagsInput';
 import { EnvVarsPanel } from './EnvVarsPanel';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Github, Loader2, SlidersHorizontal } from 'lucide-react';
+import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Github, Loader2, SlidersHorizontal, Download, Upload } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -299,6 +299,19 @@ export const ScriptsManager = () => {
                                     <Label htmlFor="gist-sync-toggle" className="text-[10px] text-slate-500 cursor-pointer">Gist</Label>
                                 </div>
 
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs gap-1"
+                                    title="Export script as JSON"
+                                    onClick={() => {
+                                        if (activeScriptId) {
+                                            window.open(`/api/scripts/${activeScriptId}/export`, '_blank')
+                                        }
+                                    }}
+                                >
+                                    <Download className="h-3 w-3" />
+                                </Button>
                                 <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleSave} disabled={saveStatus === 'saving'}>
                                     <Save className="h-3 w-3" />
                                     {saveStatus === 'saving' ? 'Saving...' : 'Save'}

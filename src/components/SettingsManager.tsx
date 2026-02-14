@@ -9,7 +9,10 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Loader2, Save, Github, FolderIcon } from 'lucide-react';
+import { Loader2, Save, Github, FolderIcon, Download, Upload, Package } from 'lucide-react';
+import { useRef } from 'react';
+import axios from 'axios';
+import { useAppDispatch as _useAppDispatch } from '@/store/hooks';
 
 export const SettingsManager = () => {
     const dispatch = useAppDispatch();
@@ -20,6 +23,29 @@ export const SettingsManager = () => {
     const [scriptPath, setScriptPath] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [saveMessage, setSaveMessage] = useState('');
+
+    // Import/Export state
+    const [importStatus, setImportStatus] = useState<string>('');
+    const [importError, setImportError] = useState<string>('');
+    const importFileRef = useRef<HTMLInputElement>(null);
+
+    const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+        setImportStatus('')
+        setImportError('')
+        try {
+            const text = await file.text()
+            const json = JSON.parse(text)
+            const res = await axios.post('/api/scripts/import', json)
+            setImportStatus(res.data.message ?? 'Import successful')
+        } catch (err: unknown) {
+            const axiosErr = err as { response?: { data?: { error?: string } } }
+            setImportError(axiosErr.response?.data?.error ?? 'Import failed — check file format')
+        } finally {
+            if (importFileRef.current) importFileRef.current.value = ''
+        }
+    };
 
     useEffect(() => {
         if (status === 'idle') {
@@ -140,6 +166,55 @@ export const SettingsManager = () => {
                             checked={gistSyncEnabled}
                             onCheckedChange={setGistSyncEnabled}
                         />
+                    </div>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Package className="h-5 w-5" /> Import &amp; Export</CardTitle>
+                    <CardDescription>
+                        Export all scripts to a JSON file for backup or transfer. Import scripts from a previously exported file.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="flex items-center gap-3">
+                        <Button
+                            variant="outline"
+                            className="gap-2"
+                            onClick={() => window.open('/api/export', '_blank')}
+                        >
+                            <Download className="h-4 w-4" />
+                            Export All Scripts
+                        </Button>
+                        <span className="text-xs text-slate-500">Downloads a JSON file with all scripts and metadata</span>
+                    </div>
+                    <div className="border-t pt-4 space-y-2">
+                        <Label className="text-sm font-medium">Import Scripts</Label>
+                        <div className="flex items-center gap-3">
+                            <Button
+                                variant="outline"
+                                className="gap-2"
+                                onClick={() => importFileRef.current?.click()}
+                            >
+                                <Upload className="h-4 w-4" />
+                                Choose JSON File
+                            </Button>
+                            <input
+                                ref={importFileRef}
+                                type="file"
+                                accept=".json"
+                                className="hidden"
+                                onChange={handleImportFile}
+                            />
+                            <span className="text-xs text-slate-500">Duplicate scripts (same name) are skipped</span>
+                        </div>
+                        {importStatus && (
+                            <p className="text-xs text-green-600 font-medium">{importStatus}</p>
+                        )}
+                        {importError && (
+                            <p className="text-xs text-red-500">{importError}</p>
+                        )}
                     </div>
                 </CardContent>
             </Card>
