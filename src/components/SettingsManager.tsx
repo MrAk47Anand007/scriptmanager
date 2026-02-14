@@ -21,6 +21,7 @@ export const SettingsManager = () => {
     const [githubToken, setGithubToken] = useState('');
     const [gistSyncEnabled, setGistSyncEnabled] = useState(false);
     const [scriptPath, setScriptPath] = useState('');
+    const [executionTimeoutSecs, setExecutionTimeoutSecs] = useState('30');
     const [isSaving, setIsSaving] = useState(false);
     const [saveMessage, setSaveMessage] = useState('');
 
@@ -58,6 +59,8 @@ export const SettingsManager = () => {
             setGithubToken(settings['github_token'] || '');
             setGistSyncEnabled(settings['gist_sync_enabled'] === 'true');
             setScriptPath(settings['script_storage_path'] || '');
+            const timeoutMs = settings['execution_timeout_ms']
+            setExecutionTimeoutSecs(timeoutMs ? String(parseInt(timeoutMs, 10) / 1000) : '30');
         }
     }, [settings, status]);
 
@@ -65,10 +68,14 @@ export const SettingsManager = () => {
         setIsSaving(true);
         setSaveMessage('');
         try {
+            const timeoutMs = executionTimeoutSecs.trim()
+                ? String(Math.round(parseFloat(executionTimeoutSecs) * 1000))
+                : '30000';
             await dispatch(saveSettings({
                 'github_token': githubToken,
                 'gist_sync_enabled': String(gistSyncEnabled),
                 'script_storage_path': scriptPath,
+                'execution_timeout_ms': timeoutMs,
             })).unwrap();
             setSaveMessage('Settings saved successfully!');
             setTimeout(() => setSaveMessage(''), 3000);
@@ -124,6 +131,21 @@ export const SettingsManager = () => {
                             Absolute path or relative to the application root.
                             <br />
                             <span className="text-amber-600 font-medium">Warning:</span> Changing this will not move existing scripts.
+                        </p>
+                    </div>
+                    <div className="space-y-2 border-t pt-4">
+                        <Label htmlFor="execution_timeout">Default Execution Timeout (seconds)</Label>
+                        <Input
+                            id="execution_timeout"
+                            type="number"
+                            min="1"
+                            placeholder="30"
+                            value={executionTimeoutSecs}
+                            onChange={(e) => setExecutionTimeoutSecs(e.target.value)}
+                            className="w-32"
+                        />
+                        <p className="text-xs text-slate-500">
+                            Scripts that run longer than this will be killed. Per-script overrides take precedence. Default: 30s.
                         </p>
                     </div>
                 </CardContent>

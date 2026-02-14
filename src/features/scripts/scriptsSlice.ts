@@ -30,6 +30,8 @@ export interface Script {
     sync_to_gist?: boolean
     // Tags
     tags?: Tag[]
+    // Timeout override
+    timeout_ms?: number | null
 }
 
 export type { ScriptParameter }
@@ -44,7 +46,7 @@ export interface EnvVar {
 export interface Build {
     id: string
     script_id: string
-    status: 'pending' | 'running' | 'success' | 'failure'
+    status: 'pending' | 'running' | 'success' | 'failure' | 'timeout'
     started_at: string
     completed_at?: string
     triggered_by: string
@@ -187,7 +189,7 @@ export const deleteTemplate = createAsyncThunk('scripts/deleteTemplate', async (
     return id
 })
 
-export const saveScript = createAsyncThunk('scripts/saveScript', async (data: { id: string; name: string; content: string; sync_to_gist?: boolean; language?: string; interpreter?: string | null; parameters?: ScriptParameter[] }) => {
+export const saveScript = createAsyncThunk('scripts/saveScript', async (data: { id: string; name: string; content: string; sync_to_gist?: boolean; language?: string; interpreter?: string | null; parameters?: ScriptParameter[]; timeout_ms?: number | null }) => {
     const response = await axios.post('/api/scripts', data)
     return response.data
 })

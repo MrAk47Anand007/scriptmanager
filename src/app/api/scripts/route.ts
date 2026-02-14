@@ -31,6 +31,7 @@ export async function GET() {
     gist_url: s.gistUrl,
     sync_to_gist: s.syncToGist,
     tags: s.tags.map(st => ({ id: st.tag.id, name: st.tag.name, color: st.tag.color })),
+    timeout_ms: s.timeoutMs,
   }))
 
   return NextResponse.json(result)
@@ -38,7 +39,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const data = await req.json()
-  const { id, name, content, sync_to_gist, language, interpreter, parameters } = data
+  const { id, name, content, sync_to_gist, language, interpreter, parameters, timeout_ms } = data
 
   // Serialize parameters to JSON string for storage
   let parametersJson = '[]'
@@ -71,6 +72,7 @@ export async function POST(req: Request) {
         interpreter: language === 'custom' ? (interpreter ?? null) : null,
         syncToGist: sync_to_gist ?? script.syncToGist,
         parameters: parametersJson,
+        timeoutMs: timeout_ms !== undefined ? (timeout_ms || null) : script.timeoutMs,
         updatedAt: new Date()
       },
       include: { collection: true }
@@ -141,5 +143,6 @@ export async function POST(req: Request) {
     gist_id: script.gistId,
     gist_url: script.gistUrl,
     sync_to_gist: script.syncToGist,
+    timeout_ms: script.timeoutMs,
   })
 }

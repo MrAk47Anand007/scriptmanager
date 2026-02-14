@@ -23,6 +23,7 @@ model Script {
   syncToGist      Boolean     @default(false) @map("sync_to_gist")
   gistFilename    String?     @map("gist_filename")
   collectionId    String?     @map("collection_id")
+  timeoutMs       Int?        @map("timeout_ms")
   createdAt       DateTime    @default(now()) @map("created_at")
   updatedAt       DateTime    @updatedAt @map("updated_at")
   lastRun         DateTime?   @map("last_run")

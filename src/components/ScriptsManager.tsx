@@ -64,6 +64,9 @@ export const ScriptsManager = () => {
     const [scriptParameters, setScriptParameters] = useState<ScriptParameter[]>([]);
     const [showRunDialog, setShowRunDialog] = useState(false);
 
+    // Timeout state (empty string = use global default)
+    const [timeoutSecs, setTimeoutSecs] = useState<string>('');
+
     // Initial data fetching is centralized in page.tsx
 
     useEffect(() => {
@@ -87,6 +90,7 @@ export const ScriptsManager = () => {
                 setScriptLanguage(script.language || 'python');
                 setCustomInterpreter(script.interpreter || '');
                 setScriptParameters(script.parameters || []);
+                setTimeoutSecs(script.timeout_ms ? String(script.timeout_ms / 1000) : '');
             }
         }
     }, [activeScriptId, dispatch]);
@@ -99,6 +103,7 @@ export const ScriptsManager = () => {
                 setScriptLanguage(script.language || 'python');
                 setCustomInterpreter(script.interpreter || '');
                 setScriptParameters(script.parameters || []);
+                setTimeoutSecs(script.timeout_ms ? String(script.timeout_ms / 1000) : '');
             }
         }
     }, [scripts, activeScriptId]);
@@ -118,6 +123,7 @@ export const ScriptsManager = () => {
         if (activeScriptId) {
             const script = scripts.find(s => s.id === activeScriptId);
             if (script) {
+                const timeoutMs = timeoutSecs.trim() ? Math.round(parseFloat(timeoutSecs) * 1000) : null;
                 await dispatch(saveScript({
                     id: activeScriptId,
                     name: script.name,
@@ -126,6 +132,7 @@ export const ScriptsManager = () => {
                     language: scriptLanguage,
                     interpreter: scriptLanguage === 'custom' ? customInterpreter : null,
                     parameters: scriptParameters,
+                    timeout_ms: timeoutMs,
                 }));
             }
         }
@@ -412,6 +419,26 @@ export const ScriptsManager = () => {
                             )}
                         </div>
 
+                        {/* Timeout section */}
+                        <div>
+                            <div className="flex items-center gap-1 mb-1.5">
+                                <Clock className="h-3 w-3 text-slate-400" />
+                                <h3 className="text-xs font-semibold text-slate-500 uppercase">Timeout</h3>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Input
+                                    className="h-7 text-xs w-20"
+                                    type="number"
+                                    min="1"
+                                    placeholder="30"
+                                    value={timeoutSecs}
+                                    onChange={(e) => setTimeoutSecs(e.target.value)}
+                                    title="Execution timeout in seconds (empty = global default)"
+                                />
+                                <span className="text-[10px] text-slate-400">seconds (empty = global default)</span>
+                            </div>
+                        </div>
+
                         {/* Parameters section */}
                         <div>
                             <ParametersPanel
@@ -466,6 +493,7 @@ export const ScriptsManager = () => {
                                     <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full uppercase tracking-wide",
                                         build.status === 'success' ? "bg-green-100 text-green-700" :
                                             build.status === 'failure' ? "bg-red-100 text-red-700" :
+                                                build.status === 'timeout' ? "bg-orange-100 text-orange-700" :
                                                 "bg-yellow-100 text-yellow-700"
                                     )}>{build.status}</span>
                                 </div>
