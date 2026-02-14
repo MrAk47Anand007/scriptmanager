@@ -16,6 +16,7 @@ import {
     moveScript, addTagToScript, removeTagFromScript, fetchAllTags,
     fetchEnvVars, upsertEnvVar, deleteEnvVar,
     fetchVersions,
+    regenerateWebhookSecret, toggleWebhookSignature,
 } from '@/features/scripts/scriptsSlice';
 import type { Script } from '@/features/scripts/scriptsSlice';
 import { VersionHistoryPanel } from './VersionHistoryPanel';
@@ -23,7 +24,7 @@ import { TagsInput } from './TagsInput';
 import { EnvVarsPanel } from './EnvVarsPanel';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Github, Loader2, SlidersHorizontal, Download, Upload } from 'lucide-react';
+import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Github, Loader2, SlidersHorizontal, Download, ShieldCheck, KeyRound } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -69,11 +70,15 @@ export const ScriptsManager = () => {
     // Timeout state (empty string = use global default)
     const [timeoutSecs, setTimeoutSecs] = useState<string>('');
 
+    // Webhook HMAC state
+    const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+
     // Initial data fetching is centralized in page.tsx
 
     useEffect(() => {
         if (activeScriptId) {
             setShowRunDialog(false);
+            setRevealedSecret(null);
 
             dispatch(fetchScriptContent(activeScriptId));
             dispatch(fetchBuilds(activeScriptId));
@@ -398,6 +403,58 @@ export const ScriptsManager = () => {
                                 {webhookUrl}
                             </div>
                             <p className="text-[10px] text-slate-400 mt-1">POST to this URL to trigger the script</p>
+
+                            {/* HMAC Signature Verification */}
+                            <div className="mt-2 border-t pt-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                                        <ShieldCheck className="h-3 w-3" />
+                                        Require Signature
+                                    </span>
+                                    <Switch
+                                        checked={activeScript?.require_webhook_signature ?? false}
+                                        onCheckedChange={async (checked) => {
+                                            if (!activeScriptId) return
+                                            const result = await dispatch(toggleWebhookSignature({ scriptId: activeScriptId, requireSignature: checked }))
+                                            if (toggleWebhookSignature.fulfilled.match(result) && result.payload.webhook_secret) {
+                                                setRevealedSecret(result.payload.webhook_secret)
+                                            }
+                                        }}
+                                        className="scale-75 origin-right"
+                                    />
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-1.5">
+                                    <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                                        <KeyRound className="h-3 w-3" />
+                                        {activeScript?.webhook_secret_set ? 'Secret configured' : 'No secret set'}
+                                    </span>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-4 text-[9px] text-blue-500 hover:text-blue-700 px-1"
+                                        onClick={async () => {
+                                            if (!activeScriptId) return
+                                            const result = await dispatch(regenerateWebhookSecret(activeScriptId))
+                                            if (regenerateWebhookSecret.fulfilled.match(result)) {
+                                                setRevealedSecret(result.payload.secret)
+                                            }
+                                        }}
+                                    >
+                                        {activeScript?.webhook_secret_set ? 'Rotate' : 'Generate'}
+                                    </Button>
+                                </div>
+                                {revealedSecret && (
+                                    <div className="mt-1.5">
+                                        <p className="text-[9px] text-amber-600 mb-1">⚠ Copy now — shown once only</p>
+                                        <div className="bg-amber-50 border border-amber-200 p-1.5 rounded text-[9px] font-mono break-all text-amber-800 select-all">
+                                            {revealedSecret}
+                                        </div>
+                                        <p className="text-[9px] text-slate-400 mt-1">
+                                            Header: <code>X-Hub-Signature-256: sha256=&#123;HMAC_SHA256(secret, body)&#125;</code>
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <div>

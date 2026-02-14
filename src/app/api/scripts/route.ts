@@ -32,6 +32,8 @@ export async function GET() {
     sync_to_gist: s.syncToGist,
     tags: s.tags.map(st => ({ id: st.tag.id, name: st.tag.name, color: st.tag.color })),
     timeout_ms: s.timeoutMs,
+    require_webhook_signature: s.requireWebhookSignature,
+    webhook_secret_set: !!s.webhookSecret,
   }))
 
   return NextResponse.json(result)

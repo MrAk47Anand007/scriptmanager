@@ -32,6 +32,9 @@ export interface Script {
     tags?: Tag[]
     // Timeout override
     timeout_ms?: number | null
+    // Webhook HMAC
+    require_webhook_signature?: boolean
+    webhook_secret_set?: boolean
 }
 
 export type { ScriptParameter }
@@ -222,6 +225,21 @@ export const fetchBuildOutput = createAsyncThunk('scripts/fetchBuildOutput', asy
 export const regenerateWebhook = createAsyncThunk('scripts/regenerateWebhook', async (scriptId: string) => {
     const response = await axios.post(`/api/scripts/${scriptId}/webhook/regenerate`)
     return { scriptId, token: response.data.webhook_token }
+})
+
+export const regenerateWebhookSecret = createAsyncThunk('scripts/regenerateWebhookSecret', async (scriptId: string) => {
+    const response = await axios.post(`/api/scripts/${scriptId}/webhook/secret`)
+    return { scriptId, secret: response.data.webhook_secret as string }
+})
+
+export const toggleWebhookSignature = createAsyncThunk('scripts/toggleWebhookSignature', async ({ scriptId, requireSignature }: { scriptId: string; requireSignature: boolean }) => {
+    const response = await axios.put(`/api/scripts/${scriptId}/webhook/secret`, { require_signature: requireSignature })
+    return {
+        scriptId,
+        require_webhook_signature: response.data.require_webhook_signature as boolean,
+        // new secret if auto-generated
+        webhook_secret: response.data.webhook_secret as string | undefined,
+    }
 })
 
 export const fetchSchedule = createAsyncThunk('scripts/fetchSchedule', async (scriptId: string) => {
@@ -531,6 +549,21 @@ const scriptsSlice = createSlice({
                 const script = state.items.find(s => s.id === scriptId)
                 if (script && script.tags) {
                     script.tags = script.tags.filter(t => t.id !== tagId)
+                }
+            })
+            .addCase(regenerateWebhookSecret.fulfilled, (state, action) => {
+                const { scriptId } = action.payload
+                const script = state.items.find(s => s.id === scriptId)
+                if (script) {
+                    script.webhook_secret_set = true
+                }
+            })
+            .addCase(toggleWebhookSignature.fulfilled, (state, action) => {
+                const { scriptId, require_webhook_signature, webhook_secret } = action.payload
+                const script = state.items.find(s => s.id === scriptId)
+                if (script) {
+                    script.require_webhook_signature = require_webhook_signature
+                    if (webhook_secret) script.webhook_secret_set = true
                 }
             })
             .addCase(fetchVersions.pending, (state) => {

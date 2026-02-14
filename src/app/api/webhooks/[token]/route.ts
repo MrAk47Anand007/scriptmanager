@@ -2,6 +2,21 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { executeScriptAsync } from '@/lib/scriptRunner'
 import type { ScriptParameter } from '@/lib/types'
+import crypto from 'crypto'
+
+/**
+ * Verify an X-Hub-Signature-256 header against a shared secret.
+ * Compatible with GitHub-style HMAC-SHA256 webhook signatures.
+ */
+function verifySignature(secret: string, body: string, signatureHeader: string | null): boolean {
+  if (!signatureHeader) return false
+  const expected = `sha256=${crypto.createHmac('sha256', secret).update(body).digest('hex')}`
+  try {
+    return crypto.timingSafeEqual(Buffer.from(signatureHeader), Buffer.from(expected))
+  } catch {
+    return false
+  }
+}
 
 export async function POST(
   req: Request,
@@ -17,12 +32,23 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid webhook token' }, { status: 404 })
   }
 
-  let payload: string | null = null
+  // Read raw body text so we can validate the HMAC before parsing JSON
+  const rawBody = await req.text()
+
+  // HMAC signature verification (optional per-script toggle)
+  if (script.requireWebhookSignature && script.webhookSecret) {
+    const signatureHeader = req.headers.get('x-hub-signature-256')
+    const valid = verifySignature(script.webhookSecret, rawBody, signatureHeader)
+    if (!valid) {
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+    }
+  }
+
+  let payload: string | null = rawBody || null
   let paramValues: Record<string, string> | undefined
 
   try {
-    const body = await req.json()
-    payload = JSON.stringify(body)
+    const body = JSON.parse(rawBody)
 
     // Extract param values from webhook body if script has parameters
     if (script.parameters && script.parameters !== '[]') {

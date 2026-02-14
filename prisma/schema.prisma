@@ -15,6 +15,8 @@ model Script {
   language        String      @default("python")
   interpreter     String?
   webhookToken    String?     @unique @map("webhook_token")
+  webhookSecret   String?     @map("webhook_secret")
+  requireWebhookSignature Boolean @default(false) @map("require_webhook_signature")
   scheduleCron    String?     @map("schedule_cron")
   scheduleEnabled Boolean     @default(false) @map("schedule_enabled")
   parameters      String      @default("[]")
