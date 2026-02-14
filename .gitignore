@@ -10,6 +10,8 @@ dist/
 
 # Production
 build/
+# Allow the builds API route (don't confuse with the builds/ runtime dir)
+!/src/app/api/builds/
 
 # Misc
 .DS_Store
