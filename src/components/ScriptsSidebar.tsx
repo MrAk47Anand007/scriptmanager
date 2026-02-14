@@ -1,13 +1,14 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { setActiveScript, createScript, createCollection, deleteCollection, moveScript } from '@/features/scripts/scriptsSlice';
 import type { Script, Collection } from '@/features/scripts/scriptsSlice';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { FileCode, Plus, Folder, MoreVertical, Trash2, ChevronRight, ChevronDown, GripVertical } from 'lucide-react';
+import { FileCode, Plus, Folder, MoreVertical, Trash2, ChevronRight, ChevronDown, GripVertical, Search } from 'lucide-react';
+import { QuickSwitcher } from './QuickSwitcher';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -157,7 +158,24 @@ export const ScriptsSidebar = () => {
     const [parentCollectionId, setParentCollectionId] = useState<string | null>(null);
     const [syncToGistOverride, setSyncToGistOverride] = useState(false);
 
+    // Search state
+    const [searchQuery, setSearchQuery] = useState('');
+    const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
+
     const { settings } = useAppSelector((state) => state.settings);
+
+    // Ctrl+P / Cmd+P global shortcut
+    const handleKeyDown = useCallback((e: KeyboardEvent) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+            e.preventDefault();
+            setQuickSwitcherOpen(true);
+        }
+    }, []);
+
+    useEffect(() => {
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [handleKeyDown]);
 
     // Initial data fetching is centralized in page.tsx
 
@@ -236,6 +254,25 @@ export const ScriptsSidebar = () => {
         }
     };
 
+    const filteredScripts = useMemo(() => {
+        if (!searchQuery.trim()) return scripts;
+        const q = searchQuery.toLowerCase();
+        return scripts.filter(s =>
+            s.name.toLowerCase().includes(q) ||
+            (s.description ?? '').toLowerCase().includes(q)
+        );
+    }, [scripts, searchQuery]);
+
+    // Auto-expand collections that contain matching scripts when searching
+    useEffect(() => {
+        if (!searchQuery.trim()) return;
+        const toExpand: Record<string, boolean> = {};
+        filteredScripts.forEach(s => {
+            if (s.collection_id) toExpand[s.collection_id] = true;
+        });
+        setExpandedCollections(prev => ({ ...prev, ...toExpand }));
+    }, [filteredScripts, searchQuery]);
+
     const grouped = useMemo(() => {
         const result: Record<string, typeof scripts> = {};
         const unsorted: typeof scripts = [];
@@ -244,7 +281,7 @@ export const ScriptsSidebar = () => {
             result[c.id] = [];
         });
 
-        scripts.forEach(s => {
+        filteredScripts.forEach(s => {
             if (s.collection_id && result[s.collection_id]) {
                 result[s.collection_id].push(s);
             } else {
@@ -253,7 +290,7 @@ export const ScriptsSidebar = () => {
         });
 
         return { result, unsorted };
-    }, [scripts, collections]);
+    }, [filteredScripts, collections]);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -264,25 +301,45 @@ export const ScriptsSidebar = () => {
     );
 
     return (
+        <>
+        <QuickSwitcher open={quickSwitcherOpen} onClose={() => setQuickSwitcherOpen(false)} />
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div className="w-64 border-r flex flex-col bg-slate-50 h-full">
                 <div className="p-4 border-b flex items-center justify-between">
                     <h2 className="font-semibold text-xs tracking-wider text-slate-500 uppercase">SCRIPTS</h2>
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-6 w-6">
-                                <Plus className="h-4 w-4 text-slate-600" />
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleCreateScript()}>
-                                <FileCode className="mr-2 h-4 w-4" /> New Script
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setIsCreatingCollection(true)}>
-                                <Folder className="mr-2 h-4 w-4" /> New Collection
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                    <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="icon" className="h-6 w-6" title="Quick open (Ctrl+P)" onClick={() => setQuickSwitcherOpen(true)}>
+                            <Search className="h-3.5 w-3.5 text-slate-500" />
+                        </Button>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-6 w-6">
+                                    <Plus className="h-4 w-4 text-slate-600" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleCreateScript()}>
+                                    <FileCode className="mr-2 h-4 w-4" /> New Script
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setIsCreatingCollection(true)}>
+                                    <Folder className="mr-2 h-4 w-4" /> New Collection
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
+                </div>
+
+                {/* Inline search bar */}
+                <div className="px-2 pt-2 pb-1">
+                    <div className="relative">
+                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 pointer-events-none" />
+                        <Input
+                            placeholder="Filter scripts…"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="h-7 pl-6 text-xs bg-white"
+                        />
+                    </div>
                 </div>
 
                 {isCreatingCollection && (
@@ -303,6 +360,9 @@ export const ScriptsSidebar = () => {
                 )}
 
                 <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                    {searchQuery.trim() && filteredScripts.length === 0 && (
+                        <div className="px-2 py-6 text-xs text-slate-400 text-center italic">No scripts match "{searchQuery}"</div>
+                    )}
                     {collections.map(collection => (
                         <DroppableCollection
                             key={collection.id}
@@ -312,7 +372,7 @@ export const ScriptsSidebar = () => {
                             onDelete={() => handleDeleteCollection(collection.id)}
                             onCreateScript={() => handleCreateScript(collection.id)}
                         >
-                            {grouped.result[collection.id].length === 0 && (
+                            {grouped.result[collection.id].length === 0 && !searchQuery.trim() && (
                                 <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
                             )}
                             {grouped.result[collection.id].map(script => (
@@ -404,5 +464,6 @@ export const ScriptsSidebar = () => {
                 </DialogContent>
             </Dialog>
         </DndContext>
+        </>
     );
 };
