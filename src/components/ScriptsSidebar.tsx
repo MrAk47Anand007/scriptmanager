@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import {
     setActiveScript, createScript, createCollection, deleteCollection, moveScript,
-    saveAsTemplate,
+    saveAsTemplate, duplicateScript,
 } from '@/features/scripts/scriptsSlice';
 import type { Script, Collection, ScriptTemplate } from '@/features/scripts/scriptsSlice';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
     FileCode, Plus, Folder, MoreVertical, Trash2, ChevronRight, ChevronDown,
-    GripVertical, Search, LayoutTemplate,
+    GripVertical, Search, LayoutTemplate, Copy,
 } from 'lucide-react';
 import { QuickSwitcher } from './QuickSwitcher';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
@@ -67,11 +67,13 @@ const DraggableScript = ({
     isActive,
     onClick,
     onSaveAsTemplate,
+    onDuplicate,
 }: {
     script: Script;
     isActive: boolean;
     onClick: () => void;
     onSaveAsTemplate: () => void;
+    onDuplicate: () => void;
 }) => {
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
         id: script.id,
@@ -100,6 +102,9 @@ const DraggableScript = ({
                 </div>
             </ContextMenuTrigger>
             <ContextMenuContent>
+                <ContextMenuItem onClick={onDuplicate}>
+                    <Copy className="mr-2 h-4 w-4" /> Duplicate
+                </ContextMenuItem>
                 <ContextMenuItem onClick={onSaveAsTemplate}>
                     <LayoutTemplate className="mr-2 h-4 w-4" /> Save as Template
                 </ContextMenuItem>
@@ -534,6 +539,7 @@ export const ScriptsSidebar = () => {
                                     isActive={activeScriptId === script.id}
                                     onClick={() => dispatch(setActiveScript(script.id))}
                                     onSaveAsTemplate={() => openSaveAsTemplate(script)}
+                                    onDuplicate={() => dispatch(duplicateScript(script.id))}
                                 />
                             ))}
                         </DroppableCollection>
@@ -549,6 +555,7 @@ export const ScriptsSidebar = () => {
                             isActive={activeScriptId === script.id}
                             onClick={() => dispatch(setActiveScript(script.id))}
                             onSaveAsTemplate={() => openSaveAsTemplate(script)}
+                            onDuplicate={() => dispatch(duplicateScript(script.id))}
                         />
                     ))}
                 </div>

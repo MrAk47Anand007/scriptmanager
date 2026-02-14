@@ -267,6 +267,13 @@ export const deleteGist = createAsyncThunk('scripts/deleteGist', async (scriptId
     return scriptId
 })
 
+// --- Duplication Thunk ---
+
+export const duplicateScript = createAsyncThunk('scripts/duplicateScript', async (id: string) => {
+    const response = await axios.post(`/api/scripts/${id}/duplicate`)
+    return response.data as Script
+})
+
 // --- Collection Thunks ---
 
 export const fetchCollections = createAsyncThunk('scripts/fetchCollections', async () => {
@@ -550,6 +557,23 @@ const scriptsSlice = createSlice({
                 if (script && script.tags) {
                     script.tags = script.tags.filter(t => t.id !== tagId)
                 }
+            })
+            .addCase(duplicateScript.fulfilled, (state, action) => {
+                // Insert duplicate next to original in items list
+                const originalIdx = state.items.findIndex(s => s.id === action.meta.arg)
+                if (originalIdx !== -1) {
+                    state.items.splice(originalIdx + 1, 0, action.payload)
+                } else {
+                    state.items.push(action.payload)
+                }
+                // Automatically switch to the new duplicate
+                state.activeScriptId = action.payload.id
+                state.contentStatus = 'idle'
+                state.builds = []
+                state.envVars = []
+                state.envVarsStatus = 'idle'
+                state.versions = []
+                state.versionsStatus = 'idle'
             })
             .addCase(regenerateWebhookSecret.fulfilled, (state, action) => {
                 const { scriptId } = action.payload
