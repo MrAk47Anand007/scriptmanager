@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useAppDispatch } from '@/store/hooks'
-import { fetchScripts, fetchCollections, fetchTemplates } from '@/features/scripts/scriptsSlice'
+import { fetchScripts, fetchCollections, fetchTemplates, fetchAllTags } from '@/features/scripts/scriptsSlice'
 import { fetchSettings } from '@/features/settings/settingsSlice'
 import { ScriptsManager } from '@/components/ScriptsManager'
 import { SettingsManager } from '@/components/SettingsManager'
@@ -18,6 +18,7 @@ export default function Home() {
     dispatch(fetchCollections())
     dispatch(fetchSettings())
     dispatch(fetchTemplates())
+    dispatch(fetchAllTags())
   }, [dispatch])
 
   return (

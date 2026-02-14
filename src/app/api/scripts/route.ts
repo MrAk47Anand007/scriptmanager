@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from 'uuid'
 export async function GET() {
   const scripts = await prisma.script.findMany({
     orderBy: { name: 'asc' },
-    include: { collection: true }
+    include: { collection: true, tags: { include: { tag: true } } }
   })
 
   // Map to camelCase → snake_case for frontend compatibility
@@ -30,6 +30,7 @@ export async function GET() {
     gist_id: s.gistId,
     gist_url: s.gistUrl,
     sync_to_gist: s.syncToGist,
+    tags: s.tags.map(st => ({ id: st.tag.id, name: st.tag.name, color: st.tag.color })),
   }))
 
   return NextResponse.json(result)

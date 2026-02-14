@@ -13,9 +13,10 @@ import {
     fetchScriptContent, saveScript, runScript, fetchBuilds, fetchBuildOutput,
     updateActiveScriptContent, appendBuildOutput, clearBuildOutput,
     regenerateWebhook, fetchSchedule, saveSchedule,
-    moveScript
+    moveScript, addTagToScript, removeTagFromScript, fetchAllTags,
 } from '@/features/scripts/scriptsSlice';
 import type { Script } from '@/features/scripts/scriptsSlice';
+import { TagsInput } from './TagsInput';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Github, Loader2, SlidersHorizontal } from 'lucide-react';
@@ -45,7 +46,7 @@ const LANGUAGE_OPTIONS = [
 
 export const ScriptsManager = () => {
     const dispatch = useAppDispatch();
-    const { items: scripts, collections, activeScriptId, activeScriptContent, builds, currentBuildOutput, saveStatus, schedule, contentStatus, runStatus } = useAppSelector((state) => state.scripts);
+    const { items: scripts, collections, activeScriptId, activeScriptContent, builds, currentBuildOutput, saveStatus, schedule, contentStatus, runStatus, allTags } = useAppSelector((state) => state.scripts);
     const { settings } = useAppSelector((state) => state.settings);
     const consoleRef = useRef<HTMLDivElement>(null);
     const eventSourceRef = useRef<EventSource | null>(null);
@@ -402,6 +403,22 @@ export const ScriptsManager = () => {
                                 onChange={setScriptParameters}
                             />
                         </div>
+
+                        {/* Tags section */}
+                        {activeScriptId && (() => {
+                            const activeScript = scripts.find(s => s.id === activeScriptId)
+                            return (
+                                <div>
+                                    <TagsInput
+                                        scriptId={activeScriptId}
+                                        tags={activeScript?.tags ?? []}
+                                        allTags={allTags}
+                                        onAdd={(name) => dispatch(addTagToScript({ scriptId: activeScriptId, name }))}
+                                        onRemove={(tagId) => dispatch(removeTagFromScript({ scriptId: activeScriptId, tagId }))}
+                                    />
+                                </div>
+                            )
+                        })()}
                     </div>
                 )}
 

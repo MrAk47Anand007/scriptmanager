@@ -29,8 +29,31 @@ model Script {
 
   collection      Collection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
   builds          Build[]
+  tags            ScriptTag[]
 
   @@map("scripts")
+}
+
+model Tag {
+  id        String      @id @default(uuid())
+  name      String      @unique
+  color     String      @default("#6366f1")
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  scripts   ScriptTag[]
+
+  @@map("tags")
+}
+
+model ScriptTag {
+  scriptId  String  @map("script_id")
+  tagId     String  @map("tag_id")
+
+  script    Script  @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([scriptId, tagId])
+  @@map("script_tags")
 }
 
 model Build {

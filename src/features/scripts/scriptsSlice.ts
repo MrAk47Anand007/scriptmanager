@@ -2,6 +2,12 @@ import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
 import axios from 'axios'
 import type { ScriptParameter } from '@/lib/types'
 
+export interface Tag {
+    id: string
+    name: string
+    color: string
+}
+
 export interface Script {
     id: string
     name: string
@@ -22,6 +28,8 @@ export interface Script {
     gist_id?: string
     gist_url?: string
     sync_to_gist?: boolean
+    // Tags
+    tags?: Tag[]
 }
 
 export type { ScriptParameter }
@@ -61,6 +69,7 @@ interface ScriptsState {
     collections: Collection[];
     templates: ScriptTemplate[];
     templatesStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
+    allTags: Tag[];
     activeScriptId: string | null;
     activeScriptContent: string;
     builds: Build[];
@@ -83,6 +92,7 @@ const initialState: ScriptsState = {
     collections: [],
     templates: [],
     templatesStatus: 'idle',
+    allTags: [],
     activeScriptId: null,
     activeScriptContent: '',
     builds: [],
@@ -236,6 +246,23 @@ export const deleteCollection = createAsyncThunk('scripts/deleteCollection', asy
 export const moveScript = createAsyncThunk('scripts/moveScript', async ({ scriptId, collectionId }: { scriptId: string, collectionId: string | null }) => {
     const response = await axios.put(`/api/scripts/${scriptId}/move`, { collection_id: collectionId })
     return { scriptId, collectionId: response.data.collection_id }
+})
+
+// --- Tag Thunks ---
+
+export const fetchAllTags = createAsyncThunk('scripts/fetchAllTags', async () => {
+    const response = await axios.get('/api/tags')
+    return response.data as Tag[]
+})
+
+export const addTagToScript = createAsyncThunk('scripts/addTagToScript', async ({ scriptId, name, color }: { scriptId: string; name: string; color?: string }) => {
+    const response = await axios.post(`/api/scripts/${scriptId}/tags`, { name, color })
+    return { scriptId, tag: response.data as Tag }
+})
+
+export const removeTagFromScript = createAsyncThunk('scripts/removeTagFromScript', async ({ scriptId, tagId }: { scriptId: string; tagId: string }) => {
+    await axios.delete(`/api/scripts/${scriptId}/tags?tagId=${tagId}`)
+    return { scriptId, tagId }
 })
 
 const scriptsSlice = createSlice({
@@ -400,6 +427,30 @@ const scriptsSlice = createSlice({
             })
             .addCase(deleteTemplate.fulfilled, (state, action) => {
                 state.templates = state.templates.filter(t => t.id !== action.payload)
+            })
+            .addCase(fetchAllTags.fulfilled, (state, action) => {
+                state.allTags = action.payload
+            })
+            .addCase(addTagToScript.fulfilled, (state, action) => {
+                const { scriptId, tag } = action.payload
+                const script = state.items.find(s => s.id === scriptId)
+                if (script) {
+                    if (!script.tags) script.tags = []
+                    if (!script.tags.find(t => t.id === tag.id)) {
+                        script.tags.push(tag)
+                    }
+                }
+                // Also add to allTags if not present
+                if (!state.allTags.find(t => t.id === tag.id)) {
+                    state.allTags.push(tag)
+                }
+            })
+            .addCase(removeTagFromScript.fulfilled, (state, action) => {
+                const { scriptId, tagId } = action.payload
+                const script = state.items.find(s => s.id === scriptId)
+                if (script && script.tags) {
+                    script.tags = script.tags.filter(t => t.id !== tagId)
+                }
             })
     }
 })

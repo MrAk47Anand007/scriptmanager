@@ -187,6 +187,7 @@ export const ScriptsSidebar = () => {
         activeScriptId,
         activeScriptContent,
         templates,
+        allTags,
     } = useAppSelector((state) => state.scripts);
     const [expandedCollections, setExpandedCollections] = useState<Record<string, boolean>>({});
     const [isCreatingCollection, setIsCreatingCollection] = useState(false);
@@ -199,9 +200,10 @@ export const ScriptsSidebar = () => {
     const [parentCollectionId, setParentCollectionId] = useState<string | null>(null);
     const [syncToGistOverride, setSyncToGistOverride] = useState(false);
 
-    // Search state
+    // Search + filter state
     const [searchQuery, setSearchQuery] = useState('');
     const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
+    const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
 
     // Template picker state
     const [isTemplatePickerOpen, setIsTemplatePickerOpen] = useState(false);
@@ -372,23 +374,27 @@ export const ScriptsSidebar = () => {
     };
 
     const filteredScripts = useMemo(() => {
-        if (!searchQuery.trim()) return scripts;
+        let result = scripts;
+        if (selectedTagId) {
+            result = result.filter(s => s.tags?.some(t => t.id === selectedTagId));
+        }
+        if (!searchQuery.trim()) return result;
         const q = searchQuery.toLowerCase();
-        return scripts.filter(s =>
+        return result.filter(s =>
             s.name.toLowerCase().includes(q) ||
             (s.description ?? '').toLowerCase().includes(q)
         );
-    }, [scripts, searchQuery]);
+    }, [scripts, searchQuery, selectedTagId]);
 
-    // Auto-expand collections that contain matching scripts when searching
+    // Auto-expand collections that contain matching scripts when searching or filtering
     useEffect(() => {
-        if (!searchQuery.trim()) return;
+        if (!searchQuery.trim() && !selectedTagId) return;
         const toExpand: Record<string, boolean> = {};
         filteredScripts.forEach(s => {
             if (s.collection_id) toExpand[s.collection_id] = true;
         });
         setExpandedCollections(prev => ({ ...prev, ...toExpand }));
-    }, [filteredScripts, searchQuery]);
+    }, [filteredScripts, searchQuery, selectedTagId]);
 
     const grouped = useMemo(() => {
         const result: Record<string, typeof scripts> = {};
@@ -467,6 +473,25 @@ export const ScriptsSidebar = () => {
                             className="h-7 pl-6 text-xs bg-white"
                         />
                     </div>
+                    {/* Tag filter chips */}
+                    {allTags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                            {allTags.map(tag => (
+                                <button
+                                    key={tag.id}
+                                    onClick={() => setSelectedTagId(selectedTagId === tag.id ? null : tag.id)}
+                                    className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium transition-all"
+                                    style={
+                                        selectedTagId === tag.id
+                                            ? { backgroundColor: tag.color, color: '#fff', border: `1px solid ${tag.color}` }
+                                            : { backgroundColor: tag.color + '22', color: tag.color, border: `1px solid ${tag.color}44` }
+                                    }
+                                >
+                                    {tag.name}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
                 {isCreatingCollection && (
