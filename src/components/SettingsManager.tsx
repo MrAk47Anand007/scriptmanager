@@ -9,14 +9,16 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Loader2, Save, Github, FolderIcon, Download, Upload, Package } from 'lucide-react';
+import { Loader2, Save, Github, FolderIcon, Download, Upload, Package, Lock, LogOut } from 'lucide-react';
 import { useRef } from 'react';
 import axios from 'axios';
 import { useAppDispatch as _useAppDispatch } from '@/store/hooks';
+import { useRouter } from 'next/navigation';
 
 export const SettingsManager = () => {
     const dispatch = useAppDispatch();
     const { settings, status, error } = useAppSelector((state) => state.settings);
+    const router = useRouter();
 
     const [githubToken, setGithubToken] = useState('');
     const [gistSyncEnabled, setGistSyncEnabled] = useState(false);
@@ -24,6 +26,14 @@ export const SettingsManager = () => {
     const [executionTimeoutSecs, setExecutionTimeoutSecs] = useState('30');
     const [isSaving, setIsSaving] = useState(false);
     const [saveMessage, setSaveMessage] = useState('');
+
+    // Password change state
+    const [currentPassword, setCurrentPassword] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [passwordMessage, setPasswordMessage] = useState('');
+    const [passwordError, setPasswordError] = useState('');
+    const [isChangingPassword, setIsChangingPassword] = useState(false);
 
     // Import/Export state
     const [importStatus, setImportStatus] = useState<string>('');
@@ -84,6 +94,40 @@ export const SettingsManager = () => {
         } finally {
             setIsSaving(false);
         }
+    };
+
+    const handleChangePassword = async () => {
+        setPasswordError('');
+        setPasswordMessage('');
+        if (newPassword !== confirmPassword) {
+            setPasswordError('Passwords do not match');
+            return;
+        }
+        if (newPassword.length < 1) {
+            setPasswordError('Password cannot be empty');
+            return;
+        }
+        setIsChangingPassword(true);
+        try {
+            const res = await axios.post('/api/auth/change-password', { currentPassword, newPassword });
+            if (res.data.ok) {
+                setPasswordMessage('Password updated successfully!');
+                setCurrentPassword('');
+                setNewPassword('');
+                setConfirmPassword('');
+                setTimeout(() => setPasswordMessage(''), 3000);
+            }
+        } catch (err: unknown) {
+            const axiosErr = err as { response?: { data?: { error?: string } } };
+            setPasswordError(axiosErr.response?.data?.error ?? 'Failed to change password');
+        } finally {
+            setIsChangingPassword(false);
+        }
+    };
+
+    const handleLogout = async () => {
+        await axios.post('/api/auth/logout');
+        router.push('/login');
     };
 
     if (status === 'loading' && Object.keys(settings).length === 0) {
@@ -237,6 +281,69 @@ export const SettingsManager = () => {
                         {importError && (
                             <p className="text-xs text-red-500">{importError}</p>
                         )}
+                    </div>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Lock className="h-5 w-5" /> Password &amp; Security</CardTitle>
+                    <CardDescription>
+                        Change the master password used to access ScriptManager.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {passwordMessage && (
+                        <Alert className="bg-green-50 text-green-800 border-green-200">
+                            <AlertTitle>Success</AlertTitle>
+                            <AlertDescription>{passwordMessage}</AlertDescription>
+                        </Alert>
+                    )}
+                    {passwordError && (
+                        <Alert variant="destructive">
+                            <AlertTitle>Error</AlertTitle>
+                            <AlertDescription>{passwordError}</AlertDescription>
+                        </Alert>
+                    )}
+                    <div className="space-y-2">
+                        <Label htmlFor="current_password">Current Password</Label>
+                        <Input
+                            id="current_password"
+                            type="password"
+                            placeholder="Leave blank if not yet set"
+                            value={currentPassword}
+                            onChange={(e) => setCurrentPassword(e.target.value)}
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="new_password">New Password</Label>
+                        <Input
+                            id="new_password"
+                            type="password"
+                            placeholder="New password"
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="confirm_password">Confirm New Password</Label>
+                        <Input
+                            id="confirm_password"
+                            type="password"
+                            placeholder="Repeat new password"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                        />
+                    </div>
+                    <Button variant="outline" onClick={handleChangePassword} disabled={isChangingPassword || !newPassword}>
+                        {isChangingPassword ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Lock className="mr-2 h-4 w-4" />}
+                        Change Password
+                    </Button>
+                    <div className="border-t pt-4">
+                        <Button variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={handleLogout}>
+                            <LogOut className="mr-2 h-4 w-4" />
+                            Sign Out
+                        </Button>
                     </div>
                 </CardContent>
             </Card>
