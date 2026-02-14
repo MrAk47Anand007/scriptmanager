@@ -27,6 +27,7 @@ export async function GET(
     content,
     language: script.language,
     interpreter: script.interpreter,
+    parameters: (() => { try { return JSON.parse(script.parameters ?? '[]') } catch { return [] } })(),
     created_at: script.createdAt.toISOString(),
     updated_at: script.updatedAt.toISOString(),
   })

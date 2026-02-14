@@ -1,6 +1,7 @@
 import { Cron } from 'croner'
 import { prisma } from '@/lib/db'
 import { executeScriptAsync } from '@/lib/scriptRunner'
+import type { ScriptParameter } from '@/lib/types'
 
 // Module-level map: scriptId -> Cron instance
 const scheduledJobs = new Map<string, Cron>()
@@ -53,7 +54,25 @@ export function registerSchedule(script: ScriptScheduleInfo): void {
           }
         })
 
-        await executeScriptAsync(build.id, freshScript)
+        // Build param values from defaults for scheduled runs (no interactive user)
+        let paramValues: Record<string, string> | undefined
+        if (freshScript.parameters && freshScript.parameters !== '[]') {
+          try {
+            const scriptParams: ScriptParameter[] = JSON.parse(freshScript.parameters)
+            if (scriptParams.length > 0) {
+              paramValues = {}
+              for (const param of scriptParams) {
+                if (param.defaultValue !== undefined) {
+                  paramValues[param.name] = param.defaultValue
+                }
+              }
+            }
+          } catch {
+            // Malformed JSON — run without params
+          }
+        }
+
+        await executeScriptAsync(build.id, freshScript, paramValues)
       } catch (err) {
         console.error(`[Scheduler] Error running scheduled script ${script.id}:`, err)
       }

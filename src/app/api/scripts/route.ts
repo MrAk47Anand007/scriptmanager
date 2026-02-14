@@ -19,6 +19,7 @@ export async function GET() {
     description: s.description,
     language: s.language,
     interpreter: s.interpreter,
+    parameters: (() => { try { return JSON.parse(s.parameters ?? '[]') } catch { return [] } })(),
     created_at: s.createdAt.toISOString(),
     updated_at: s.updatedAt.toISOString(),
     last_run: s.lastRun?.toISOString() ?? null,
@@ -36,7 +37,13 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const data = await req.json()
-  const { id, name, content, sync_to_gist, language, interpreter } = data
+  const { id, name, content, sync_to_gist, language, interpreter, parameters } = data
+
+  // Serialize parameters to JSON string for storage
+  let parametersJson = '[]'
+  if (Array.isArray(parameters)) {
+    try { parametersJson = JSON.stringify(parameters) } catch { parametersJson = '[]' }
+  }
 
   if (!name) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
@@ -62,6 +69,7 @@ export async function POST(req: Request) {
         language: language ?? script.language,
         interpreter: language === 'custom' ? (interpreter ?? null) : null,
         syncToGist: sync_to_gist ?? script.syncToGist,
+        parameters: parametersJson,
         updatedAt: new Date()
       },
       include: { collection: true }
@@ -96,6 +104,7 @@ export async function POST(req: Request) {
         language: language ?? 'python',
         interpreter: language === 'custom' ? (interpreter ?? null) : null,
         syncToGist: sync_to_gist ?? defaultSyncToGist,
+        parameters: parametersJson,
         webhookToken: uuidv4().replace(/-/g, '')
       },
       include: { collection: true }
@@ -120,6 +129,7 @@ export async function POST(req: Request) {
     description: script.description,
     language: script.language,
     interpreter: script.interpreter,
+    parameters: (() => { try { return JSON.parse(script.parameters ?? '[]') } catch { return [] } })(),
     created_at: script.createdAt.toISOString(),
     updated_at: script.updatedAt.toISOString(),
     last_run: script.lastRun?.toISOString() ?? null,

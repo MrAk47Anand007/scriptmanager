@@ -18,11 +18,14 @@ import {
 import type { Script } from '@/features/scripts/scriptsSlice';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Github, Loader2 } from 'lucide-react';
+import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Github, Loader2, SlidersHorizontal } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { ScriptsSidebar } from './ScriptsSidebar';
+import { ParametersPanel } from './ParametersPanel';
+import { RunInputsDialog } from './RunInputsDialog';
+import type { ScriptParameter } from '@/lib/types';
 import {
     Select,
     SelectContent,
@@ -54,10 +57,16 @@ export const ScriptsManager = () => {
     const [isTerminalOpen, setIsTerminalOpen] = useState(false);
     const [isTerminalMinimized, setIsTerminalMinimized] = useState(false);
 
+    // Parameters state
+    const [scriptParameters, setScriptParameters] = useState<ScriptParameter[]>([]);
+    const [showRunDialog, setShowRunDialog] = useState(false);
+
     // Initial data fetching is centralized in page.tsx
 
     useEffect(() => {
         if (activeScriptId) {
+            setShowRunDialog(false);
+
             dispatch(fetchScriptContent(activeScriptId));
             dispatch(fetchBuilds(activeScriptId));
             dispatch(fetchSchedule(activeScriptId));
@@ -68,22 +77,24 @@ export const ScriptsManager = () => {
             }
             dispatch(clearBuildOutput());
 
-            // Load language setting from script
+            // Load language + parameter settings from script
             const script = scripts.find(s => s.id === activeScriptId);
             if (script) {
                 setScriptLanguage(script.language || 'python');
                 setCustomInterpreter(script.interpreter || '');
+                setScriptParameters(script.parameters || []);
             }
         }
     }, [activeScriptId, dispatch]);
 
-    // Also update language when scripts list updates (after fetch)
+    // Also update language + params when scripts list updates (after fetch)
     useEffect(() => {
         if (activeScriptId) {
             const script = scripts.find(s => s.id === activeScriptId);
             if (script) {
                 setScriptLanguage(script.language || 'python');
                 setCustomInterpreter(script.interpreter || '');
+                setScriptParameters(script.parameters || []);
             }
         }
     }, [scripts, activeScriptId]);
@@ -109,7 +120,8 @@ export const ScriptsManager = () => {
                     content: activeScriptContent,
                     sync_to_gist: script.sync_to_gist,
                     language: scriptLanguage,
-                    interpreter: scriptLanguage === 'custom' ? customInterpreter : null
+                    interpreter: scriptLanguage === 'custom' ? customInterpreter : null,
+                    parameters: scriptParameters,
                 }));
             }
         }
@@ -148,7 +160,7 @@ export const ScriptsManager = () => {
         }
     }
 
-    const handleRun = async () => {
+    const executeRun = async (paramValues: Record<string, string>) => {
         if (!activeScriptId) return;
 
         if (eventSourceRef.current) {
@@ -156,7 +168,7 @@ export const ScriptsManager = () => {
         }
 
         dispatch(clearBuildOutput());
-        const resultAction = await dispatch(runScript(activeScriptId));
+        const resultAction = await dispatch(runScript({ id: activeScriptId, paramValues }));
 
         if (runScript.fulfilled.match(resultAction)) {
             const buildId = resultAction.payload.build_id;
@@ -181,6 +193,17 @@ export const ScriptsManager = () => {
                 dispatch(fetchBuilds(activeScriptId));
             };
         }
+    };
+
+    const handleRun = async () => {
+        if (!activeScriptId) return;
+        // If the script has parameters, show the fill-in dialog first
+        if (scriptParameters.length > 0) {
+            setShowRunDialog(true);
+            return;
+        }
+        // No parameters — run immediately
+        await executeRun({});
     };
 
     const handleBuildClick = async (buildId: string) => {
@@ -371,6 +394,14 @@ export const ScriptsManager = () => {
                                 </div>
                             )}
                         </div>
+
+                        {/* Parameters section */}
+                        <div>
+                            <ParametersPanel
+                                parameters={scriptParameters}
+                                onChange={setScriptParameters}
+                            />
+                        </div>
                     </div>
                 )}
 
@@ -421,6 +452,18 @@ export const ScriptsManager = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Run Inputs Dialog — shown when script has parameters */}
+            <RunInputsDialog
+                key={activeScriptId ?? 'none'}
+                open={showRunDialog}
+                parameters={scriptParameters}
+                onRun={(values) => {
+                    setShowRunDialog(false);
+                    executeRun(values);
+                }}
+                onCancel={() => setShowRunDialog(false)}
+            />
         </div>
     );
 };
