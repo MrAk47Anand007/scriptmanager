@@ -52,6 +52,12 @@ export interface Build {
     triggered_by: string
 }
 
+export interface ScriptVersionMeta {
+    id: string
+    snapshot_number: number
+    saved_at: string
+}
+
 export interface Collection {
     id: string;
     name: string;
@@ -81,6 +87,8 @@ interface ScriptsState {
     allTags: Tag[];
     envVars: EnvVar[];
     envVarsStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
+    versions: ScriptVersionMeta[];
+    versionsStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
     activeScriptId: string | null;
     activeScriptContent: string;
     builds: Build[];
@@ -106,6 +114,8 @@ const initialState: ScriptsState = {
     allTags: [],
     envVars: [],
     envVarsStatus: 'idle',
+    versions: [],
+    versionsStatus: 'idle',
     activeScriptId: null,
     activeScriptContent: '',
     builds: [],
@@ -278,6 +288,21 @@ export const deleteEnvVar = createAsyncThunk('scripts/deleteEnvVar', async ({ sc
     return key
 })
 
+// --- Version History Thunks ---
+
+export const fetchVersions = createAsyncThunk('scripts/fetchVersions', async (scriptId: string) => {
+    const response = await axios.get(`/api/scripts/${scriptId}/versions`)
+    return response.data as ScriptVersionMeta[]
+})
+
+export const fetchVersionContent = createAsyncThunk(
+    'scripts/fetchVersionContent',
+    async ({ scriptId, versionId }: { scriptId: string; versionId: string }) => {
+        const response = await axios.get(`/api/scripts/${scriptId}/versions/${versionId}`)
+        return response.data as { id: string; snapshot_number: number; content: string; saved_at: string }
+    }
+)
+
 // --- Tag Thunks ---
 
 export const fetchAllTags = createAsyncThunk('scripts/fetchAllTags', async () => {
@@ -307,6 +332,8 @@ const scriptsSlice = createSlice({
             state.schedule = { cron: '', enabled: false, nextRun: null, status: 'idle' }
             state.envVars = []
             state.envVarsStatus = 'idle'
+            state.versions = []
+            state.versionsStatus = 'idle'
         },
         updateActiveScriptContent(state, action: PayloadAction<string>) {
             state.activeScriptContent = action.payload
@@ -506,6 +533,17 @@ const scriptsSlice = createSlice({
                     script.tags = script.tags.filter(t => t.id !== tagId)
                 }
             })
+            .addCase(fetchVersions.pending, (state) => {
+                state.versionsStatus = 'loading'
+            })
+            .addCase(fetchVersions.fulfilled, (state, action) => {
+                state.versions = action.payload
+                state.versionsStatus = 'succeeded'
+            })
+            .addCase(fetchVersions.rejected, (state) => {
+                state.versionsStatus = 'failed'
+            })
+            // fetchVersionContent doesn't need to update global state — used locally in the component
     }
 })
 

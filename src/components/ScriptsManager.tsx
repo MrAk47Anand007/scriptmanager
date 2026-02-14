@@ -15,8 +15,10 @@ import {
     regenerateWebhook, fetchSchedule, saveSchedule,
     moveScript, addTagToScript, removeTagFromScript, fetchAllTags,
     fetchEnvVars, upsertEnvVar, deleteEnvVar,
+    fetchVersions,
 } from '@/features/scripts/scriptsSlice';
 import type { Script } from '@/features/scripts/scriptsSlice';
+import { VersionHistoryPanel } from './VersionHistoryPanel';
 import { TagsInput } from './TagsInput';
 import { EnvVarsPanel } from './EnvVarsPanel';
 import { Button } from '@/components/ui/button';
@@ -77,6 +79,7 @@ export const ScriptsManager = () => {
             dispatch(fetchBuilds(activeScriptId));
             dispatch(fetchSchedule(activeScriptId));
             dispatch(fetchEnvVars(activeScriptId));
+            dispatch(fetchVersions(activeScriptId));
 
             if (eventSourceRef.current) {
                 eventSourceRef.current.close();
@@ -124,7 +127,7 @@ export const ScriptsManager = () => {
             const script = scripts.find(s => s.id === activeScriptId);
             if (script) {
                 const timeoutMs = timeoutSecs.trim() ? Math.round(parseFloat(timeoutSecs) * 1000) : null;
-                await dispatch(saveScript({
+                const result = await dispatch(saveScript({
                     id: activeScriptId,
                     name: script.name,
                     content: activeScriptContent,
@@ -134,6 +137,10 @@ export const ScriptsManager = () => {
                     parameters: scriptParameters,
                     timeout_ms: timeoutMs,
                 }));
+                if (saveScript.fulfilled.match(result)) {
+                    // Refresh version list after save
+                    dispatch(fetchVersions(activeScriptId));
+                }
             }
         }
     };
@@ -470,6 +477,20 @@ export const ScriptsManager = () => {
                                     envVars={envVars}
                                     onAdd={(key, value, isSecret) => dispatch(upsertEnvVar({ scriptId: activeScriptId, key, value, isSecret }))}
                                     onDelete={(key) => dispatch(deleteEnvVar({ scriptId: activeScriptId, key }))}
+                                />
+                            </div>
+                        )}
+
+                        {/* Version History section */}
+                        {activeScriptId && (
+                            <div>
+                                <VersionHistoryPanel
+                                    scriptId={activeScriptId}
+                                    currentContent={activeScriptContent}
+                                    language={scriptLanguage}
+                                    onRestore={(content) => {
+                                        dispatch(updateActiveScriptContent(content));
+                                    }}
                                 />
                             </div>
                         )}

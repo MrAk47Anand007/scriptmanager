@@ -62,6 +62,28 @@ export async function POST(req: Request) {
 
     if (content !== undefined) {
       fs.writeFileSync(filePath, content, 'utf8')
+
+      // Snapshot version history (keep last 10)
+      const MAX_VERSIONS = 10
+      const latestVersion = await prisma.scriptVersion.findFirst({
+        where: { scriptId: id },
+        orderBy: { snapshotNumber: 'desc' },
+        select: { snapshotNumber: true }
+      })
+      const nextSnapshotNumber = (latestVersion?.snapshotNumber ?? 0) + 1
+      await prisma.scriptVersion.create({
+        data: { scriptId: id!, content, snapshotNumber: nextSnapshotNumber }
+      })
+      // Prune old versions beyond the last MAX_VERSIONS
+      const allVersions = await prisma.scriptVersion.findMany({
+        where: { scriptId: id },
+        orderBy: { snapshotNumber: 'desc' },
+        select: { id: true }
+      })
+      if (allVersions.length > MAX_VERSIONS) {
+        const toDelete = allVersions.slice(MAX_VERSIONS).map(v => v.id)
+        await prisma.scriptVersion.deleteMany({ where: { id: { in: toDelete } } })
+      }
     }
 
     script = await prisma.script.update({

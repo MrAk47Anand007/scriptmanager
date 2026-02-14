@@ -32,6 +32,7 @@ model Script {
   builds          Build[]
   tags            ScriptTag[]
   envVars         ScriptEnvVar[]
+  versions        ScriptVersion[]
 
   @@map("scripts")
 }
@@ -69,6 +70,18 @@ model ScriptEnvVar {
 
   @@unique([scriptId, key])
   @@map("script_env_vars")
+}
+
+model ScriptVersion {
+  id             String   @id @default(uuid())
+  scriptId       String   @map("script_id")
+  content        String
+  snapshotNumber Int      @map("snapshot_number")
+  savedAt        DateTime @default(now()) @map("saved_at")
+
+  script         Script   @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+
+  @@map("script_versions")
 }
 
 model Build {
