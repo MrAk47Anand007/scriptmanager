@@ -17,6 +17,7 @@ model Script {
   webhookToken    String?     @unique @map("webhook_token")
   scheduleCron    String?     @map("schedule_cron")
   scheduleEnabled Boolean     @default(false) @map("schedule_enabled")
+  parameters      String      @default("[]")
   gistId          String?     @map("gist_id")
   gistUrl         String?     @map("gist_url")
   syncToGist      Boolean     @default(false) @map("sync_to_gist")

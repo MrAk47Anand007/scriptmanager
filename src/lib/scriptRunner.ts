@@ -3,6 +3,7 @@ import { EventEmitter } from 'events'
 import { prisma } from '@/lib/db'
 import path from 'path'
 import fs from 'fs'
+import type { ScriptParameter } from '@/lib/types'
 
 // Module-level map: buildId -> EventEmitter (Node.js equivalent of Python's _output_queues dict)
 const buildEmitters = new Map<string, EventEmitter>()
@@ -51,7 +52,11 @@ function resolveInterpreter(language: string, interpreter: string | null | undef
   }
 }
 
-export async function executeScriptAsync(buildId: string, script: ScriptInfo): Promise<void> {
+export async function executeScriptAsync(
+  buildId: string,
+  script: ScriptInfo,
+  paramValues?: Record<string, string>
+): Promise<void> {
   const emitter = new EventEmitter()
   buildEmitters.set(buildId, emitter)
 
@@ -89,8 +94,17 @@ export async function executeScriptAsync(buildId: string, script: ScriptInfo): P
       return
     }
 
+    // Build parameter env vars — sanitize keys to valid env var names
+    const paramEnv: Record<string, string> = {}
+    if (paramValues) {
+      for (const [key, val] of Object.entries(paramValues)) {
+        const safeKey = key.replace(/[^a-zA-Z0-9_]/g, '_')
+        paramEnv[safeKey] = val
+      }
+    }
+
     const child = spawn(cmd, args, {
-      env: { ...process.env },
+      env: { ...process.env, ...paramEnv },
       stdio: ['ignore', 'pipe', 'pipe']
     })
 

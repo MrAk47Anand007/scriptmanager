@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { executeScriptAsync } from '@/lib/scriptRunner'
+import type { ScriptParameter } from '@/lib/types'
 
 export async function POST(
   req: Request,
@@ -17,9 +18,26 @@ export async function POST(
   }
 
   let payload: string | null = null
+  let paramValues: Record<string, string> | undefined
+
   try {
     const body = await req.json()
     payload = JSON.stringify(body)
+
+    // Extract param values from webhook body if script has parameters
+    if (script.parameters && script.parameters !== '[]') {
+      const scriptParams: ScriptParameter[] = JSON.parse(script.parameters)
+      if (scriptParams.length > 0 && typeof body === 'object' && body !== null) {
+        paramValues = {}
+        for (const param of scriptParams) {
+          if (Object.prototype.hasOwnProperty.call(body, param.name)) {
+            paramValues[param.name] = String(body[param.name])
+          } else if (param.defaultValue !== undefined) {
+            paramValues[param.name] = param.defaultValue
+          }
+        }
+      }
+    }
   } catch {
     // No body or invalid JSON - that's fine
   }
@@ -34,7 +52,7 @@ export async function POST(
   })
 
   // Fire-and-forget
-  executeScriptAsync(build.id, script).catch(err => {
+  executeScriptAsync(build.id, script, paramValues).catch(err => {
     console.error('[Webhook] Script execution error:', err)
   })
 

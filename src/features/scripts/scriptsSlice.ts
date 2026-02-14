@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
 import axios from 'axios'
+import type { ScriptParameter } from '@/lib/types'
 
 export interface Script {
     id: string
@@ -9,6 +10,7 @@ export interface Script {
     content?: string
     language?: string
     interpreter?: string | null
+    parameters?: ScriptParameter[]
     created_at: string
     updated_at: string
     last_run?: string
@@ -21,6 +23,8 @@ export interface Script {
     gist_url?: string
     sync_to_gist?: boolean
 }
+
+export type { ScriptParameter }
 
 export interface Build {
     id: string
@@ -100,13 +104,13 @@ export const createScript = createAsyncThunk('scripts/createScript', async (payl
     return response.data
 })
 
-export const saveScript = createAsyncThunk('scripts/saveScript', async (data: { id: string; name: string; content: string; sync_to_gist?: boolean; language?: string; interpreter?: string | null }) => {
+export const saveScript = createAsyncThunk('scripts/saveScript', async (data: { id: string; name: string; content: string; sync_to_gist?: boolean; language?: string; interpreter?: string | null; parameters?: ScriptParameter[] }) => {
     const response = await axios.post('/api/scripts', data)
     return response.data
 })
 
-export const runScript = createAsyncThunk('scripts/runScript', async (id: string) => {
-    const response = await axios.post(`/api/scripts/${id}/run`)
+export const runScript = createAsyncThunk('scripts/runScript', async ({ id, paramValues }: { id: string; paramValues?: Record<string, string> }) => {
+    const response = await axios.post(`/api/scripts/${id}/run`, { paramValues })
     return response.data
 })
 
@@ -212,6 +216,13 @@ const scriptsSlice = createSlice({
             .addCase(fetchScriptContent.fulfilled, (state, action) => {
                 state.activeScriptContent = action.payload.content
                 state.contentStatus = 'succeeded'
+                // Merge parameters back into the items array so the UI can read them
+                if (action.payload.parameters) {
+                    const idx = state.items.findIndex(s => s.id === state.activeScriptId)
+                    if (idx !== -1) {
+                        state.items[idx].parameters = action.payload.parameters
+                    }
+                }
             })
             .addCase(fetchScriptContent.rejected, (state) => {
                 state.contentStatus = 'failed'
