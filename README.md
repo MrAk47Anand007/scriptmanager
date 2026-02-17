@@ -2,7 +2,7 @@
 
 A self-hosted, local-first script manager — write, run, schedule, and organize scripts with a professional web UI. Think of it as **n8n for scripts**: automation without the complexity.
 
-![ScriptManager UI](/screenshot.png)
+![ScriptManager UI](https://github.com/MrAk47Anand007/scriptmanager/blob/main/Screenshot%202026-02-17%20145941.png)
 
 ---
 
