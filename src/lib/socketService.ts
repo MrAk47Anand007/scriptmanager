@@ -20,13 +20,36 @@ export const initWebSocketServer = (server: Server) => {
 
         const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
 
-        const ptyProcess = pty.spawn(shell, [], {
-            name: 'xterm-color',
-            cols: 80,
-            rows: 24,
-            cwd: process.cwd(),
-            env: process.env as { [key: string]: string }
-        });
+        let ptyProcess: pty.IPty;
+        try {
+            ptyProcess = pty.spawn(shell, [], {
+                name: 'xterm-color',
+                cols: 80,
+                rows: 24,
+                cwd: process.cwd(),
+                env: process.env as { [key: string]: string },
+                // On Windows inside Electron there is no console window so ConPTY's
+                // AttachConsole call fails. Fall back to the WinPTY backend instead.
+                useConpty: false,
+            });
+        } catch (err) {
+            console.error('[Terminal] pty.spawn failed, retrying without ConPTY:', err);
+            try {
+                ptyProcess = pty.spawn(shell, [], {
+                    name: 'xterm-color',
+                    cols: 80,
+                    rows: 24,
+                    cwd: process.cwd(),
+                    env: process.env as { [key: string]: string },
+                    useConpty: false,
+                });
+            } catch (err2) {
+                console.error('[Terminal] pty.spawn failed entirely:', err2);
+                ws.send('\r\nFailed to start terminal: ' + String(err2) + '\r\n');
+                ws.close();
+                return;
+            }
+        }
 
         sessions.set(ws, { process: ptyProcess, socket: ws });
 
