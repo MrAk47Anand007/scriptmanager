@@ -16,7 +16,7 @@
     "db:studio": "prisma studio",
     "next:dev": "next dev",
     "cli": "node ./cli/sm.mjs",
-    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron:dev": "cross-env DESKTOP_AUTH_SECRET=dev-desktop-secret-local concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "cross-env ELECTRON_BUILD=1 next build && tsc -p electron/tsconfig.json && electron-builder",
     "electron:pack": "cross-env ELECTRON_BUILD=1 next build && tsc -p electron/tsconfig.json && electron-builder --dir"
   },
