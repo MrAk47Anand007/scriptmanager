@@ -42,6 +42,10 @@ data/
 user_scripts/
 builds/
 
+# Electron build outputs
+dist-electron/
+release/
+
 # Editor
 .vscode/
 .idea/
