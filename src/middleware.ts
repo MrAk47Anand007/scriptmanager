@@ -23,6 +23,13 @@ const PUBLIC_PREFIXES = [
 
 function validateToken(token: string | undefined): boolean {
   if (!token) return false
+
+  // Desktop Electron bypass — cookie value is "desktop:{DESKTOP_AUTH_SECRET}"
+  if (token.startsWith('desktop:')) {
+    const secret = process.env.DESKTOP_AUTH_SECRET
+    return !!secret && token === `desktop:${secret}`
+  }
+
   try {
     const [payload, sig] = token.split('.')
     if (!payload || !sig) return false
