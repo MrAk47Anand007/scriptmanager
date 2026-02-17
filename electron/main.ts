@@ -4,40 +4,35 @@ import path from 'path'
 import http from 'http'
 import crypto from 'crypto'
 
-const PORT = parseInt(process.env.ELECTRON_PORT ?? '3141', 10)
-const DESKTOP_SECRET = crypto.randomBytes(32).toString('hex')
+// In dev mode, `concurrently` already runs the Next.js server on port 3000.
+// In production (packaged), Electron spawns the standalone server itself.
+const IS_DEV = !app.isPackaged
+const DEV_PORT = parseInt(process.env.DEV_PORT ?? '3000', 10)
+const PROD_PORT = parseInt(process.env.ELECTRON_PORT ?? '3141', 10)
+const PORT = IS_DEV ? DEV_PORT : PROD_PORT
+
+// In dev, DESKTOP_AUTH_SECRET is set by the npm script so both processes share it.
+// In production, generate a fresh ephemeral secret per launch.
+const DESKTOP_SECRET = process.env.DESKTOP_AUTH_SECRET ?? crypto.randomBytes(32).toString('hex')
 let serverProcess: ChildProcess | null = null
 let mainWindow: BrowserWindow | null = null
 
 function startServer() {
-  const isDev = !app.isPackaged
-
-  let cmd: string
-  let args: string[]
-
-  if (isDev) {
-    // Dev: run ts-node with the custom server
-    cmd = process.platform === 'win32' ? 'npx.cmd' : 'npx'
-    args = [
-      'ts-node',
-      '-r', 'tsconfig-paths/register',
-      '--project', 'tsconfig.server.json',
-      'server.ts',
-    ]
-  } else {
-    // Prod: run compiled server.js from resources
-    cmd = process.execPath.replace('ScriptManager.exe', '').replace('ScriptManager', '') + 'node'
-    args = [path.join(process.resourcesPath, 'app', 'server.js')]
+  if (IS_DEV) {
+    // Dev: server is already running via `concurrently`, nothing to spawn
+    return
   }
 
-  const cwd = isDev ? path.join(__dirname, '..') : undefined
+  // Production: spawn the compiled standalone server
+  const nodeExe = process.platform === 'win32' ? 'node.exe' : 'node'
+  const nodePath = path.join(path.dirname(process.execPath), nodeExe)
+  const serverScript = path.join(process.resourcesPath, 'app', 'server.js')
 
-  serverProcess = spawn(cmd, args, {
-    cwd,
+  serverProcess = spawn(nodePath, [serverScript], {
     env: {
       ...process.env,
       PORT: String(PORT),
-      NODE_ENV: isDev ? 'development' : 'production',
+      NODE_ENV: 'production',
       DESKTOP_AUTH_SECRET: DESKTOP_SECRET,
       DATABASE_URL: `file:${path.join(app.getPath('userData'), 'scriptmanager.db')}`,
       SCRIPTS_DIR: path.join(app.getPath('userData'), 'user_scripts'),
