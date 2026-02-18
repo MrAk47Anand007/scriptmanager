@@ -1,0 +1,59 @@
+﻿# fly.toml — Fly.io deployment config for ScriptManager
+# Docs: https://fly.io/docs/reference/configuration/
+
+app = "scriptmanager-anand"   # ← CHANGE THIS to a globally-unique name on Fly.io
+primary_region = "sin"         # Singapore — change to "bom" (Mumbai) or "lax" (LA) if closer
+
+[build]
+  dockerfile = "Dockerfile"
+
+# ── Persistent volume mounts ──────────────────────────────────────────────────
+# These must match the volumes you created with `fly volumes create`
+[[mounts]]
+  source      = "sm_data"
+  destination = "/data/db"
+
+[[mounts]]
+  source      = "sm_scripts"
+  destination = "/data/scripts"
+
+[[mounts]]
+  source      = "sm_builds"
+  destination = "/data/builds"
+
+# ── HTTP service ──────────────────────────────────────────────────────────────
+[[services]]
+  protocol      = "tcp"
+  internal_port = 3000
+
+  [[services.ports]]
+    port     = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port     = 443
+    handlers = ["tls", "http"]
+
+  # Health check — hits the auth endpoint (always 200/204, never 5xx)
+  [[services.http_checks]]
+    interval     = "30s"
+    timeout      = "10s"
+    grace_period = "60s"
+    method       = "GET"
+    path         = "/api/auth/login"
+    protocol     = "http"
+
+# ── Environment (non-secret) ──────────────────────────────────────────────────
+# Secrets (SESSION_SECRET etc.) must be set with:  fly secrets set SESSION_SECRET="..."
+[env]
+  NODE_ENV     = "production"
+  PORT         = "3000"
+  DATABASE_URL = "file:/data/db/scriptmanager.db"
+  SCRIPTS_DIR  = "/data/scripts"
+  BUILDS_DIR   = "/data/builds"
+
+# ── VM size ───────────────────────────────────────────────────────────────────
+[[vm]]
+  memory   = "512mb"
+  cpu_kind = "shared"
+  cpus     = 1
