@@ -23,6 +23,25 @@ A self-hosted, local-first script manager — write, run, schedule, and organize
 
 ---
 
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Usage Guide](#usage-guide)
+- [CLI Usage](#cli-usage)
+- [Desktop App (Electron)](#desktop-app-electron)
+- [API Reference](#api-reference)
+- [Database Schema](#database-schema)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
 ## Features
 
 ### Core
