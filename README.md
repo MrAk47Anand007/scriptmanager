@@ -1,61 +1,186 @@
 # ScriptManager
 
-A self-hosted, local-first script manager for writing, running, scheduling, and organizing scripts — like n8n but for scripts.
+A self-hosted, local-first script manager — write, run, schedule, and organize scripts with a professional web UI. Think of it as **n8n for scripts**: automation without the complexity.
 
 ![ScriptManager UI](/screenshot.png)
 
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Usage Guide](#usage-guide)
+- [CLI Usage](#cli-usage)
+- [Desktop App (Electron)](#desktop-app-electron)
+- [API Reference](#api-reference)
+- [Database Schema](#database-schema)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
 ## Features
 
-- **Script Editor** — Professional styling with **Monaco Editor** (VS Code), supporting Python, JavaScript (Node), Shell, and custom interpreters.
-- **Integrated Terminal** — Full-featured web terminal (PowerShell/Bash) to install packages (`npm`, `pip`), run git commands, or manage your system alongside your scripts.
-- **Run & Stream** — Execute scripts with real-time console output streaming via WebSockets.
-- **File Management** — Organize scripts in named collections. **Configurable storage path** allows you to save scripts anywhere on your disk.
-- **Webhooks** — Trigger any script via a unique HTTP POST URL (great for IFTTT/Zapier integrations).
-- **Cron Scheduling** — Built-in cron scheduler to run scripts automatically.
-- **GitHub Gist Sync** — Backup and share scripts privately or publicly via GitHub Gists.
-- **Build History** — Persistent logs for every execution (success/failure status, duration, output).
-- **Dark Mode UI** — Sleek, responsive interface built with Shadcn UI and Tailwind CSS.
+### Core
+- **Monaco Editor** — Full VS Code-powered editor with syntax highlighting, autocomplete, and multi-language support (Python, JavaScript/Node.js, Shell/Bash, and custom interpreters).
+- **Real-time Output Streaming** — Script output streams live to the console via Server-Sent Events (SSE) and WebSockets; no page refresh needed.
+- **Build History** — Every execution is logged with status (`pending`, `running`, `success`, `failure`, `timeout`), duration, exit code, and full output. Logs are stored on disk and queryable via API.
+- **Integrated Web Terminal** — A full xterm.js + node-pty terminal (PowerShell on Windows, Bash on Linux/macOS) accessible directly in the browser. Install dependencies, run git commands, or manage your system — all without leaving the app.
+
+### Organization
+- **Collections** — Group scripts into named folders. Scripts can be moved between collections with drag-and-drop.
+- **Tags** — Color-coded labels for filtering and categorizing scripts. Tags are created on the fly and reusable across scripts.
+- **Script Templates** — Built-in and custom starter templates (Python, JavaScript, Bash) to scaffold new scripts instantly.
+- **Script Duplication** — Clone any script with one click.
+
+### Automation
+- **Webhooks** — Every script gets a unique HTTP POST endpoint. Send a request from IFTTT, Zapier, GitHub Actions, or any HTTP client to trigger execution. Supports optional HMAC-SHA256 signature verification (GitHub-compatible).
+- **Cron Scheduling** — Built-in cron scheduler. Enter any standard cron expression and the server executes your script automatically. Next-run time displayed in the UI.
+- **Script Parameters** — Define typed, named parameters per script. Parameters are injected as environment variables at runtime and can be supplied via the UI, CLI, or webhook payload.
+- **Environment Variables** — Per-script environment variables (with optional secret masking) stored securely in the database.
+- **Execution Timeout** — Configurable timeout per script (or global default) to prevent runaway processes.
+
+### Sync & Backup
+- **GitHub Gist Sync** — Automatically sync any script to a private or public GitHub Gist on every save. One-click force-sync and the ability to unlink Gists are also supported.
+- **Version History** — Keeps the last 10 snapshots of each script's content. Restore any prior version from the UI.
+
+### Auth & Security
+- **Password Authentication** — Session-based login with HMAC-signed cookies (`sm_session`). Sessions have configurable expiry.
+- **Electron Desktop Bypass** — A secure ephemeral `DESKTOP_AUTH_SECRET` token is used when running as a packaged desktop app, so no login prompt appears.
+- **Webhook Signature Verification** — Optional HMAC-SHA256 request signing (compatible with GitHub webhook format) to validate incoming webhook calls.
+
+### UI & UX
+- **Dark Mode** — Sleek dark-first interface built with Shadcn UI + Tailwind CSS.
+- **Drag-and-drop** — Reorder scripts and move them between collections using `@dnd-kit`.
+- **Responsive Layout** — Works on desktop and tablet viewports.
+- **Context Menus** — Right-click on any script for quick actions (run, rename, duplicate, delete, move).
+
+---
 
 ## Tech Stack
 
-- **Framework**: Next.js 15 (App Router)
-- **Database**: SQLite + Prisma (Zero config, local file)
-- **State Management**: Redux Toolkit
-- **Terminal**: xterm.js + node-pty
-- **UI**: React + Tailwind CSS + Lucide Icons + Radix UI
+| Layer | Technology |
+|---|---|
+| Framework | [Next.js 15](https://nextjs.org/) (App Router) |
+| Language | TypeScript |
+| Database | SQLite via [Prisma ORM](https://www.prisma.io/) |
+| State Management | [Redux Toolkit](https://redux-toolkit.js.org/) |
+| Editor | [@monaco-editor/react](https://github.com/suren-atoyan/monaco-react) |
+| Terminal | [xterm.js](https://xtermjs.org/) + [node-pty](https://github.com/microsoft/node-pty) |
+| WebSocket Server | [ws](https://github.com/websockets/ws) |
+| UI Components | [Radix UI](https://www.radix-ui.com/) + [Shadcn UI](https://ui.shadcn.com/) |
+| Styling | Tailwind CSS |
+| Icons | [Lucide React](https://lucide.dev/) |
+| Drag & Drop | [@dnd-kit](https://dndkit.com/) |
+| Desktop | [Electron](https://www.electronjs.org/) + [electron-builder](https://www.electron.build/) |
+| Scheduling | [node-cron](https://www.npmjs.com/package/node-cron) |
+| HTTP Client | [axios](https://axios-http.com/) |
+
+---
+
+## Project Structure
+
+```
+scriptmanager/
+├── cli/
+│   └── sm.mjs                  # CLI entry point (sm run, sm list, sm logs)
+├── electron/
+│   ├── main.ts                 # Electron main process (spawns server, manages window)
+│   ├── preload.ts              # Context bridge (security)
+│   └── tsconfig.json
+├── prisma/
+│   ├── schema.prisma           # Database schema
+│   └── migrations/             # SQL migration history
+├── public/                     # Static assets
+├── src/
+│   ├── app/                    # Next.js App Router pages & API routes
+│   │   ├── api/
+│   │   │   ├── auth/           # Login / logout
+│   │   │   ├── builds/         # Build logs, output, SSE streaming
+│   │   │   ├── collections/    # Script collections CRUD
+│   │   │   ├── env/            # Per-script environment variables
+│   │   │   ├── scripts/        # Scripts CRUD, run, schedule, gist, webhook, tags, versions
+│   │   │   ├── settings/       # Global app settings
+│   │   │   ├── tags/           # Global tag management
+│   │   │   ├── templates/      # Script templates CRUD
+│   │   │   └── webhooks/       # Unauthenticated webhook trigger endpoint
+│   │   └── (pages)/            # UI pages (login, main app)
+│   ├── components/             # React UI components
+│   │   └── ScriptsManager.tsx  # Main app shell
+│   ├── features/
+│   │   └── scripts/
+│   │       └── scriptsSlice.ts # Redux slice (scripts, builds, collections, env vars, etc.)
+│   ├── lib/
+│   │   ├── db.ts               # Prisma client singleton
+│   │   ├── gistService.ts      # GitHub Gist sync logic
+│   │   ├── scriptRunner.ts     # Script execution engine (async, streaming, timeout)
+│   │   ├── scheduler.ts        # Cron scheduler
+│   │   ├── socketService.ts    # WebSocket terminal server (node-pty)
+│   │   └── types.ts            # Shared TypeScript types
+│   └── middleware.ts           # Auth middleware (session validation, route protection)
+├── server.ts                   # Custom Express-compatible server (WebSockets + Next.js)
+├── .env                        # Environment variables
+├── package.json
+└── tsconfig.json
+```
+
+---
 
 ## Quick Start
 
 ### Prerequisites
 
 - **Node.js 18+**
-- **Python 3** (if running Python scripts)
-- **Windows/Linux/Mac** supported
+- **Python 3** — required if you plan to run Python scripts
+- **Windows, Linux, or macOS** — all supported
 
-### Installation
+> **Windows note:** If you see errors related to `node-pty` during `npm install`, run:
+> ```bash
+> npm install --global --production windows-build-tools
+> ```
 
-1.  **Install dependencies**
-    ```bash
-    npm install
-    # On Windows, if you encounter errors with node-pty, ensure you have build tools:
-    # npm install --global --production windows-build-tools
-    ```
+### 1. Install Dependencies
 
-2.  **Setup Database**
-    ```bash
-    # Generate Prisma Client
-    npm run db:generate
+```bash
+npm install
+```
 
-    # Run Migrations (creates ./data/scriptmanager.db)
-    npm run db:migrate
-    ```
+### 2. Set Up the Database
 
-3.  **Start Server**
-    ```bash
-    npm run dev
-    ```
+```bash
+# Generate the Prisma client
+npm run db:generate
 
-    Open [http://localhost:3000](http://localhost:3000)
+# Apply migrations (creates ./data/scriptmanager.db)
+npm run db:migrate
+```
+
+### 3. Configure Environment
+
+Create a `.env` file in the project root:
+
+```env
+# Required: SQLite database path
+DATABASE_URL="file:./data/scriptmanager.db"
+
+# Optional: change the port (default: 3000)
+PORT=3000
+
+# Optional: session secret for cookie signing (change in production!)
+SESSION_SECRET="your-secret-here"
+```
+
+### 4. Start the Development Server
+
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser. You'll be prompted to log in.
 
 ### Production Build
 
@@ -64,46 +189,296 @@ npm run build
 npm start
 ```
 
+---
+
 ## Configuration
 
-You can configure the application via the **Settings** tab in the UI, or by setting environment variables in `.env`.
+### Application Settings (UI)
 
-### UI Settings
-- **GitHub Token**: For Gist syncing.
-- **Script Storage Path**: Choose a custom folder on your disk to store scripts (defaults to `./user_scripts`).
+Navigate to the **Settings** tab in the UI to configure:
 
-### Environment Variables (.env)
-```env
-# Database connection
-DATABASE_URL="file:./data/scriptmanager.db"
+| Setting | Description |
+|---|---|
+| Admin Password | Password used to log into the web UI |
+| GitHub Token | Personal access token for GitHub Gist sync (`gist` scope required) |
+| Script Storage Path | Directory where script files are saved (default: `./user_scripts`) |
+| Default Gist Sync | Whether new scripts sync to Gist by default |
+| Global Execution Timeout | Default script timeout in milliseconds |
 
-# Server Port
-PORT=3000
-```
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `file:./data/scriptmanager.db` | Prisma database connection string |
+| `PORT` | `3000` | HTTP server port |
+| `SESSION_SECRET` | `scriptmanager-dev-secret-change-me` | HMAC secret for session cookies |
+| `DESKTOP_AUTH_SECRET` | _(auto-generated)_ | Electron desktop authentication secret |
+| `SCRIPTS_DIR` | `./user_scripts` | Override script storage directory |
+| `BUILDS_DIR` | `./builds` | Override build log directory |
+
+---
 
 ## Usage Guide
 
-### Running Scripts
-- Click **Run** to execute immediately.
-- Output streams in real-time to the Console Output pane.
-- View past runs in the **Build History** sidebar.
+### Writing & Running Scripts
 
-### Using the Terminal
-- Click **Open Terminal** in the Console Output header.
-- A fully functional terminal will appear below the editor.
-- Use it to install dependencies: `pip install pandas` or `npm install axios`.
-- Minimize it to keep it running in the background.
+1. Click **New Script** in the sidebar.
+2. Choose a language (Python, JavaScript, Shell, or Custom interpreter).
+3. Write your code in the Monaco editor.
+4. Click **Run** — output streams live to the Console pane below the editor.
+5. Click **Save** (or use `Ctrl+S`) to persist your changes.
+
+### Script Parameters
+
+Parameters allow you to pass dynamic values to scripts at runtime:
+
+1. Open the **Parameters** panel in the sidebar.
+2. Add parameters with a name, type (`string`, `number`, `boolean`), and optional default value.
+3. When running manually, a dialog prompts for parameter values.
+4. Parameters are injected as environment variables (e.g., a param named `my_input` becomes `$MY_INPUT`).
+
+### Environment Variables
+
+Per-script environment variables are stored in the database:
+
+1. Open **Env Vars** in the sidebar for the active script.
+2. Add key/value pairs. Mark sensitive values as **Secret** to mask them in the UI.
+3. All env vars are automatically available to the script at runtime.
+
+### Build History
+
+- Every run (manual, scheduled, or webhook-triggered) creates a **Build** record.
+- View past builds in the **Build History** panel.
+- Click any build to see its full output log.
+- Builds display status, triggered-by source, start/end times, and exit code.
+
+### Integrated Terminal
+
+- Click **Open Terminal** in the Console header.
+- A full interactive terminal (PowerShell/Bash) appears in the browser.
+- Use it to install packages (`pip install pandas`, `npm install axios`), run git, or debug your environment.
+- The terminal persists across script switches and can be minimized.
+
+### Collections & Tags
+
+- **Collections:** Click the folder icon or right-click a script to move it to a collection. Create and delete collections from the sidebar.
+- **Tags:** Add color-coded tags to any script. Filter the sidebar by tag to find scripts quickly.
 
 ### Webhooks
-- Every script has a unique **Webhook URL** shown in the sidebar.
-- Send a `POST` request to trigger it.
-- **Payloads**: Any JSON body sent to the webhook is available to the script via environment variables or arguments (depending on implementation).
 
-### Scheduling
-- Enable the **Schedule** toggle.
-- Enter a standard cron expression (e.g., `*/15 * * * *` for every 15 mins).
-- The server will run the script automatically as long as it's running.
+Each script has a unique webhook URL:
+
+```
+POST http://your-host:3000/api/webhooks/{token}
+```
+
+- Trigger the script from any external service (IFTTT, Zapier, GitHub Actions, etc.).
+- The webhook endpoint is **unauthenticated** by design — the token acts as the secret.
+- **Signature Verification:** Enable HMAC-SHA256 signing in the script's Webhook panel. Send the `X-Hub-Signature-256` header (compatible with GitHub's webhook format) to validate requests.
+- **Payload:** The raw JSON body is passed to the script via `WEBHOOK_PAYLOAD` env var.
+- Regenerate the webhook token or secret at any time from the UI.
+
+### Cron Scheduling
+
+1. Open the **Schedule** panel for a script.
+2. Enter a valid cron expression (e.g., `*/15 * * * *` for every 15 minutes).
+3. Toggle **Enable**.
+4. The scheduler runs server-side; scripts execute automatically while the server is running.
+
+### GitHub Gist Sync
+
+1. Add your GitHub Personal Access Token in **Settings** (requires `gist` scope).
+2. Toggle **Sync to Gist** on any script.
+3. The script is pushed to a private Gist on every save.
+4. Use **Force Sync** to push immediately, or **Unlink Gist** to detach.
+
+### Version History
+
+- ScriptManager keeps the last 10 saved snapshots of every script.
+- Open the **Versions** panel to browse and restore any previous version.
+
+---
+
+## CLI Usage
+
+ScriptManager ships with `sm`, a command-line interface for running and managing scripts from your terminal.
+
+### Installation
+
+```bash
+# Run directly from the project
+node ./cli/sm.mjs --help
+
+# Or use the npm script alias
+npm run cli -- --help
+```
+
+### Configure the CLI
+
+```bash
+# Point the CLI at your running ScriptManager instance
+sm config set baseUrl http://localhost:3000
+sm config set apiKey <your-session-token>
+```
+
+### Commands
+
+```bash
+# List all scripts
+sm list
+
+# Run a script (streams output to stdout)
+sm run "My Script Name"
+
+# Run with parameters
+sm run "My Script" --param KEY=value --param OTHER=value
+
+# View the latest build log for a script
+sm logs "My Script Name"
+```
+
+The CLI authenticates using the same session mechanism as the web UI and streams SSE output directly to your terminal.
+
+---
+
+## Desktop App (Electron)
+
+ScriptManager can be packaged as a native desktop application using Electron.
+
+### Development Mode
+
+```bash
+npm run electron:dev
+```
+
+This starts both the Next.js server and Electron concurrently. The desktop window bypasses web authentication using a shared `DESKTOP_AUTH_SECRET`.
+
+### Build a Distributable
+
+```bash
+# Package without installer (for local testing)
+npm run electron:pack
+
+# Build full installers (NSIS on Windows, DMG on macOS, AppImage on Linux)
+npm run electron:build
+```
+
+Built artifacts are output to the `release/` directory.
+
+### How it Works
+
+- In production, Electron spawns the standalone Next.js server on port `3141`.
+- An ephemeral `DESKTOP_AUTH_SECRET` is generated each launch and injected as a session cookie, bypassing the password login screen.
+- The SQLite database and scripts are stored in the OS user data directory (`app.getPath('userData')`), so data persists across app updates.
+
+---
+
+## API Reference
+
+All routes (except `/api/webhooks/` and `/api/auth/`) require a valid session cookie.
+
+### Scripts
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/scripts` | List all scripts |
+| `POST` | `/api/scripts` | Create or update a script |
+| `GET` | `/api/scripts/:id` | Get script with content |
+| `DELETE` | `/api/scripts/:id` | Delete a script |
+| `POST` | `/api/scripts/:id/run` | Trigger a manual run |
+| `POST` | `/api/scripts/:id/duplicate` | Duplicate a script |
+| `GET` | `/api/scripts/:id/schedule` | Get schedule |
+| `PUT` | `/api/scripts/:id/schedule` | Save/update schedule |
+| `DELETE` | `/api/scripts/:id/schedule` | Delete schedule |
+| `GET` | `/api/scripts/:id/tags` | List script tags |
+| `POST` | `/api/scripts/:id/tags` | Add a tag |
+| `DELETE` | `/api/scripts/:id/tags?tagId=` | Remove a tag |
+| `GET` | `/api/scripts/:id/versions` | List version snapshots |
+| `GET` | `/api/scripts/:id/versions/:versionId` | Get a version's content |
+| `POST` | `/api/scripts/:id/gist/sync` | Force Gist sync |
+| `DELETE` | `/api/scripts/:id/gist` | Unlink Gist |
+| `POST` | `/api/scripts/:id/webhook/regenerate` | Regenerate webhook token |
+| `POST` | `/api/scripts/:id/webhook/secret` | Regenerate HMAC secret |
+| `PUT` | `/api/scripts/:id/webhook/secret` | Toggle signature requirement |
+| `PUT` | `/api/scripts/:id/move` | Move to a collection |
+
+### Builds
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/builds/:scriptId` | List builds for a script |
+| `GET` | `/api/builds/output/:scriptId/:buildId` | Get build output |
+| `GET` | `/api/builds/:buildId/stream` | Stream live output (SSE) |
+
+### Collections
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/collections` | List all collections |
+| `POST` | `/api/collections` | Create a collection |
+| `DELETE` | `/api/collections/:id` | Delete a collection |
+
+### Environment Variables
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/env/:scriptId` | List env vars for a script |
+| `POST` | `/api/env/:scriptId` | Create an env var |
+| `PUT` | `/api/env/:scriptId/:id` | Update an env var |
+| `DELETE` | `/api/env/:scriptId/:id` | Delete an env var |
+
+### Templates, Tags & Settings
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/templates` | List script templates |
+| `POST` | `/api/templates` | Create a template |
+| `GET` | `/api/tags` | List all tags |
+| `GET` | `/api/settings` | Get all settings |
+| `PUT` | `/api/settings` | Update settings |
+
+### Webhooks (unauthenticated)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/webhooks/:token` | Trigger a script by webhook token |
+| `GET` | `/api/webhooks/:token` | Check webhook info |
+
+### Auth
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/auth/login` | Log in (returns session cookie) |
+| `POST` | `/api/auth/logout` | Log out (clears session cookie) |
+
+---
+
+## Database Schema
+
+ScriptManager uses **SQLite** via Prisma with the following models:
+
+- **`Script`** — Core entity. Stores name, filename, language, interpreter, parameters (JSON), webhook token/secret, schedule cron, Gist metadata, collection link, and timeout.
+- **`Build`** — Execution record. Tracks status, triggered-by, log file path, start/finish times, and exit code.
+- **`Collection`** — Named folder for grouping scripts.
+- **`Tag`** / **`ScriptTag`** — Color-coded labels with a many-to-many join to scripts.
+- **`ScriptEnvVar`** — Per-script environment variables with optional secret masking.
+- **`ScriptVersion`** — Snapshot of script content at save time. Keeps last 10 per script.
+- **`ScriptTemplate`** — Reusable starter templates (built-in and user-created).
+- **`Setting`** — Key/value store for global application settings.
+
+---
+
+## Contributing
+
+1. Fork the repository and create a feature branch.
+2. Install dependencies: `npm install`
+3. Set up the database: `npm run db:migrate`
+4. Start the dev server: `npm run dev`
+5. Make your changes and add tests where appropriate.
+6. Open a pull request with a clear description of the change.
+
+---
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE) for details.
