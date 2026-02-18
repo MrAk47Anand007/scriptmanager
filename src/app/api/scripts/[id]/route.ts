@@ -31,7 +31,6 @@ export async function GET(
     created_at: script.createdAt.toISOString(),
     updated_at: script.updatedAt.toISOString(),
   })
-})
 }
 
 export async function DELETE(
@@ -69,6 +68,10 @@ export async function DELETE(
 
     // Delete from database
     await prisma.script.delete({ where: { id } })
+
+    // Invalidate script list cache
+    const { cache } = await import('@/lib/cache')
+    await cache.del('all_scripts')
 
     return NextResponse.json({ message: 'Script deleted successfully', id })
   } catch (error: any) {

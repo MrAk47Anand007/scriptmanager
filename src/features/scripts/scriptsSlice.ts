@@ -210,7 +210,7 @@ export const deleteScript = createAsyncThunk('scripts/deleteScript', async ({ id
     return id
 })
 
-export const saveScript = createAsyncThunk('scripts/saveScript', async (data: { id: string; name: string; content: string; sync_to_gist?: boolean; language?: string; interpreter?: string | null; parameters?: ScriptParameter[]; timeout_ms?: number | null }) => {
+export const saveScript = createAsyncThunk('scripts/saveScript', async (data: { id: string; name: string; content: string; sync_to_gist?: boolean; language?: string; interpreter?: string | null; parameters?: ScriptParameter[]; timeout_ms?: number | null; skipGist?: boolean }) => {
     const response = await axios.post('/api/scripts', data)
     return response.data
 })

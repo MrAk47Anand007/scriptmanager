@@ -62,6 +62,7 @@ export const ScriptsManager = () => {
     const [scriptLanguage, setScriptLanguage] = useState('python');
     const [customInterpreter, setCustomInterpreter] = useState('');
     const [isGistSyncing, setIsGistSyncing] = useState(false);
+    const [gistDirty, setGistDirty] = useState(false);
 
     const [isTerminalOpen, setIsTerminalOpen] = useState(false);
     const [isTerminalMinimized, setIsTerminalMinimized] = useState(false);
@@ -131,7 +132,7 @@ export const ScriptsManager = () => {
         }
     }, [currentBuildOutput]);
 
-    const handleSave = async () => {
+    const handleSave = async (options: { skipGist?: boolean } = {}) => {
         if (activeScriptId) {
             const script = scripts.find(s => s.id === activeScriptId);
             if (script) {
@@ -145,16 +146,21 @@ export const ScriptsManager = () => {
                     interpreter: scriptLanguage === 'custom' ? customInterpreter : null,
                     parameters: scriptParameters,
                     timeout_ms: timeoutMs,
+                    skipGist: options.skipGist
                 }));
+
                 if (saveScript.fulfilled.match(result)) {
                     // Refresh version list after save
                     dispatch(fetchVersions(activeScriptId));
+                    if (!options.skipGist) {
+                        setGistDirty(false);
+                    }
                 }
             }
         }
     };
 
-    // Auto-save effect
+    // Auto-save effect (Local DB only)
     useEffect(() => {
         if (!autoSaveEnabled || !activeScriptId || saveStatus === 'saving') return;
 
@@ -166,11 +172,44 @@ export const ScriptsManager = () => {
         if (savedContent === activeScriptContent) return; // Not dirty
 
         const timer = setTimeout(() => {
-            handleSave();
+            // Save locally, skip Gist
+            handleSave({ skipGist: true });
+            // Mark Gist as dirty if Gist sync is enabled
+            if (script.sync_to_gist) {
+                setGistDirty(true);
+            }
         }, 2000); // 2 seconds debounce
 
         return () => clearTimeout(timer);
     }, [activeScriptContent, autoSaveEnabled, activeScriptId, scripts, saveStatus, scriptLanguage, customInterpreter, scriptParameters, timeoutSecs]);
+
+    // Gist Sync Interval Effect (Every 10 mins)
+    useEffect(() => {
+        const timer = setInterval(() => {
+            if (activeScriptId && gistDirty) {
+                const script = scripts.find(s => s.id === activeScriptId);
+                if (script && script.sync_to_gist) {
+                    console.log('[Gist] Auto-syncing to Gist...');
+                    handleSave({ skipGist: false });
+                }
+            }
+        }, 10 * 60 * 1000); // 10 minutes
+
+        return () => clearInterval(timer);
+    }, [activeScriptId, gistDirty, scripts]);
+
+    // Sync Gist on unmount or script change
+    useEffect(() => {
+        return () => {
+            if (activeScriptId && gistDirty) {
+                const script = scripts.find(s => s.id === activeScriptId);
+                if (script && script.sync_to_gist) {
+                    console.log('[Gist] Syncing on close/change...');
+                    handleSave({ skipGist: false });
+                }
+            }
+        };
+    }, [activeScriptId, gistDirty /* scripts omitted to avoid stale closure issues, but might need ref ref pattern if strict */]);
 
     const toggleGistSync = async (enabled: boolean) => {
         if (enabled && !settings['github_token']) {
@@ -492,7 +531,7 @@ export const ScriptsManager = () => {
                                 >
                                     <Download className="h-3 w-3" />
                                 </Button>
-                                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleSave} disabled={saveStatus === 'saving'}>
+                                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => handleSave({ skipGist: false })} disabled={saveStatus === 'saving'}>
                                     <Save className="h-3 w-3" />
                                     {saveStatus === 'saving' ? 'Saving...' : 'Save'}
                                 </Button>

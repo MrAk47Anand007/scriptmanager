@@ -5,7 +5,14 @@ import { syncScriptToGist } from '@/lib/gistService'
 import fs from 'fs'
 import { v4 as uuidv4 } from 'uuid'
 
+import { cache } from '@/lib/cache'
+
 export async function GET() {
+  const cachedScripts = await cache.get('all_scripts')
+  if (cachedScripts) {
+    return NextResponse.json(cachedScripts)
+  }
+
   const scripts = await prisma.script.findMany({
     orderBy: { name: 'asc' },
     include: { collection: true, tags: { include: { tag: true } } }
@@ -36,11 +43,16 @@ export async function GET() {
     webhook_secret_set: !!s.webhookSecret,
   }))
 
+  await cache.set('all_scripts', result, 60 * 5) // Cache for 5 mins
+
   return NextResponse.json(result)
 }
 
 export async function POST(req: Request) {
   const data = await req.json()
+  // Invalidate cache on create/update
+  await cache.del('all_scripts')
+
   const { id, name, content, sync_to_gist, language, interpreter, parameters, timeout_ms } = data
 
   // Serialize parameters to JSON string for storage
@@ -138,8 +150,8 @@ export async function POST(req: Request) {
     })
   }
 
-  // Sync to GitHub Gist if enabled
-  if (script.syncToGist && content !== undefined) {
+  // Sync to GitHub Gist if enabled (unless skipped)
+  if (script.syncToGist && content !== undefined && !data.skipGist) {
     try {
       await syncScriptToGist(script, content ?? '')
       script = await prisma.script.findUnique({ where: { id: script.id }, include: { collection: true } }) ?? script
