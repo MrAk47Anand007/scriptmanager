@@ -1,0 +1,43 @@
+﻿# Dependencies — installed fresh inside Docker
+node_modules
+npm-debug.log*
+
+# Next.js build output — rebuilt inside Docker
+.next
+out
+
+# Electron — not needed in Docker
+dist-electron
+release
+electron
+
+# Runtime data — mounted as volumes
+data
+user_scripts
+builds
+
+# Git & IDE
+.git
+.gitignore
+.vscode
+.idea
+.claude
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Env files — injected via docker compose environment:
+.env
+.env.local
+.env*.local
+
+# Docs & scripts that aren't part of the app
+README.md
+LICENSE
+install.sh
+install.ps1
+nginx
+
+# TypeScript build caches
+*.tsbuildinfo
