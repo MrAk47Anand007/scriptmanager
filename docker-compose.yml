@@ -1,0 +1,41 @@
+﻿# =============================================================================
+# ScriptManager — Docker Compose (local / development)
+# Usage: docker compose up -d
+# =============================================================================
+name: scriptmanager
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    image: scriptmanager:latest
+    container_name: scriptmanager
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: "file:/data/db/scriptmanager.db"
+      SCRIPTS_DIR: "/data/scripts"
+      BUILDS_DIR: "/data/builds"
+      # IMPORTANT: set a strong secret — do not use the default in production
+      SESSION_SECRET: "${SESSION_SECRET:-change-me-please-use-a-strong-secret}"
+    volumes:
+      # Persistent data: database, user scripts, build logs
+      - scriptmanager_db:/data/db
+      - scriptmanager_scripts:/data/scripts
+      - scriptmanager_builds:/data/builds
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:3000/api/auth/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  scriptmanager_db:
+  scriptmanager_scripts:
+  scriptmanager_builds:
