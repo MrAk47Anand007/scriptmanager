@@ -1,0 +1,67 @@
+﻿# =============================================================================
+# ScriptManager — Production Docker Compose
+# Usage:
+#   1. Copy .env.example to .env and fill in values
+#   2. docker compose -f docker-compose.prod.yml up -d
+# =============================================================================
+name: scriptmanager-prod
+
+services:
+  app:
+    image: scriptmanager:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    container_name: scriptmanager_app
+    restart: always
+    # Do NOT expose port directly — Nginx proxies to it
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: "file:/data/db/scriptmanager.db"
+      SCRIPTS_DIR: "/data/scripts"
+      BUILDS_DIR: "/data/builds"
+      SESSION_SECRET: "${SESSION_SECRET}"
+    volumes:
+      - scriptmanager_db:/data/db
+      - scriptmanager_scripts:/data/scripts
+      - scriptmanager_builds:/data/builds
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:3000/api/auth/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - internal
+
+  nginx:
+    image: nginx:alpine
+    container_name: scriptmanager_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Mount your SSL certs here (e.g. from Certbot / Let's Encrypt)
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - internal
+
+volumes:
+  scriptmanager_db:
+  scriptmanager_scripts:
+  scriptmanager_builds:
+  nginx_logs:
+
+networks:
+  internal:
+    driver: bridge
