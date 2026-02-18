@@ -84,13 +84,13 @@ export function EnvVarsPanel({ envVars, onAdd, onDelete, disabled }: Props) {
                     {envVars.map(v => (
                         <div
                             key={v.key}
-                            className="border border-slate-200 rounded px-2 py-1.5 bg-slate-50 flex items-center gap-1"
+                            className="border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 bg-slate-50 dark:bg-slate-900 flex items-center gap-1"
                         >
                             <div className="flex-1 min-w-0 space-y-0.5">
                                 <div className="flex items-center gap-1">
-                                    <span className="text-[10px] font-mono font-semibold text-slate-700 truncate">{v.key}</span>
+                                    <span className="text-[10px] font-mono font-semibold text-slate-700 dark:text-slate-300 truncate">{v.key}</span>
                                     {v.is_secret && (
-                                        <span className="text-[9px] bg-amber-100 text-amber-700 rounded px-1 font-medium">secret</span>
+                                        <span className="text-[9px] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded px-1 font-medium">secret</span>
                                     )}
                                 </div>
                                 <div className="flex items-center gap-1">
@@ -99,7 +99,7 @@ export function EnvVarsPanel({ envVars, onAdd, onDelete, disabled }: Props) {
                                             {revealed[v.key] ? '(secret — stored securely)' : '••••••••'}
                                         </span>
                                     ) : (
-                                        <span className="text-[10px] font-mono text-slate-500 flex-1 truncate">{v.value || <em className="text-slate-300">empty</em>}</span>
+                                        <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400 flex-1 truncate">{v.value || <em className="text-slate-300">empty</em>}</span>
                                     )}
                                 </div>
                             </div>
@@ -133,10 +133,10 @@ export function EnvVarsPanel({ envVars, onAdd, onDelete, disabled }: Props) {
                     ))}
 
                     {isAdding && (
-                        <div className="border border-blue-200 rounded p-2 bg-blue-50/40 space-y-1.5">
+                        <div className="border border-blue-200 dark:border-blue-900/50 rounded p-2 bg-blue-50/40 dark:bg-blue-900/10 space-y-1.5">
                             <Input
                                 autoFocus
-                                className="h-6 text-xs font-mono"
+                                className="h-6 text-xs font-mono bg-white dark:bg-slate-950 dark:border-slate-600"
                                 placeholder="KEY_NAME"
                                 value={newKey}
                                 onChange={(e) => {
@@ -146,7 +146,7 @@ export function EnvVarsPanel({ envVars, onAdd, onDelete, disabled }: Props) {
                                 onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
                             />
                             <Input
-                                className="h-6 text-xs font-mono"
+                                className="h-6 text-xs font-mono bg-white dark:bg-slate-950 dark:border-slate-600"
                                 placeholder="value"
                                 type={newIsSecret ? 'password' : 'text'}
                                 value={newValue}

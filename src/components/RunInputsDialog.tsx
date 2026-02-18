@@ -98,7 +98,7 @@ export function RunInputsDialog({ open, parameters, onRun, onCancel }: Props) {
                                 </div>
                             ) : (
                                 <Input
-                                    className="h-7 text-xs font-mono"
+                                    className="h-7 text-xs font-mono bg-white dark:bg-slate-950 dark:border-slate-700"
                                     type={p.type === 'number' ? 'number' : 'text'}
                                     value={values[p.name] ?? ''}
                                     onChange={(e) => setValue(p.name, e.target.value)}

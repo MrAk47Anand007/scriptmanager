@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react';
-import Editor from '@monaco-editor/react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import Editor, { Monaco } from '@monaco-editor/react';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import dynamic from 'next/dynamic';
 
@@ -31,6 +31,7 @@ import { Input } from '@/components/ui/input';
 import { ScriptsSidebar } from './ScriptsSidebar';
 import { ParametersPanel } from './ParametersPanel';
 import { RunInputsDialog } from './RunInputsDialog';
+import { useTheme } from "next-themes";
 import type { ScriptParameter } from '@/lib/types';
 import {
     Select,
@@ -51,14 +52,16 @@ const LANGUAGE_OPTIONS = [
 
 export const ScriptsManager = () => {
     const dispatch = useAppDispatch();
-    const { items: scripts, collections, activeScriptId, activeScriptContent, builds, currentBuildOutput, saveStatus, schedule, contentStatus, runStatus, allTags, envVars } = useAppSelector((state) => state.scripts);
+    const { items: scripts, collections, activeScriptId, activeScriptContent, builds, currentBuildOutput, saveStatus, schedule, contentStatus, runStatus, allTags, envVars, autoSaveEnabled } = useAppSelector((state) => state.scripts);
     const { settings } = useAppSelector((state) => state.settings);
+    const { resolvedTheme } = useTheme();
     const consoleRef = useRef<HTMLDivElement>(null);
     const eventSourceRef = useRef<EventSource | null>(null);
     const [cronExpression, setCronExpression] = useState('');
     const [scheduleEnabled, setScheduleEnabled] = useState(false);
     const [scriptLanguage, setScriptLanguage] = useState('python');
     const [customInterpreter, setCustomInterpreter] = useState('');
+    const [isGistSyncing, setIsGistSyncing] = useState(false);
 
     const [isTerminalOpen, setIsTerminalOpen] = useState(false);
     const [isTerminalMinimized, setIsTerminalMinimized] = useState(false);
@@ -72,6 +75,7 @@ export const ScriptsManager = () => {
 
     // Webhook HMAC state
     const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+    const [isWebhookLoading, setIsWebhookLoading] = useState(false);
 
     // Initial data fetching is centralized in page.tsx
 
@@ -150,24 +154,47 @@ export const ScriptsManager = () => {
         }
     };
 
+    // Auto-save effect
+    useEffect(() => {
+        if (!autoSaveEnabled || !activeScriptId || saveStatus === 'saving') return;
+
+        // Check if dirty
+        const script = scripts.find(s => s.id === activeScriptId);
+        if (!script) return;
+
+        const savedContent = script.content || '';
+        if (savedContent === activeScriptContent) return; // Not dirty
+
+        const timer = setTimeout(() => {
+            handleSave();
+        }, 2000); // 2 seconds debounce
+
+        return () => clearTimeout(timer);
+    }, [activeScriptContent, autoSaveEnabled, activeScriptId, scripts, saveStatus, scriptLanguage, customInterpreter, scriptParameters, timeoutSecs]);
+
     const toggleGistSync = async (enabled: boolean) => {
         if (enabled && !settings['github_token']) {
             alert("Please configure your GitHub Token in Settings first.");
             return;
         }
 
-        if (activeScriptId) {
-            const script = scripts.find(s => s.id === activeScriptId);
-            if (script) {
-                await dispatch(saveScript({
-                    id: activeScriptId,
-                    name: script.name,
-                    content: activeScriptContent,
-                    sync_to_gist: enabled,
-                    language: scriptLanguage,
-                    interpreter: scriptLanguage === 'custom' ? customInterpreter : null
-                }));
+        try {
+            setIsGistSyncing(true);
+            if (activeScriptId) {
+                const script = scripts.find(s => s.id === activeScriptId);
+                if (script) {
+                    await dispatch(saveScript({
+                        id: activeScriptId,
+                        name: script.name,
+                        content: activeScriptContent,
+                        sync_to_gist: enabled,
+                        language: scriptLanguage,
+                        interpreter: scriptLanguage === 'custom' ? customInterpreter : null
+                    }));
+                }
             }
+        } finally {
+            setIsGistSyncing(false);
         }
     }
 
@@ -248,8 +275,132 @@ export const ScriptsManager = () => {
         ? `${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/${activeScript.webhook_token}`
         : 'No webhook generated yet';
 
+    // Monaco Editor IntelliSense Customization
+    const handleEditorDidMount = useCallback((editor: any, monaco: Monaco) => {
+        // Python Completion Provider
+        monaco.languages.registerCompletionItemProvider('python', {
+            provideCompletionItems: (model: any, position: any) => {
+                const word = model.getWordUntilPosition(position);
+                const range = {
+                    startLineNumber: position.lineNumber,
+                    endLineNumber: position.lineNumber,
+                    startColumn: word.startColumn,
+                    endColumn: word.endColumn,
+                };
+
+                const suggestions = [
+                    {
+                        label: 'def',
+                        kind: monaco.languages.CompletionItemKind.Snippet,
+                        insertText: 'def ${1:function_name}(${2:args}):\n\t${3:pass}',
+                        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                        documentation: 'Function definition',
+                        range,
+                    },
+                    {
+                        label: 'if',
+                        kind: monaco.languages.CompletionItemKind.Snippet,
+                        insertText: 'if ${1:condition}:\n\t${2:pass}',
+                        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                        documentation: 'If statement',
+                        range,
+                    },
+                    {
+                        label: 'for',
+                        kind: monaco.languages.CompletionItemKind.Snippet,
+                        insertText: 'for ${1:item} in ${2:iterable}:\n\t${3:pass}',
+                        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                        documentation: 'For loop',
+                        range,
+                    },
+                    {
+                        label: 'try',
+                        kind: monaco.languages.CompletionItemKind.Snippet,
+                        insertText: 'try:\n\t${1:pass}\nexcept ${2:Exception} as ${3:e}:\n\t${4:print(e)}',
+                        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                        documentation: 'Try/Except block',
+                        range,
+                    },
+                    {
+                        label: 'print',
+                        kind: monaco.languages.CompletionItemKind.Function,
+                        insertText: 'print(${1:object})',
+                        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                        documentation: 'Print to console',
+                        range,
+                    },
+                    {
+                        label: 'import',
+                        kind: monaco.languages.CompletionItemKind.Keyword,
+                        insertText: 'import ',
+                        documentation: 'Import module',
+                        range,
+                    },
+                    {
+                        label: 'from',
+                        kind: monaco.languages.CompletionItemKind.Keyword,
+                        insertText: 'from ${1:module} import ${2:submodule}',
+                        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                        documentation: 'From import',
+                        range,
+                    },
+                ];
+                return { suggestions };
+            },
+        });
+
+        // JavaScript Completion Provider
+        monaco.languages.registerCompletionItemProvider('javascript', {
+            provideCompletionItems: (model: any, position: any) => {
+                const word = model.getWordUntilPosition(position);
+                const range = {
+                    startLineNumber: position.lineNumber,
+                    endLineNumber: position.lineNumber,
+                    startColumn: word.startColumn,
+                    endColumn: word.endColumn,
+                };
+
+                const suggestions = [
+                    {
+                        label: 'console.log',
+                        kind: monaco.languages.CompletionItemKind.Snippet,
+                        insertText: 'console.log(${1:item});',
+                        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                        documentation: 'Log to console',
+                        range,
+                    },
+                    {
+                        label: 'function',
+                        kind: monaco.languages.CompletionItemKind.Snippet,
+                        insertText: 'function ${1:name}(${2:args}) {\n\t${3}\n}',
+                        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                        documentation: 'Function declaration',
+                        range,
+                    },
+                    {
+                        label: 'const',
+                        kind: monaco.languages.CompletionItemKind.Keyword,
+                        insertText: 'const ${1:name} = ${2:value};',
+                        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                        documentation: 'Constant declaration',
+                        range,
+                    },
+                    {
+                        label: 'if',
+                        kind: monaco.languages.CompletionItemKind.Snippet,
+                        insertText: 'if (${1:condition}) {\n\t${2}\n}',
+                        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                        documentation: 'If statement',
+                        range,
+                    },
+                ];
+                return { suggestions };
+            },
+        });
+    }, []);
+
     return (
-        <div className="flex h-screen bg-white">
+        <div className="flex h-screen bg-white dark:bg-slate-950">
             {/* Sidebar List */}
             <ScriptsSidebar />
 
@@ -257,9 +408,9 @@ export const ScriptsManager = () => {
             <div className="flex-1 flex flex-col min-w-0">
                 {activeScriptId ? (
                     <>
-                        <div className="border-b px-4 py-2 flex items-center justify-between bg-white">
+                        <div className="border-b px-4 py-2 flex items-center justify-between bg-white dark:bg-slate-950 dark:border-slate-800">
                             <div className="flex items-center gap-4">
-                                <span className="font-semibold text-sm text-slate-700">
+                                <span className="font-semibold text-sm text-slate-700 dark:text-slate-200">
                                     {scripts.find(s => s.id === activeScriptId)?.name}
                                 </span>
                                 <div className="flex items-center gap-2">
@@ -308,15 +459,25 @@ export const ScriptsManager = () => {
                                     </a>
                                 )}
 
-                                <div className="flex items-center gap-1.5 mr-2" title="Sync to GitHub Gist">
-                                    <Switch
-                                        id="gist-sync-toggle"
-                                        checked={activeScript?.sync_to_gist || false}
-                                        onCheckedChange={toggleGistSync}
-                                        className="h-4 w-7"
-                                    />
-                                    <Label htmlFor="gist-sync-toggle" className="text-[10px] text-slate-500 cursor-pointer">Gist</Label>
+                                <div className="flex flex-col items-center gap-1 mr-4" title="Sync to GitHub Gist">
+                                    {isGistSyncing ? (
+                                        <div className="h-4 flex items-center">
+                                            <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+                                        </div>
+                                    ) : (
+                                        <Switch
+                                            id="gist-sync-toggle"
+                                            checked={activeScript?.sync_to_gist || false}
+                                            onCheckedChange={toggleGistSync}
+                                            className="h-4 w-7"
+                                        />
+                                    )}
+                                    <Label htmlFor="gist-sync-toggle" className="text-[9px] text-slate-500 cursor-pointer">
+                                        {isGistSyncing ? 'Syncing' : 'Gist'}
+                                    </Label>
                                 </div>
+
+
 
                                 <Button
                                     size="sm"
@@ -356,15 +517,25 @@ export const ScriptsManager = () => {
                                                 scriptLanguage === 'shell' ? 'shell' :
                                                     scriptLanguage === 'python' ? 'python' : 'plaintext'
                                         }
-                                        theme="vs-dark"
+                                        theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
                                         value={activeScriptContent || ''}
                                         onChange={(value) => dispatch(updateActiveScriptContent(value || ''))}
+                                        onMount={handleEditorDidMount}
                                         options={{
                                             minimap: { enabled: false },
                                             fontSize: 14,
                                             scrollBeyondLastLine: false,
                                             automaticLayout: true,
                                             padding: { top: 16, bottom: 16 },
+                                            suggest: {
+                                                showWords: true,
+                                                showSnippets: true,
+                                            },
+                                            quickSuggestions: {
+                                                other: true,
+                                                comments: true,
+                                                strings: true,
+                                            },
                                         }}
                                     />
                                 )}
@@ -387,19 +558,37 @@ export const ScriptsManager = () => {
             </div>
 
             {/* Right Panel */}
-            <div className="w-96 border-l flex flex-col bg-slate-50 overflow-y-auto">
+            <div className="w-96 border-l dark:border-slate-800 flex flex-col bg-slate-50 dark:bg-slate-900 overflow-y-auto">
+                <div className="flex-none flex flex-col h-[250px] min-h-[200px] border-b">
+                    <div className="px-3 py-2 border-b bg-amber-50 dark:bg-slate-950 text-xs font-semibold text-amber-900/80 dark:text-slate-400 uppercase flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <Terminal className="h-3 w-3" /> Console Output
+                        </div>
+                        {(!isTerminalOpen || isTerminalMinimized) && (
+                            <Button variant="ghost" size="sm" className="h-5 text-[10px] text-amber-800/60 dark:text-slate-500 hover:text-amber-900 dark:hover:text-slate-300" onClick={() => { setIsTerminalOpen(true); setIsTerminalMinimized(false); }}>
+                                {isTerminalMinimized ? 'Restore Terminal' : 'Open Terminal'}
+                            </Button>
+                        )}
+                    </div>
+                    <div
+                        ref={consoleRef}
+                        className="flex-1 overflow-y-auto bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-300 p-3 font-mono text-xs whitespace-pre-wrap"
+                    >
+                        {currentBuildOutput || <span className="text-slate-600 italic">Ready...</span>}
+                    </div>
+                </div>
                 {activeScriptId && (
-                    <div className="p-4 border-b bg-white space-y-4">
+                    <div className="p-4 border-b dark:border-slate-800 bg-white dark:bg-slate-950 space-y-4">
                         <div>
                             <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1">
+                                <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1">
                                     <LinkIcon className="h-3 w-3" /> Webhook
                                 </h3>
                                 <Button variant="ghost" size="icon" className="h-5 w-5" onClick={handleRegenerateWebhook} title="Regenerate Token">
                                     <RefreshCw className="h-3 w-3 text-slate-400" />
                                 </Button>
                             </div>
-                            <div className="bg-slate-100 p-2 rounded border border-slate-200 text-[10px] font-mono break-all text-slate-600 select-all">
+                            <div className="bg-slate-100 dark:bg-slate-900 p-2 rounded border border-slate-200 dark:border-slate-700 text-[10px] font-mono break-all text-slate-600 dark:text-slate-400 select-all">
                                 {webhookUrl}
                             </div>
                             <p className="text-[10px] text-slate-400 mt-1">POST to this URL to trigger the script</p>
@@ -411,17 +600,26 @@ export const ScriptsManager = () => {
                                         <ShieldCheck className="h-3 w-3" />
                                         Require Signature
                                     </span>
-                                    <Switch
-                                        checked={activeScript?.require_webhook_signature ?? false}
-                                        onCheckedChange={async (checked) => {
-                                            if (!activeScriptId) return
-                                            const result = await dispatch(toggleWebhookSignature({ scriptId: activeScriptId, requireSignature: checked }))
-                                            if (toggleWebhookSignature.fulfilled.match(result) && result.payload.webhook_secret) {
-                                                setRevealedSecret(result.payload.webhook_secret)
-                                            }
-                                        }}
-                                        className="scale-75 origin-right"
-                                    />
+                                    {isWebhookLoading ? (
+                                        <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+                                    ) : (
+                                        <Switch
+                                            checked={activeScript?.require_webhook_signature ?? false}
+                                            onCheckedChange={async (checked) => {
+                                                if (!activeScriptId) return
+                                                setIsWebhookLoading(true)
+                                                try {
+                                                    const result = await dispatch(toggleWebhookSignature({ scriptId: activeScriptId, requireSignature: checked }))
+                                                    if (toggleWebhookSignature.fulfilled.match(result) && result.payload.webhook_secret) {
+                                                        setRevealedSecret(result.payload.webhook_secret)
+                                                    }
+                                                } finally {
+                                                    setIsWebhookLoading(false)
+                                                }
+                                            }}
+                                            className="scale-75 origin-right"
+                                        />
+                                    )}
                                 </div>
                                 <div className="flex items-center gap-1.5 mt-1.5">
                                     <span className="text-[10px] text-slate-500 flex items-center gap-1">
@@ -445,8 +643,8 @@ export const ScriptsManager = () => {
                                 </div>
                                 {revealedSecret && (
                                     <div className="mt-1.5">
-                                        <p className="text-[9px] text-amber-600 mb-1">⚠ Copy now — shown once only</p>
-                                        <div className="bg-amber-50 border border-amber-200 p-1.5 rounded text-[9px] font-mono break-all text-amber-800 select-all">
+                                        <p className="text-[9px] text-amber-600 dark:text-amber-500 mb-1">⚠ Copy now — shown once only</p>
+                                        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-1.5 rounded text-[9px] font-mono break-all text-amber-800 dark:text-amber-200 select-all">
                                             {revealedSecret}
                                         </div>
                                         <p className="text-[9px] text-slate-400 mt-1">
@@ -459,17 +657,17 @@ export const ScriptsManager = () => {
 
                         <div>
                             <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1">
+                                <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1">
                                     <Calendar className="h-3 w-3" /> Schedule
                                 </h3>
                                 <div className="flex items-center gap-2">
-                                    <span className="text-[10px] text-slate-500">{scheduleEnabled ? 'On' : 'Off'}</span>
+                                    <span className="text-[10px] text-slate-500 dark:text-slate-400">{scheduleEnabled ? 'On' : 'Off'}</span>
                                     <Switch checked={scheduleEnabled} onCheckedChange={setScheduleEnabled} className="scale-75 origin-right" />
                                 </div>
                             </div>
                             <div className="flex gap-2">
                                 <Input
-                                    className="h-7 text-xs font-mono"
+                                    className="h-7 text-xs font-mono bg-white dark:bg-slate-950 dark:border-slate-700"
                                     placeholder="Cron (e.g. */15 * * * *)"
                                     value={cronExpression}
                                     onChange={(e) => setCronExpression(e.target.value)}
@@ -487,11 +685,11 @@ export const ScriptsManager = () => {
                         <div>
                             <div className="flex items-center gap-1 mb-1.5">
                                 <Clock className="h-3 w-3 text-slate-400" />
-                                <h3 className="text-xs font-semibold text-slate-500 uppercase">Timeout</h3>
+                                <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Timeout</h3>
                             </div>
                             <div className="flex items-center gap-2">
                                 <Input
-                                    className="h-7 text-xs w-20"
+                                    className="h-7 text-xs w-20 bg-white dark:bg-slate-950 dark:border-slate-700"
                                     type="number"
                                     min="1"
                                     placeholder="30"
@@ -554,8 +752,8 @@ export const ScriptsManager = () => {
                     </div>
                 )}
 
-                <div className="h-1/3 flex flex-col border-b min-h-[150px]">
-                    <div className="px-3 py-2 border-b bg-slate-100 text-xs font-semibold text-slate-500 uppercase flex items-center gap-2">
+                <div className="h-1/3 flex flex-col border-b dark:border-slate-800 min-h-[150px]">
+                    <div className="px-3 py-2 border-b dark:border-slate-800 bg-slate-100 dark:bg-slate-900 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-2">
                         <Clock className="h-3 w-3" /> Build History
                     </div>
                     <div className="flex-1 overflow-y-auto">
@@ -563,16 +761,16 @@ export const ScriptsManager = () => {
                         {builds.map((build, index) => (
                             <div
                                 key={build.id}
-                                className="px-3 py-2 border-b border-slate-100 hover:bg-white cursor-pointer transition-colors"
+                                className="px-3 py-2 border-b border-slate-100 dark:border-slate-800 hover:bg-white dark:hover:bg-slate-800 cursor-pointer transition-colors"
                                 onClick={() => handleBuildClick(build.id)}
                             >
                                 <div className="flex items-center justify-between mb-1">
-                                    <span className="text-xs font-medium text-slate-700">#{builds.length - index}</span>
+                                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300">#{builds.length - index}</span>
                                     <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full uppercase tracking-wide",
-                                        build.status === 'success' ? "bg-green-100 text-green-700" :
-                                            build.status === 'failure' ? "bg-red-100 text-red-700" :
-                                                build.status === 'timeout' ? "bg-orange-100 text-orange-700" :
-                                                "bg-yellow-100 text-yellow-700"
+                                        build.status === 'success' ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400" :
+                                            build.status === 'failure' ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" :
+                                                build.status === 'timeout' ? "bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400" :
+                                                    "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400"
                                     )}>{build.status}</span>
                                 </div>
                                 <div className="flex items-center justify-between text-[10px] text-slate-400">
@@ -583,24 +781,7 @@ export const ScriptsManager = () => {
                         ))}
                     </div>
                 </div>
-                <div className="flex-1 flex flex-col min-h-[200px]">
-                    <div className="px-3 py-2 border-b bg-slate-950 text-xs font-semibold text-slate-400 uppercase flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <Terminal className="h-3 w-3" /> Console Output
-                        </div>
-                        {(!isTerminalOpen || isTerminalMinimized) && (
-                            <Button variant="ghost" size="sm" className="h-5 text-[10px] text-slate-500 hover:text-slate-300" onClick={() => { setIsTerminalOpen(true); setIsTerminalMinimized(false); }}>
-                                {isTerminalMinimized ? 'Restore Terminal' : 'Open Terminal'}
-                            </Button>
-                        )}
-                    </div>
-                    <div
-                        ref={consoleRef}
-                        className="flex-1 overflow-y-auto bg-slate-950 text-slate-300 p-3 font-mono text-xs whitespace-pre-wrap"
-                    >
-                        {currentBuildOutput || <span className="text-slate-600 italic">Ready...</span>}
-                    </div>
-                </div>
+
             </div>
 
             {/* Run Inputs Dialog — shown when script has parameters */}

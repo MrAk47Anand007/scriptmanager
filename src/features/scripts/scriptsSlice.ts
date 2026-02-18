@@ -107,6 +107,8 @@ interface ScriptsState {
         nextRun: string | null;
         status: 'idle' | 'loading' | 'saved' | 'failed';
     };
+    // Auto-save state
+    autoSaveEnabled: boolean;
 }
 
 const initialState: ScriptsState = {
@@ -133,7 +135,8 @@ const initialState: ScriptsState = {
         enabled: false,
         nextRun: null,
         status: 'idle'
-    }
+    },
+    autoSaveEnabled: false
 }
 
 export const fetchScripts = createAsyncThunk('scripts/fetchScripts', async () => {
@@ -199,6 +202,11 @@ export const saveAsTemplate = createAsyncThunk(
 
 export const deleteTemplate = createAsyncThunk('scripts/deleteTemplate', async (id: string) => {
     await axios.delete(`/api/templates/${id}`)
+    return id
+})
+
+export const deleteScript = createAsyncThunk('scripts/deleteScript', async ({ id, deleteGist }: { id: string; deleteGist: boolean }) => {
+    await axios.delete(`/api/scripts/${id}?deleteGist=${deleteGist}`)
     return id
 })
 
@@ -368,7 +376,10 @@ const scriptsSlice = createSlice({
         },
         clearBuildOutput(state) {
             state.currentBuildOutput = ''
-        }
+        },
+        setAutoSaveEnabled: (state, action: PayloadAction<boolean>) => {
+            state.autoSaveEnabled = action.payload
+        },
     },
     extraReducers: (builder) => {
         builder
@@ -389,10 +400,13 @@ const scriptsSlice = createSlice({
             .addCase(fetchScriptContent.fulfilled, (state, action) => {
                 state.activeScriptContent = action.payload.content
                 state.contentStatus = 'succeeded'
-                // Merge parameters back into the items array so the UI can read them
-                if (action.payload.parameters) {
-                    const idx = state.items.findIndex(s => s.id === state.activeScriptId)
-                    if (idx !== -1) {
+
+                // Update the script in items list with the latest content so we can track dirty state
+                const idx = state.items.findIndex(s => s.id === state.activeScriptId)
+                if (idx !== -1) {
+                    state.items[idx].content = action.payload.content
+                    // Merge parameters back into the items array so the UI can read them
+                    if (action.payload.parameters) {
                         state.items[idx].parameters = action.payload.parameters
                     }
                 }
@@ -473,6 +487,14 @@ const scriptsSlice = createSlice({
                         script.collection_id = null
                     }
                 })
+            })
+            // Delete Script
+            .addCase(deleteScript.fulfilled, (state, action) => {
+                state.items = state.items.filter(i => i.id !== action.payload)
+                if (state.activeScriptId === action.payload) {
+                    state.activeScriptId = null
+                    state.activeScriptContent = ''
+                }
             })
             .addCase(moveScript.fulfilled, (state, action) => {
                 const script = state.items.find(s => s.id === action.payload.scriptId)
@@ -600,9 +622,15 @@ const scriptsSlice = createSlice({
             .addCase(fetchVersions.rejected, (state) => {
                 state.versionsStatus = 'failed'
             })
-            // fetchVersionContent doesn't need to update global state — used locally in the component
+        // fetchVersionContent doesn't need to update global state — used locally in the component
     }
 })
 
-export const { setActiveScript, updateActiveScriptContent, appendBuildOutput, clearBuildOutput } = scriptsSlice.actions
+export const {
+    setActiveScript,
+    updateActiveScriptContent,
+    appendBuildOutput,
+    clearBuildOutput,
+    setAutoSaveEnabled
+} = scriptsSlice.actions
 export default scriptsSlice.reducer

@@ -94,14 +94,14 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
         <div className="border rounded-lg overflow-hidden">
             {/* Header */}
             <button
-                className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+                className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-left"
                 onClick={handleToggle}
             >
-                <span className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                    <History className="h-4 w-4 text-slate-500" />
+                <span className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                    <History className="h-4 w-4 text-slate-500 dark:text-slate-400" />
                     Version History
                     {versions.length > 0 && (
-                        <span className="text-xs bg-slate-200 text-slate-600 rounded-full px-1.5 py-0.5">
+                        <span className="text-xs bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-full px-1.5 py-0.5">
                             {versions.length}
                         </span>
                     )}
@@ -114,7 +114,7 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
             </button>
 
             {isOpen && (
-                <div className="border-t">
+                <div className="border-t dark:border-slate-800">
                     {versionsStatus === 'loading' && (
                         <div className="flex justify-center items-center py-6">
                             <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
@@ -128,15 +128,15 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
                     )}
 
                     {versionsStatus === 'succeeded' && versions.length > 0 && (
-                        <ul className="divide-y">
+                        <ul className="divide-y dark:divide-slate-800">
                             {versions.map(v => (
                                 <li key={v.id}>
                                     <button
-                                        className={`w-full flex items-center justify-between px-4 py-2.5 hover:bg-slate-50 transition-colors text-left ${selectedVersion?.id === v.id ? 'bg-blue-50' : ''}`}
+                                        className={`w-full flex items-center justify-between px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors text-left ${selectedVersion?.id === v.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
                                         onClick={() => handleSelectVersion(v)}
                                     >
                                         <div>
-                                            <span className="text-xs font-medium text-slate-700">
+                                            <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
                                                 Snapshot #{v.snapshot_number}
                                             </span>
                                             <span className="ml-2 text-xs text-slate-400">
@@ -156,9 +156,9 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
 
                     {/* Diff view */}
                     {showDiff && selectedContent !== null && selectedVersion && (
-                        <div className="border-t">
-                            <div className="flex items-center justify-between px-4 py-2 bg-slate-50">
-                                <span className="text-xs text-slate-500">
+                        <div className="border-t dark:border-slate-800">
+                            <div className="flex items-center justify-between px-4 py-2 bg-slate-50 dark:bg-slate-900">
+                                <span className="text-xs text-slate-500 dark:text-slate-400">
                                     Snapshot #{selectedVersion.snapshot_number} vs Current
                                 </span>
                                 <div className="flex items-center gap-2">

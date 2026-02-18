@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { useAppDispatch, useAppSelector, useAppStore } from '@/store/hooks';
+import type { RootState } from '@/store/store';
 import {
     setActiveScript, createScript, createCollection, deleteCollection, moveScript,
-    saveAsTemplate, duplicateScript,
+    saveAsTemplate, duplicateScript, deleteScript,
 } from '@/features/scripts/scriptsSlice';
 import type { Script, Collection, ScriptTemplate } from '@/features/scripts/scriptsSlice';
 import { Button } from '@/components/ui/button';
@@ -12,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
     FileCode, Plus, Folder, MoreVertical, Trash2, ChevronRight, ChevronDown,
-    GripVertical, Search, LayoutTemplate, Copy,
+    GripVertical, Search, LayoutTemplate, Copy, Loader2,
 } from 'lucide-react';
 import { QuickSwitcher } from './QuickSwitcher';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
@@ -61,6 +62,22 @@ const GistSyncStatus = () => {
     );
 };
 
+const UnsavedIndicator = ({ scriptId }: { scriptId: string }) => {
+    const isDirty = useAppSelector((state) => {
+        if (state.scripts.activeScriptId !== scriptId) return false;
+        const script = state.scripts.items.find(s => s.id === scriptId);
+        if (!script) return false;
+        // If content is undefined in items, assume empty string.
+        // We compare activeScriptContent (current editor state) with script.content (saved state).
+        const saved = script.content || '';
+        const current = state.scripts.activeScriptContent || '';
+        return saved !== current;
+    });
+
+    if (!isDirty) return null;
+    return <span className="text-amber-500 ml-1 font-bold" title="Unsaved changes">*</span>;
+};
+
 // Draggable Script Component
 const DraggableScript = ({
     script,
@@ -68,12 +85,14 @@ const DraggableScript = ({
     onClick,
     onSaveAsTemplate,
     onDuplicate,
+    onDelete,
 }: {
     script: Script;
     isActive: boolean;
     onClick: () => void;
     onSaveAsTemplate: () => void;
     onDuplicate: () => void;
+    onDelete: () => void;
 }) => {
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
         id: script.id,
@@ -85,19 +104,18 @@ const DraggableScript = ({
             <ContextMenuTrigger asChild>
                 <div
                     ref={setNodeRef}
+                    style={{ opacity: isDragging ? 0.5 : 1 }}
                     {...attributes}
                     {...listeners}
                     onClick={onClick}
-                    style={{ opacity: isDragging ? 0.5 : 1 }}
                     className={cn(
-                        "flex items-center gap-2 px-2 py-1.5 text-sm font-medium rounded-md cursor-pointer transition-colors group",
-                        isActive
-                            ? "bg-white text-blue-600 shadow-sm border border-slate-200"
-                            : "text-slate-600 hover:bg-slate-200/50"
+                        "group flex items-center gap-2 px-2 py-1.5 rounded-md text-sm cursor-pointer transition-colors select-none",
+                        isActive ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
+                        isDragging && "opacity-50 bg-slate-50 dark:bg-slate-800"
                     )}
                 >
                     <FileCode className="h-3.5 w-3.5 flex-shrink-0" />
-                    <span className="truncate text-xs flex-1">{script.name}</span>
+                    <span className="truncate text-xs flex-1">{script.name}<UnsavedIndicator scriptId={script.id} /></span>
                     <GripVertical className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
             </ContextMenuTrigger>
@@ -107,6 +125,10 @@ const DraggableScript = ({
                 </ContextMenuItem>
                 <ContextMenuItem onClick={onSaveAsTemplate}>
                     <LayoutTemplate className="mr-2 h-4 w-4" /> Save as Template
+                </ContextMenuItem>
+                <DropdownMenuSeparator />
+                <ContextMenuItem className="text-red-600 focus:text-red-600" onClick={onDelete}>
+                    <Trash2 className="mr-2 h-4 w-4" /> Delete Script
                 </ContextMenuItem>
             </ContextMenuContent>
         </ContextMenu>
@@ -149,6 +171,15 @@ const DroppableCollection = ({
                         )}
                         <Folder className={cn("h-4 w-4", isOver ? "text-blue-500" : "text-slate-500")} />
                         <span className="truncate flex-1 text-slate-700">{collection.name}</span>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400"
+                            onClick={(e) => { e.stopPropagation(); onCreateScript(); }}
+                            title="New Script"
+                        >
+                            <Plus className="h-3.5 w-3.5" />
+                        </Button>
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                                 <Button variant="ghost" size="icon" className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
@@ -186,13 +217,15 @@ const DroppableCollection = ({
 
 export const ScriptsSidebar = () => {
     const dispatch = useAppDispatch();
+    const store = useAppStore();
     const {
         items: scripts,
         collections,
         activeScriptId,
-        activeScriptContent,
+        // Removed activeScriptContent to prevent re-renders on keystroke
         templates,
         allTags,
+        status,
     } = useAppSelector((state) => state.scripts);
     const [expandedCollections, setExpandedCollections] = useState<Record<string, boolean>>({});
     const [isCreatingCollection, setIsCreatingCollection] = useState(false);
@@ -221,6 +254,12 @@ export const ScriptsSidebar = () => {
     const [saveAsCategory, setSaveAsCategory] = useState('general');
     const [saveAsError, setSaveAsError] = useState('');
     const [saveAsLoading, setSaveAsLoading] = useState(false);
+
+    // Delete confirmation dialog state
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [scriptToDelete, setScriptToDelete] = useState<Script | null>(null);
+    const [deleteFromGist, setDeleteFromGist] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     const { settings } = useAppSelector((state) => state.settings);
 
@@ -251,6 +290,27 @@ export const ScriptsSidebar = () => {
         setExpandedCollections(prev => ({ ...prev, [id]: !prev[id] }));
     };
 
+    const handleDeleteScriptRequest = (script: Script) => {
+        setScriptToDelete(script);
+        setDeleteFromGist(script.sync_to_gist || !!script.gist_id);
+        setIsDeleteDialogOpen(true);
+    };
+
+    const confirmDeleteScript = async () => {
+        if (!scriptToDelete) return;
+
+        setIsDeleting(true);
+        try {
+            await dispatch(deleteScript({ id: scriptToDelete.id, deleteGist: deleteFromGist }));
+            setIsDeleteDialogOpen(false);
+            setScriptToDelete(null);
+        } catch (error) {
+            console.error('Failed to delete script:', error);
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
     const openCreateScriptDialog = (collectionId?: string) => {
         setParentCollectionId(collectionId || null);
         setIsCreateScriptOpen(true);
@@ -259,9 +319,26 @@ export const ScriptsSidebar = () => {
     const handleCreateScriptSubmit = async () => {
         if (!newScriptName.trim()) return;
 
+        let content = '';
+        let language = 'python';
+
+        const lowerName = newScriptName.toLowerCase();
+        if (lowerName.endsWith('.py')) {
+            language = 'python';
+            content = 'print("Hello World")';
+        } else if (lowerName.endsWith('.js') || lowerName.endsWith('.ts')) {
+            language = 'node';
+            content = 'console.log("Hello World");';
+        } else if (lowerName.endsWith('.sh')) {
+            language = 'shell';
+            content = '#!/bin/bash\necho "Hello World"';
+        }
+
         const result = await dispatch(createScript({
             name: newScriptName,
-            syncToGist: syncToGistOverride
+            syncToGist: syncToGistOverride,
+            content,
+            language
         }));
 
         if (createScript.fulfilled.match(result)) {
@@ -333,8 +410,9 @@ export const ScriptsSidebar = () => {
         try {
             // Get content: use active script content if this is the active script, else fetch
             let content: string
-            if (saveAsSourceScript.id === activeScriptId && activeScriptContent) {
-                content = activeScriptContent
+            const state = store.getState() as RootState; // Get latest state
+            if (saveAsSourceScript.id === activeScriptId && state.scripts.activeScriptContent) {
+                content = state.scripts.activeScriptContent
             } else {
                 const res = await axios.get(`/api/scripts/${saveAsSourceScript.id}`)
                 content = res.data.content ?? ''
@@ -430,281 +508,346 @@ export const ScriptsSidebar = () => {
 
     return (
         <>
-        <QuickSwitcher open={quickSwitcherOpen} onClose={() => setQuickSwitcherOpen(false)} />
-        <TemplatePickerDialog
-            open={isTemplatePickerOpen}
-            templates={templates}
-            onClose={() => setIsTemplatePickerOpen(false)}
-            onSelect={handleCreateFromTemplate}
-        />
-        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-            <div className="w-64 border-r flex flex-col bg-slate-50 h-full">
-                <div className="p-4 border-b flex items-center justify-between">
-                    <h2 className="font-semibold text-xs tracking-wider text-slate-500 uppercase">SCRIPTS</h2>
-                    <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="icon" className="h-6 w-6" title="Quick open (Ctrl+P)" onClick={() => setQuickSwitcherOpen(true)}>
-                            <Search className="h-3.5 w-3.5 text-slate-500" />
-                        </Button>
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-6 w-6">
-                                    <Plus className="h-4 w-4 text-slate-600" />
+            <QuickSwitcher open={quickSwitcherOpen} onClose={() => setQuickSwitcherOpen(false)} />
+            <TemplatePickerDialog
+                open={isTemplatePickerOpen}
+                templates={templates}
+                onClose={() => setIsTemplatePickerOpen(false)}
+                onSelect={handleCreateFromTemplate}
+            />
+            <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+                <div className="w-64 bg-white dark:bg-slate-950 border-r dark:border-slate-800 flex flex-col h-full">
+                    <div className="p-3 border-b dark:border-slate-800">
+                        <div className="flex items-center justify-between mb-2">
+                            <h2 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Scripts</h2>
+                            <div className="flex gap-1">
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setQuickSwitcherOpen(true)}>
+                                    <Search className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                                 </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => handleCreateScript()}>
-                                    <FileCode className="mr-2 h-4 w-4" /> New Script
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setIsTemplatePickerOpen(true)}>
-                                    <LayoutTemplate className="mr-2 h-4 w-4" /> New from Template
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => setIsCreatingCollection(true)}>
-                                    <Folder className="mr-2 h-4 w-4" /> New Collection
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    </div>
-                </div>
-
-                {/* Inline search bar */}
-                <div className="px-2 pt-2 pb-1">
-                    <div className="relative">
-                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 pointer-events-none" />
-                        <Input
-                            placeholder="Filter scripts…"
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="h-7 pl-6 text-xs bg-white"
-                        />
-                    </div>
-                    {/* Tag filter chips */}
-                    {allTags.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                            {allTags.map(tag => (
-                                <button
-                                    key={tag.id}
-                                    onClick={() => setSelectedTagId(selectedTagId === tag.id ? null : tag.id)}
-                                    className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium transition-all"
-                                    style={
-                                        selectedTagId === tag.id
-                                            ? { backgroundColor: tag.color, color: '#fff', border: `1px solid ${tag.color}` }
-                                            : { backgroundColor: tag.color + '22', color: tag.color, border: `1px solid ${tag.color}44` }
-                                    }
-                                >
-                                    {tag.name}
-                                </button>
-                            ))}
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" size="icon" className="h-6 w-6">
+                                            <Plus className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => handleCreateScript()}>
+                                            <FileCode className="mr-2 h-4 w-4" /> New Script
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => setIsTemplatePickerOpen(true)}>
+                                            <LayoutTemplate className="mr-2 h-4 w-4" /> New from Template
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem onClick={() => setIsCreatingCollection(true)}>
+                                            <Folder className="mr-2 h-4 w-4" /> New Collection
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </div>
                         </div>
-                    )}
-                </div>
 
-                {isCreatingCollection && (
-                    <div className="p-2 border-b bg-blue-50">
-                        <Input
-                            autoFocus
-                            placeholder="Collection Name"
-                            value={newCollectionName}
-                            onChange={(e) => setNewCollectionName(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleCreateCollection()}
-                            className="h-7 text-xs mb-2 bg-white"
-                        />
-                        <div className="flex gap-2">
-                            <Button size="sm" className="h-6 text-xs flex-1" onClick={handleCreateCollection}>Create</Button>
-                            <Button size="sm" variant="ghost" className="h-6 text-xs flex-1" onClick={() => setIsCreatingCollection(false)}>Cancel</Button>
-                        </div>
-                    </div>
-                )}
-
-                <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                    {searchQuery.trim() && filteredScripts.length === 0 && (
-                        <div className="px-2 py-6 text-xs text-slate-400 text-center italic">No scripts match "{searchQuery}"</div>
-                    )}
-                    {collections.map(collection => (
-                        <DroppableCollection
-                            key={collection.id}
-                            collection={collection}
-                            isExpanded={!!expandedCollections[collection.id]}
-                            toggle={() => toggleCollection(collection.id)}
-                            onDelete={() => handleDeleteCollection(collection.id)}
-                            onCreateScript={() => handleCreateScript(collection.id)}
-                        >
-                            {grouped.result[collection.id].length === 0 && !searchQuery.trim() && (
-                                <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
-                            )}
-                            {grouped.result[collection.id].map(script => (
-                                <DraggableScript
-                                    key={script.id}
-                                    script={script}
-                                    isActive={activeScriptId === script.id}
-                                    onClick={() => dispatch(setActiveScript(script.id))}
-                                    onSaveAsTemplate={() => openSaveAsTemplate(script)}
-                                    onDuplicate={() => dispatch(duplicateScript(script.id))}
-                                />
-                            ))}
-                        </DroppableCollection>
-                    ))}
-
-                    {grouped.unsorted.length > 0 && collections.length > 0 && (
-                        <div className="px-2 py-2 text-xs font-semibold text-slate-400 uppercase">Unsorted</div>
-                    )}
-                    {grouped.unsorted.map((script) => (
-                        <DraggableScript
-                            key={script.id}
-                            script={script}
-                            isActive={activeScriptId === script.id}
-                            onClick={() => dispatch(setActiveScript(script.id))}
-                            onSaveAsTemplate={() => openSaveAsTemplate(script)}
-                            onDuplicate={() => dispatch(duplicateScript(script.id))}
-                        />
-                    ))}
-                </div>
-
-                <div className="p-2 border-t bg-slate-50 text-xs text-slate-500 flex justify-between items-center">
-                    <span>
-                        Gist Sync: <GistSyncStatus />
-                    </span>
-                </div>
-            </div>
-            {typeof window !== 'undefined' && createPortal(
-                <DragOverlay>
-                    {activeDragScript && (
-                        <div className="flex items-center gap-2 px-2 py-1.5 text-sm font-medium rounded-md bg-white border border-slate-200 shadow-lg opacity-80 w-64">
-                            <FileCode className="h-3.5 w-3.5" />
-                            <span className="truncate text-xs">{activeDragScript.name}</span>
-                        </div>
-                    )}
-                </DragOverlay>,
-                document.body
-            )}
-
-            {/* Create new script dialog */}
-            <Dialog open={isCreateScriptOpen} onOpenChange={setIsCreateScriptOpen}>
-                <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>Create New Script</DialogTitle>
-                        <DialogDescription>
-                            Enter a name for your new script. It will be saved to your local scripts folder.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="flex flex-col gap-4 py-4">
-                        <div className="flex flex-col gap-2">
-                            <Label htmlFor="name" className="text-right text-left">
-                                Script Name
-                            </Label>
+                        {/* Inline search bar */}
+                        <div className="relative">
+                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 pointer-events-none" />
                             <Input
-                                id="name"
-                                placeholder="myscript.py"
-                                value={newScriptName}
-                                onChange={(e) => setNewScriptName(e.target.value)}
-                                autoFocus
-                                onKeyDown={(e) => e.key === 'Enter' && handleCreateScriptSubmit()}
+                                placeholder="Filter scripts..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="h-7 pl-8 text-xs bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700"
                             />
                         </div>
-                        <div className="flex items-center space-x-2">
-                            <Checkbox
-                                id="syncToGist"
-                                checked={syncToGistOverride}
-                                onCheckedChange={(checked) => setSyncToGistOverride(!!checked)}
+
+                        {/* Tag filter chips */}
+                        {allTags.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                                {allTags.map(tag => (
+                                    <button
+                                        key={tag.id}
+                                        onClick={() => setSelectedTagId(selectedTagId === tag.id ? null : tag.id)}
+                                        className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium transition-all"
+                                        style={
+                                            selectedTagId === tag.id
+                                                ? { backgroundColor: tag.color, color: '#fff', border: `1px solid ${tag.color}` }
+                                                : { backgroundColor: tag.color + '22', color: tag.color, border: `1px solid ${tag.color}44` }
+                                        }
+                                    >
+                                        {tag.name}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {isCreatingCollection && (
+                        <div className="p-2 border-b bg-blue-50 dark:bg-blue-900/20 dark:border-slate-800">
+                            <Input
+                                autoFocus
+                                placeholder="Collection Name"
+                                value={newCollectionName}
+                                onChange={(e) => setNewCollectionName(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleCreateCollection()}
+                                className="h-7 text-xs mb-2 bg-white dark:bg-slate-950 dark:border-slate-700"
                             />
-                            <label
-                                htmlFor="syncToGist"
-                                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                            <div className="flex gap-2">
+                                <Button size="sm" className="h-6 text-xs flex-1" onClick={handleCreateCollection}>Create</Button>
+                                <Button size="sm" variant="ghost" className="h-6 text-xs flex-1" onClick={() => setIsCreatingCollection(false)}>Cancel</Button>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                        {status === 'loading' && (
+                            <div className="flex justify-center p-4">
+                                <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+                            </div>
+                        )}
+                        {searchQuery.trim() && filteredScripts.length === 0 && status !== 'loading' && (
+                            <div className="px-2 py-6 text-xs text-slate-400 text-center italic">No scripts match "{searchQuery}"</div>
+                        )}
+                        {collections.map(collection => (
+                            <DroppableCollection
+                                key={collection.id}
+                                collection={collection}
+                                isExpanded={!!expandedCollections[collection.id]}
+                                toggle={() => toggleCollection(collection.id)}
+                                onDelete={() => handleDeleteCollection(collection.id)}
+                                onCreateScript={() => handleCreateScript(collection.id)}
                             >
-                                Sync to GitHub Gist
-                            </label>
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="secondary" onClick={() => setIsCreateScriptOpen(false)}>
-                            Cancel
-                        </Button>
-                        <Button onClick={handleCreateScriptSubmit} disabled={!newScriptName.trim()}>
-                            Create Script
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                                {grouped.result[collection.id].length === 0 && !searchQuery.trim() && (
+                                    <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
+                                )}
+                                {grouped.result[collection.id].map(script => (
+                                    <DraggableScript
+                                        key={script.id}
+                                        script={script}
+                                        isActive={activeScriptId === script.id}
+                                        onClick={() => dispatch(setActiveScript(script.id))}
+                                        onSaveAsTemplate={() => openSaveAsTemplate(script)}
+                                        onDuplicate={() => dispatch(duplicateScript(script.id))}
+                                        onDelete={() => handleDeleteScriptRequest(script)}
+                                    />
+                                ))}
+                            </DroppableCollection>
+                        ))}
 
-            {/* Save as Template dialog */}
-            <Dialog open={isSaveAsTemplateOpen} onOpenChange={setIsSaveAsTemplateOpen}>
-                <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <LayoutTemplate className="h-4 w-4 text-blue-500" />
-                            Save as Template
-                        </DialogTitle>
-                        <DialogDescription>
-                            Save &quot;{saveAsSourceScript?.name}&quot; as a reusable template.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="flex flex-col gap-3 py-2">
-                        <div className="flex flex-col gap-1.5">
-                            <Label htmlFor="tpl-name" className="text-xs">Template Name</Label>
-                            <Input
-                                id="tpl-name"
-                                placeholder="My Template"
-                                value={saveAsTemplateName}
-                                onChange={(e) => {
-                                    setSaveAsTemplateName(e.target.value)
-                                    if (saveAsError) setSaveAsError('')
-                                }}
-                                autoFocus
-                                className="h-8 text-xs"
+                        {grouped.unsorted.length > 0 && collections.length > 0 && (
+                            <div className="px-2 py-2 text-xs font-semibold text-slate-400 uppercase">Unsorted</div>
+                        )}
+                        {grouped.unsorted.map((script) => (
+                            <DraggableScript
+                                key={script.id}
+                                script={script}
+                                isActive={activeScriptId === script.id}
+                                onClick={() => dispatch(setActiveScript(script.id))}
+                                onSaveAsTemplate={() => openSaveAsTemplate(script)}
+                                onDuplicate={() => dispatch(duplicateScript(script.id))}
+                                onDelete={() => handleDeleteScriptRequest(script)}
                             />
-                            {saveAsError && (
-                                <p className="text-[10px] text-red-500">{saveAsError}</p>
-                            )}
-                        </div>
-                        <div className="flex flex-col gap-1.5">
-                            <Label htmlFor="tpl-desc" className="text-xs">Description <span className="text-slate-400 font-normal">(optional)</span></Label>
-                            <Input
-                                id="tpl-desc"
-                                placeholder="What does this template do?"
-                                value={saveAsDescription}
-                                onChange={(e) => setSaveAsDescription(e.target.value)}
-                                className="h-8 text-xs"
-                            />
-                        </div>
-                        <div className="flex flex-col gap-1.5">
-                            <Label htmlFor="tpl-category" className="text-xs">Category</Label>
-                            <Select value={saveAsCategory} onValueChange={setSaveAsCategory}>
-                                <SelectTrigger id="tpl-category" className="h-8 text-xs">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="general">general</SelectItem>
-                                    <SelectItem value="networking">networking</SelectItem>
-                                    <SelectItem value="filesystem">filesystem</SelectItem>
-                                    <SelectItem value="system">system</SelectItem>
-                                    <SelectItem value="data">data</SelectItem>
-                                    <SelectItem value="automation">automation</SelectItem>
-                                    <SelectItem value="other">other</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
+                        ))}
                     </div>
-                    <DialogFooter>
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            className="text-xs"
-                            onClick={() => setIsSaveAsTemplateOpen(false)}
-                        >
-                            Cancel
-                        </Button>
-                        <Button
-                            size="sm"
-                            className="text-xs"
-                            onClick={handleSaveAsTemplate}
-                            disabled={!saveAsTemplateName.trim() || saveAsLoading}
-                        >
-                            {saveAsLoading ? 'Saving…' : 'Save Template'}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-        </DndContext>
+
+                    <div className="p-2 border-t bg-slate-50 dark:bg-slate-900 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 flex justify-between items-center">
+                        <span>
+                            Gist Sync: <GistSyncStatus />
+                        </span>
+                    </div>
+                </div >
+                {
+                    typeof window !== 'undefined' && createPortal(
+                        <DragOverlay>
+                            {activeDragScript && (
+                                <div className="flex items-center gap-2 px-2 py-1.5 text-sm font-medium rounded-md bg-white border border-slate-200 shadow-lg opacity-80 w-64">
+                                    <FileCode className="h-3.5 w-3.5" />
+                                    <span className="truncate text-xs">{activeDragScript.name}</span>
+                                </div>
+                            )}
+                        </DragOverlay>,
+                        document.body
+                    )
+                }
+
+                {/* Create new script dialog */}
+                <Dialog open={isCreateScriptOpen} onOpenChange={setIsCreateScriptOpen}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Create New Script</DialogTitle>
+                            <DialogDescription>
+                                Enter a name for your new script. It will be saved to your local scripts folder.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="flex flex-col gap-4 py-4">
+                            <div className="flex flex-col gap-2">
+                                <Label htmlFor="name" className="text-right text-left">
+                                    Script Name
+                                </Label>
+                                <Input
+                                    id="name"
+                                    placeholder="myscript.py"
+                                    value={newScriptName}
+                                    onChange={(e) => setNewScriptName(e.target.value)}
+                                    autoFocus
+                                    onKeyDown={(e) => e.key === 'Enter' && handleCreateScriptSubmit()}
+                                />
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <Checkbox
+                                    id="syncToGist"
+                                    checked={syncToGistOverride}
+                                    onCheckedChange={(checked) => setSyncToGistOverride(!!checked)}
+                                />
+                                <label
+                                    htmlFor="syncToGist"
+                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                >
+                                    Sync to GitHub Gist
+                                </label>
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button variant="secondary" onClick={() => setIsCreateScriptOpen(false)}>
+                                Cancel
+                            </Button>
+                            <Button onClick={handleCreateScriptSubmit} disabled={!newScriptName.trim()}>
+                                Create Script
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                {/* Save as Template dialog */}
+                <Dialog open={isSaveAsTemplateOpen} onOpenChange={setIsSaveAsTemplateOpen}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                                <LayoutTemplate className="h-4 w-4 text-blue-500" />
+                                Save as Template
+                            </DialogTitle>
+                            <DialogDescription>
+                                Save &quot;{saveAsSourceScript?.name}&quot; as a reusable template.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="flex flex-col gap-3 py-2">
+                            <div className="flex flex-col gap-1.5">
+                                <Label htmlFor="tpl-name" className="text-xs">Template Name</Label>
+                                <Input
+                                    id="tpl-name"
+                                    placeholder="My Template"
+                                    value={saveAsTemplateName}
+                                    onChange={(e) => {
+                                        setSaveAsTemplateName(e.target.value)
+                                        if (saveAsError) setSaveAsError('')
+                                    }}
+                                    autoFocus
+                                    className="h-8 text-xs"
+                                />
+                                {saveAsError && (
+                                    <p className="text-[10px] text-red-500">{saveAsError}</p>
+                                )}
+                            </div>
+                            <div className="flex flex-col gap-1.5">
+                                <Label htmlFor="tpl-desc" className="text-xs">Description <span className="text-slate-400 font-normal">(optional)</span></Label>
+                                <Input
+                                    id="tpl-desc"
+                                    placeholder="What does this template do?"
+                                    value={saveAsDescription}
+                                    onChange={(e) => setSaveAsDescription(e.target.value)}
+                                    className="h-8 text-xs"
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1.5">
+                                <Label htmlFor="tpl-category" className="text-xs">Category</Label>
+                                <Select value={saveAsCategory} onValueChange={setSaveAsCategory}>
+                                    <SelectTrigger id="tpl-category" className="h-8 text-xs">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="general">general</SelectItem>
+                                        <SelectItem value="networking">networking</SelectItem>
+                                        <SelectItem value="filesystem">filesystem</SelectItem>
+                                        <SelectItem value="system">system</SelectItem>
+                                        <SelectItem value="data">data</SelectItem>
+                                        <SelectItem value="automation">automation</SelectItem>
+                                        <SelectItem value="other">other</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                className="text-xs"
+                                onClick={() => setIsSaveAsTemplateOpen(false)}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                size="sm"
+                                className="text-xs"
+                                onClick={handleSaveAsTemplate}
+                                disabled={!saveAsTemplateName.trim() || saveAsLoading}
+                            >
+                                {saveAsLoading ? 'Saving…' : 'Save Template'}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                {/* Delete Script Confirmation Dialog */}
+                <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2 text-red-600">
+                                <Trash2 className="h-5 w-5" />
+                                Delete Script
+                            </DialogTitle>
+                            <DialogDescription>
+                                Are you sure you want to delete <span className="font-semibold text-slate-900 dark:text-slate-100">{scriptToDelete?.name}</span>? This action cannot be undone.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        {scriptToDelete?.gist_id && (
+                            <div className="flex items-center space-x-2 py-2">
+                                <Checkbox
+                                    id="deleteFromGist"
+                                    checked={deleteFromGist}
+                                    onCheckedChange={(checked) => setDeleteFromGist(!!checked)}
+                                />
+                                <Label
+                                    htmlFor="deleteFromGist"
+                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                >
+                                    Also delete from GitHub Gist
+                                </Label>
+                            </div>
+                        )}
+
+                        <DialogFooter>
+                            <Button
+                                variant="secondary"
+                                onClick={() => setIsDeleteDialogOpen(false)}
+                                disabled={isDeleting}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                variant="destructive"
+                                onClick={confirmDeleteScript}
+                                disabled={isDeleting}
+                            >
+                                {isDeleting ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Deleting...
+                                    </>
+                                ) : (
+                                    'Delete Script'
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            </DndContext >
         </>
     );
 };

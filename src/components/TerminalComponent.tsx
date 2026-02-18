@@ -6,6 +6,7 @@ import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 import { Loader2, Minimize2, Maximize2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useTheme } from 'next-themes';
 
 interface TerminalComponentProps {
     onClose: () => void;
@@ -19,6 +20,7 @@ export const TerminalComponent = ({ onClose, isMinimized, toggleMinimize }: Term
     const socketRef = useRef<WebSocket | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
     const [isConnected, setIsConnected] = useState(false);
+    const { resolvedTheme } = useTheme();
 
     useEffect(() => {
         if (!terminalRef.current || isMinimized) return;
@@ -28,10 +30,19 @@ export const TerminalComponent = ({ onClose, isMinimized, toggleMinimize }: Term
             cursorBlink: true,
             fontSize: 14,
             fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-            theme: {
-                background: '#0f172a', // slate-900
-                foreground: '#e2e8f0', // slate-200
-            },
+            theme: resolvedTheme === 'dark'
+                ? {
+                    background: '#020617', // slate-950
+                    foreground: '#e2e8f0', // slate-200
+                    cursor: '#e2e8f0',
+                    selectionBackground: '#334155', // slate-700
+                }
+                : {
+                    background: '#fffbeb', // amber-50 (cream)
+                    foreground: '#334155', // slate-700
+                    cursor: '#334155',
+                    selectionBackground: '#e2e8f0', // slate-200
+                },
             rows: 24,
             cols: 80
         });
@@ -101,6 +112,24 @@ export const TerminalComponent = ({ onClose, isMinimized, toggleMinimize }: Term
         };
     }, [isMinimized]); // Re-initialize when un-minimized (simple approach, or keep instance alive and just hide)
 
+    useEffect(() => {
+        if (!xtermRef.current) return;
+
+        xtermRef.current.options.theme = resolvedTheme === 'dark'
+            ? {
+                background: '#020617', // slate-950
+                foreground: '#e2e8f0', // slate-200
+                cursor: '#e2e8f0',
+                selectionBackground: '#334155', // slate-700
+            }
+            : {
+                background: '#fffbeb', // amber-50 (cream)
+                foreground: '#334155', // slate-700
+                cursor: '#334155',
+                selectionBackground: '#e2e8f0', // slate-200
+            };
+    }, [resolvedTheme]);
+
     // Fit addon needs a re-fit when view changes (e.g. minimize toggle)
     useEffect(() => {
         if (!isMinimized && fitAddonRef.current) {
@@ -129,17 +158,17 @@ export const TerminalComponent = ({ onClose, isMinimized, toggleMinimize }: Term
     }
 
     return (
-        <div className="flex flex-col h-64 bg-slate-950 border-t border-slate-700">
-            <div className="h-8 bg-slate-900 flex items-center justify-between px-4 border-b border-slate-700 select-none">
-                <span className="text-xs font-mono text-slate-300 flex items-center gap-2">
+        <div className={`flex flex-col h-64 border-t ${resolvedTheme === 'dark' ? 'bg-slate-950 border-slate-700' : 'bg-amber-50 border-amber-200'}`}>
+            <div className={`h-8 flex items-center justify-between px-4 border-b select-none ${resolvedTheme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-amber-100/50 border-amber-200'}`}>
+                <span className={`text-xs font-mono flex items-center gap-2 ${resolvedTheme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
                     <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
                     Terminal
                 </span>
                 <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400" onClick={toggleMinimize}>
+                    <Button variant="ghost" size="icon" className={`h-6 w-6 ${resolvedTheme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`} onClick={toggleMinimize}>
                         <Minimize2 className="h-3 w-3" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-red-400" onClick={onClose}>
+                    <Button variant="ghost" size="icon" className={`h-6 w-6 hover:text-red-400 ${resolvedTheme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`} onClick={onClose}>
                         <X className="h-3 w-3" />
                     </Button>
                 </div>

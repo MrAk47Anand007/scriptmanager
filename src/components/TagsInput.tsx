@@ -130,8 +130,8 @@ export function TagsInput({ scriptId: _scriptId, tags, allTags, onAdd, onRemove,
             >
                 <div
                     className={cn(
-                        "flex flex-wrap gap-1 min-h-[28px] px-1.5 py-1 rounded border bg-white text-xs cursor-text",
-                        disabled ? "opacity-50 pointer-events-none" : "border-slate-200 focus-within:border-blue-400"
+                        "flex flex-wrap gap-1 min-h-[28px] px-1.5 py-1 rounded border bg-white dark:bg-slate-950 text-xs cursor-text",
+                        disabled ? "opacity-50 pointer-events-none" : "border-slate-200 dark:border-slate-700 focus-within:border-blue-400"
                     )}
                     onClick={() => inputRef.current?.focus()}
                 >
@@ -144,7 +144,7 @@ export function TagsInput({ scriptId: _scriptId, tags, allTags, onAdd, onRemove,
                     ))}
                     <input
                         ref={inputRef}
-                        className="flex-1 min-w-[60px] outline-none bg-transparent text-[10px] placeholder:text-slate-400"
+                        className="flex-1 min-w-[60px] outline-none bg-transparent text-[10px] placeholder:text-slate-400 dark:text-slate-200"
                         placeholder={tags.length === 0 ? 'Add tags…' : ''}
                         value={input}
                         onChange={(e) => {
@@ -158,13 +158,13 @@ export function TagsInput({ scriptId: _scriptId, tags, allTags, onAdd, onRemove,
                 </div>
 
                 {showSuggestions && (suggestions.length > 0 || canCreate) && (
-                    <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-white border border-slate-200 rounded shadow-lg text-xs overflow-hidden">
+                    <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded shadow-lg text-xs overflow-hidden">
                         {suggestions.map((tag, i) => (
                             <button
                                 key={tag.id}
                                 className={cn(
-                                    "w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-slate-50 transition-colors",
-                                    i === activeIdx && "bg-slate-50"
+                                    "w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors dark:text-slate-200",
+                                    i === activeIdx && "bg-slate-50 dark:bg-slate-800"
                                 )}
                                 onMouseDown={(e) => { e.preventDefault(); submit(tag.name) }}
                             >
@@ -178,8 +178,8 @@ export function TagsInput({ scriptId: _scriptId, tags, allTags, onAdd, onRemove,
                         {canCreate && (
                             <button
                                 className={cn(
-                                    "w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-slate-50 transition-colors text-blue-600",
-                                    activeIdx === suggestions.length && "bg-slate-50"
+                                    "w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-blue-600 dark:text-blue-400",
+                                    activeIdx === suggestions.length && "bg-slate-50 dark:bg-slate-800"
                                 )}
                                 onMouseDown={(e) => { e.preventDefault(); submit(input) }}
                             >
