@@ -8,12 +8,15 @@ import {
     saveAsTemplate, duplicateScript, deleteScript,
 } from '@/features/scripts/scriptsSlice';
 import type { Script, Collection, ScriptTemplate } from '@/features/scripts/scriptsSlice';
+import {
+    createProject, deleteProject,
+} from '@/features/ops/opsSlice';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
     FileCode, Plus, Folder, MoreVertical, Trash2, ChevronRight, ChevronDown,
-    GripVertical, Search, LayoutTemplate, Copy, Loader2,
+    GripVertical, Search, LayoutTemplate, Copy, Loader2, Layers,
 } from 'lucide-react';
 import { QuickSwitcher } from './QuickSwitcher';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
@@ -262,6 +265,39 @@ export const ScriptsSidebar = () => {
     const [isDeleting, setIsDeleting] = useState(false);
 
     const { settings } = useAppSelector((state) => state.settings);
+    const isModeActive = useAppSelector((state) => state.ops.isModeActive);
+    const { projects } = useAppSelector((state) => state.ops);
+    const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+    const [isCreatingProject, setIsCreatingProject] = useState(false);
+    const [newProjectName, setNewProjectName] = useState('');
+    const [newProjectEnv, setNewProjectEnv] = useState<'development' | 'qa' | 'uat' | 'production'>('development');
+
+    const toggleProject = (id: string) => {
+        setExpandedProjects(prev => ({ ...prev, [id]: !prev[id] }));
+    };
+
+    const handleCreateProject = async () => {
+        if (!newProjectName.trim()) return;
+        const envColors: Record<string, string> = {
+            development: '#22c55e',
+            qa: '#3b82f6',
+            uat: '#f59e0b',
+            production: '#ef4444',
+        };
+        await dispatch(createProject({
+            name: newProjectName.trim(),
+            environment: newProjectEnv,
+            color: envColors[newProjectEnv] ?? '#6366f1',
+        }));
+        setNewProjectName('');
+        setIsCreatingProject(false);
+    };
+
+    const handleDeleteProject = async (id: string) => {
+        if (confirm('Delete this project? Collections will become unassigned (not deleted).')) {
+            await dispatch(deleteProject(id));
+        }
+    };
 
     // Ctrl+P / Cmd+P global shortcut
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -541,6 +577,11 @@ export const ScriptsSidebar = () => {
                                         <DropdownMenuItem onClick={() => setIsCreatingCollection(true)}>
                                             <Folder className="mr-2 h-4 w-4" /> New Collection
                                         </DropdownMenuItem>
+                                        {isModeActive && (
+                                            <DropdownMenuItem onClick={() => setIsCreatingProject(true)}>
+                                                <Layers className="mr-2 h-4 w-4" /> New Project
+                                            </DropdownMenuItem>
+                                        )}
                                     </DropdownMenuContent>
                                 </DropdownMenu>
                             </div>
@@ -595,6 +636,34 @@ export const ScriptsSidebar = () => {
                         </div>
                     )}
 
+                    {isModeActive && isCreatingProject && (
+                        <div className="p-2 border-b bg-amber-50 dark:bg-amber-900/20 dark:border-slate-800">
+                            <Input
+                                autoFocus
+                                placeholder="Project Name"
+                                value={newProjectName}
+                                onChange={(e) => setNewProjectName(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
+                                className="h-7 text-xs mb-2 bg-white dark:bg-slate-950 dark:border-slate-700"
+                            />
+                            <Select value={newProjectEnv} onValueChange={(v) => setNewProjectEnv(v as typeof newProjectEnv)}>
+                                <SelectTrigger className="h-7 text-xs mb-2">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="development">Development</SelectItem>
+                                    <SelectItem value="qa">QA</SelectItem>
+                                    <SelectItem value="uat">UAT</SelectItem>
+                                    <SelectItem value="production">Production</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <div className="flex gap-2">
+                                <Button size="sm" className="h-6 text-xs flex-1" onClick={handleCreateProject}>Create</Button>
+                                <Button size="sm" variant="ghost" className="h-6 text-xs flex-1" onClick={() => setIsCreatingProject(false)}>Cancel</Button>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
                         {status === 'loading' && (
                             <div className="flex justify-center p-4">
@@ -602,21 +671,178 @@ export const ScriptsSidebar = () => {
                             </div>
                         )}
                         {searchQuery.trim() && filteredScripts.length === 0 && status !== 'loading' && (
-                            <div className="px-2 py-6 text-xs text-slate-400 text-center italic">No scripts match "{searchQuery}"</div>
+                            <div className="px-2 py-6 text-xs text-slate-400 text-center italic">No scripts match &quot;{searchQuery}&quot;</div>
                         )}
-                        {collections.map(collection => (
-                            <DroppableCollection
-                                key={collection.id}
-                                collection={collection}
-                                isExpanded={!!expandedCollections[collection.id]}
-                                toggle={() => toggleCollection(collection.id)}
-                                onDelete={() => handleDeleteCollection(collection.id)}
-                                onCreateScript={() => handleCreateScript(collection.id)}
-                            >
-                                {grouped.result[collection.id].length === 0 && !searchQuery.trim() && (
-                                    <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
+
+                        {/* === Ops Mode: 3-level Project → Collection → Script hierarchy === */}
+                        {isModeActive && !searchQuery.trim() && (
+                            <>
+                                {projects.map(project => {
+                                    const projectCollections = collections.filter(c => c.project_id === project.id);
+                                    const isExpanded = !!expandedProjects[project.id];
+                                    const envLabels: Record<string, string> = {
+                                        development: 'DEV',
+                                        qa: 'QA',
+                                        uat: 'UAT',
+                                        production: 'PROD',
+                                    };
+                                    return (
+                                        <div key={project.id} className="space-y-0.5">
+                                            <div
+                                                className="flex items-center gap-1 px-2 py-1.5 text-xs font-semibold rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 group cursor-pointer"
+                                                onClick={() => toggleProject(project.id)}
+                                            >
+                                                {isExpanded ? <ChevronDown className="h-3 w-3 text-slate-400" /> : <ChevronRight className="h-3 w-3 text-slate-400" />}
+                                                <Layers className="h-3.5 w-3.5" style={{ color: project.color }} />
+                                                <span className="flex-1 truncate text-slate-700 dark:text-slate-300">{project.name}</span>
+                                                <span
+                                                    className="text-[9px] font-bold px-1 py-0.5 rounded"
+                                                    style={{ backgroundColor: project.color + '22', color: project.color }}
+                                                >
+                                                    {envLabels[project.environment] ?? project.environment.toUpperCase()}
+                                                </span>
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <Button variant="ghost" size="icon" className="h-5 w-5 opacity-0 group-hover:opacity-100" onClick={e => e.stopPropagation()}>
+                                                            <MoreVertical className="h-3 w-3" />
+                                                        </Button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end">
+                                                        <DropdownMenuItem onClick={e => { e.stopPropagation(); handleCreateScript(); }}>
+                                                            <FileCode className="mr-2 h-4 w-4" /> New Script
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={e => { e.stopPropagation(); setIsCreatingCollection(true); }}>
+                                                            <Folder className="mr-2 h-4 w-4" /> New Collection
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuSeparator />
+                                                        <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={e => { e.stopPropagation(); handleDeleteProject(project.id); }}>
+                                                            <Trash2 className="mr-2 h-4 w-4" /> Delete Project
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
+                                            </div>
+                                            {isExpanded && (
+                                                <div className="pl-3 space-y-0.5">
+                                                    {projectCollections.map(collection => (
+                                                        <DroppableCollection
+                                                            key={collection.id}
+                                                            collection={collection}
+                                                            isExpanded={!!expandedCollections[collection.id]}
+                                                            toggle={() => toggleCollection(collection.id)}
+                                                            onDelete={() => handleDeleteCollection(collection.id)}
+                                                            onCreateScript={() => handleCreateScript(collection.id)}
+                                                        >
+                                                            {grouped.result[collection.id]?.length === 0 && (
+                                                                <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
+                                                            )}
+                                                            {(grouped.result[collection.id] ?? []).map(script => (
+                                                                <DraggableScript
+                                                                    key={script.id}
+                                                                    script={script}
+                                                                    isActive={activeScriptId === script.id}
+                                                                    onClick={() => dispatch(setActiveScript(script.id))}
+                                                                    onSaveAsTemplate={() => openSaveAsTemplate(script)}
+                                                                    onDuplicate={() => dispatch(duplicateScript(script.id))}
+                                                                    onDelete={() => handleDeleteScriptRequest(script)}
+                                                                />
+                                                            ))}
+                                                        </DroppableCollection>
+                                                    ))}
+                                                    {projectCollections.length === 0 && (
+                                                        <div className="px-4 py-1 text-xs text-slate-400 italic">No collections</div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+
+                                {/* Unassigned collections in Ops Mode */}
+                                {(() => {
+                                    const unassigned = collections.filter(c => !c.project_id);
+                                    if (unassigned.length === 0 && grouped.unsorted.length === 0) return null;
+                                    return (
+                                        <div className="space-y-0.5">
+                                            {(unassigned.length > 0 || grouped.unsorted.length > 0) && (
+                                                <div className="px-2 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                                    <Folder className="h-3 w-3" /> Unassigned
+                                                </div>
+                                            )}
+                                            {unassigned.map(collection => (
+                                                <DroppableCollection
+                                                    key={collection.id}
+                                                    collection={collection}
+                                                    isExpanded={!!expandedCollections[collection.id]}
+                                                    toggle={() => toggleCollection(collection.id)}
+                                                    onDelete={() => handleDeleteCollection(collection.id)}
+                                                    onCreateScript={() => handleCreateScript(collection.id)}
+                                                >
+                                                    {grouped.result[collection.id]?.length === 0 && (
+                                                        <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
+                                                    )}
+                                                    {(grouped.result[collection.id] ?? []).map(script => (
+                                                        <DraggableScript
+                                                            key={script.id}
+                                                            script={script}
+                                                            isActive={activeScriptId === script.id}
+                                                            onClick={() => dispatch(setActiveScript(script.id))}
+                                                            onSaveAsTemplate={() => openSaveAsTemplate(script)}
+                                                            onDuplicate={() => dispatch(duplicateScript(script.id))}
+                                                            onDelete={() => handleDeleteScriptRequest(script)}
+                                                        />
+                                                    ))}
+                                                </DroppableCollection>
+                                            ))}
+                                            {grouped.unsorted.map(script => (
+                                                <DraggableScript
+                                                    key={script.id}
+                                                    script={script}
+                                                    isActive={activeScriptId === script.id}
+                                                    onClick={() => dispatch(setActiveScript(script.id))}
+                                                    onSaveAsTemplate={() => openSaveAsTemplate(script)}
+                                                    onDuplicate={() => dispatch(duplicateScript(script.id))}
+                                                    onDelete={() => handleDeleteScriptRequest(script)}
+                                                />
+                                            ))}
+                                        </div>
+                                    );
+                                })()}
+                            </>
+                        )}
+
+                        {/* === Normal Mode (or search active): flat collection → script view === */}
+                        {(!isModeActive || searchQuery.trim()) && (
+                            <>
+                                {collections.map(collection => (
+                                    <DroppableCollection
+                                        key={collection.id}
+                                        collection={collection}
+                                        isExpanded={!!expandedCollections[collection.id]}
+                                        toggle={() => toggleCollection(collection.id)}
+                                        onDelete={() => handleDeleteCollection(collection.id)}
+                                        onCreateScript={() => handleCreateScript(collection.id)}
+                                    >
+                                        {grouped.result[collection.id].length === 0 && !searchQuery.trim() && (
+                                            <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
+                                        )}
+                                        {grouped.result[collection.id].map(script => (
+                                            <DraggableScript
+                                                key={script.id}
+                                                script={script}
+                                                isActive={activeScriptId === script.id}
+                                                onClick={() => dispatch(setActiveScript(script.id))}
+                                                onSaveAsTemplate={() => openSaveAsTemplate(script)}
+                                                onDuplicate={() => dispatch(duplicateScript(script.id))}
+                                                onDelete={() => handleDeleteScriptRequest(script)}
+                                            />
+                                        ))}
+                                    </DroppableCollection>
+                                ))}
+
+                                {grouped.unsorted.length > 0 && collections.length > 0 && (
+                                    <div className="px-2 py-2 text-xs font-semibold text-slate-400 uppercase">Unsorted</div>
                                 )}
-                                {grouped.result[collection.id].map(script => (
+                                {grouped.unsorted.map((script) => (
                                     <DraggableScript
                                         key={script.id}
                                         script={script}
@@ -627,23 +853,8 @@ export const ScriptsSidebar = () => {
                                         onDelete={() => handleDeleteScriptRequest(script)}
                                     />
                                 ))}
-                            </DroppableCollection>
-                        ))}
-
-                        {grouped.unsorted.length > 0 && collections.length > 0 && (
-                            <div className="px-2 py-2 text-xs font-semibold text-slate-400 uppercase">Unsorted</div>
+                            </>
                         )}
-                        {grouped.unsorted.map((script) => (
-                            <DraggableScript
-                                key={script.id}
-                                script={script}
-                                isActive={activeScriptId === script.id}
-                                onClick={() => dispatch(setActiveScript(script.id))}
-                                onSaveAsTemplate={() => openSaveAsTemplate(script)}
-                                onDuplicate={() => dispatch(duplicateScript(script.id))}
-                                onDelete={() => handleDeleteScriptRequest(script)}
-                            />
-                        ))}
                     </div>
 
                     <div className="p-2 border-t bg-slate-50 dark:bg-slate-900 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 flex justify-between items-center">

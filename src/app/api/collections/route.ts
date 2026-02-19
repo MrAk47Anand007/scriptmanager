@@ -12,6 +12,7 @@ export async function GET() {
     name: c.name,
     description: c.description,
     script_count: c._count.scripts,
+    project_id: c.projectId ?? null,
     created_at: c.createdAt.toISOString()
   })))
 }

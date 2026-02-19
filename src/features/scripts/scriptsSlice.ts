@@ -66,6 +66,7 @@ export interface Collection {
     name: string;
     description?: string;
     script_count?: number;
+    project_id?: string | null;
     created_at: string;
 }
 

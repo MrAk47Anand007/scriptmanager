@@ -22,6 +22,9 @@ import type { Script } from '@/features/scripts/scriptsSlice';
 import { VersionHistoryPanel } from './VersionHistoryPanel';
 import { TagsInput } from './TagsInput';
 import { EnvVarsPanel } from './EnvVarsPanel';
+import { ServerProfilesPanel } from './ServerProfilesPanel';
+import { RemoteExecutionPanel } from './RemoteExecutionPanel';
+import { AuditTrailPanel } from './AuditTrailPanel';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Github, Loader2, SlidersHorizontal, Download, ShieldCheck, KeyRound } from 'lucide-react';
@@ -54,6 +57,7 @@ export const ScriptsManager = () => {
     const dispatch = useAppDispatch();
     const { items: scripts, collections, activeScriptId, activeScriptContent, builds, currentBuildOutput, saveStatus, schedule, contentStatus, runStatus, allTags, envVars, autoSaveEnabled } = useAppSelector((state) => state.scripts);
     const { settings } = useAppSelector((state) => state.settings);
+    const isModeActive = useAppSelector((state) => state.ops.isModeActive);
     const { resolvedTheme } = useTheme();
     const consoleRef = useRef<HTMLDivElement>(null);
     const eventSourceRef = useRef<EventSource | null>(null);
@@ -611,6 +615,9 @@ export const ScriptsManager = () => {
 
             {/* Right Panel */}
             <div className="w-96 border-l dark:border-slate-800 flex flex-col bg-slate-50 dark:bg-slate-900 overflow-y-auto">
+                {isModeActive && <ServerProfilesPanel />}
+                {isModeActive && <RemoteExecutionPanel />}
+                {isModeActive && <AuditTrailPanel />}
                 <div className="flex-none flex flex-col h-[250px] min-h-[200px] border-b">
                     <div className="px-3 py-2 border-b bg-amber-50 dark:bg-slate-950 text-xs font-semibold text-amber-900/80 dark:text-slate-400 uppercase flex items-center justify-between">
                         <div className="flex items-center gap-2">

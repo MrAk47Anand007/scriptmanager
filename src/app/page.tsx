@@ -4,10 +4,12 @@ import { useState, useEffect } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchScripts, fetchCollections, fetchTemplates, fetchAllTags, setAutoSaveEnabled } from '@/features/scripts/scriptsSlice'
 import { fetchSettings } from '@/features/settings/settingsSlice'
+import { setOpsMode, fetchProjects, fetchServerProfiles } from '@/features/ops/opsSlice'
 import { ScriptsManager } from '@/components/ScriptsManager'
 import { SettingsManager } from '@/components/SettingsManager'
 import { Settings, Code2 } from 'lucide-react'
 import { ModeToggle } from '@/components/ModeToggle'
+import { OpsModeToggle } from '@/components/OpsModeToggle'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 
@@ -29,6 +31,16 @@ export default function Home() {
     if (stored) {
       dispatch(setAutoSaveEnabled(stored === 'true'))
     }
+
+    // Load ops mode preference
+    const storedOpsMode = localStorage.getItem('scriptManager_opsMode')
+    if (storedOpsMode) {
+      dispatch(setOpsMode(storedOpsMode === 'true'))
+    }
+
+    // Load ops mode data
+    dispatch(fetchProjects())
+    dispatch(fetchServerProfiles())
   }, [dispatch])
 
   const toggleAutoSave = (enabled: boolean) => {
@@ -75,6 +87,7 @@ export default function Home() {
               className="h-4 w-7"
             />
           </div>
+          <OpsModeToggle />
           <ModeToggle />
         </div>
       </header>
