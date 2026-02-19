@@ -108,10 +108,71 @@ model Collection {
   name        String
   description String    @default("")
   createdAt   DateTime  @default(now()) @map("created_at")
+  projectId   String?   @map("project_id")
 
   scripts     Script[]
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@map("collections")
+}
+
+model Project {
+  id          String       @id @default(uuid())
+  name        String
+  description String       @default("")
+  environment String       @default("development")
+  color       String       @default("#6366f1")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  collections    Collection[]
+  serverProfiles ServerProfile[]
+
+  @@map("projects")
+}
+
+model ServerProfile {
+  id              String   @id @default(uuid())
+  name            String
+  host            String
+  port            Int      @default(22)
+  username        String
+  authMethod      String   @default("password") @map("auth_method")
+  encryptedSecret String?  @map("encrypted_secret")
+  keyPath         String?  @map("key_path")
+  projectId       String?  @map("project_id")
+  notes           String   @default("")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  project          Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  remoteExecutions RemoteExecution[]
+
+  @@map("server_profiles")
+}
+
+model RemoteExecution {
+  id          String    @id @default(uuid())
+  scriptId    String    @map("script_id")
+  profileId   String    @map("profile_id")
+  scriptName  String    @map("script_name")
+  profileName String    @map("profile_name")
+  serverHost  String    @map("server_host")
+  status      String    @default("pending_approval")
+  triggeredBy String    @default("manual") @map("triggered_by")
+  approvedBy  String?   @map("approved_by")
+  remotePath  String?   @map("remote_path")
+  exitCode    Int?      @map("exit_code")
+  logOutput   String?   @map("log_output")
+  paramValues String    @default("{}") @map("param_values")
+  requestedAt DateTime  @default(now()) @map("requested_at")
+  approvedAt  DateTime? @map("approved_at")
+  startedAt   DateTime? @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+
+  profile     ServerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@map("remote_executions")
 }
 
 model Setting {
