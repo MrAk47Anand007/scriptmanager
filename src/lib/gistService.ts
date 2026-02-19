@@ -57,6 +57,7 @@ export async function syncScriptToGist(script: ScriptForGist, content: string): 
     })
   } else {
     // POST new gist
+    console.log('[Gist] Creating new gist with files:', { [newFilename]: { content } })
     resp = await fetch('https://api.github.com/gists', {
       method: 'POST',
       headers,

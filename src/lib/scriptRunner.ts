@@ -73,6 +73,7 @@ export async function executeScriptAsync(
   fs.mkdirSync(buildScriptDir, { recursive: true })
 
   const [cmd, args] = resolveInterpreter(script.language, script.interpreter, scriptPath)
+  console.log(`[ScriptRunner] Executing: ${cmd} ${args.join(' ')} (Language: ${script.language})`)
 
   try {
     await prisma.build.update({
@@ -81,6 +82,7 @@ export async function executeScriptAsync(
     })
 
     const logStream = fs.createWriteStream(logFile, { encoding: 'utf8' })
+    logStream.setMaxListeners(20); // Suppress warnings if we attach multiple listeners (though we shouldn't be)
 
     if (!fs.existsSync(scriptPath)) {
       const errMsg = `Error: Script file not found: ${scriptPath}\n`

@@ -270,9 +270,22 @@ export const ScriptsManager = () => {
                     es.close();
                     eventSourceRef.current = null;
                     dispatch(fetchBuilds(activeScriptId));
+                    // Fetch full output to ensure we didn't miss anything (race condition for fast scripts)
+                    dispatch(fetchBuildOutput({ scriptId: activeScriptId, buildId }));
                     return;
                 }
-                dispatch(appendBuildOutput(event.data + '\n'));
+                const cleanData = event.data.replace(/^data: /, '').trim();
+                // SSE sends "data: " prefix sometimes if manual parsing not handled by EventSource class (browser handles it, but our raw string check might be loose)
+                // Actually EventSource.onmessage event.data is the payload.
+                // Our server sends: `data: ${line}\n\n`
+                // Browser EventSource parses this and event.data = line.
+                // So event.data is the line content.
+                // But we should check if line is just newline?
+
+                // Server sends: controller.enqueue(encoder.encode(`data: ${line}\n\n`))
+                // If line has newlines, SSE spec says they are joined by newline.
+                // We just append it.
+                dispatch(appendBuildOutput(event.data));
             };
 
             es.onerror = () => {
