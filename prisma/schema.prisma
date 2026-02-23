@@ -197,3 +197,51 @@ model ScriptTemplate {
 
   @@map("script_templates")
 }
+
+model ApiCollection {
+  id          String       @id @default(cuid())
+  name        String
+  description String       @default("")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  requests    ApiRequest[]
+
+  @@map("api_collections")
+}
+
+model ApiRequest {
+  id           String         @id @default(cuid())
+  name         String
+  method       String         @default("GET")
+  url          String         @default("")
+  headers      String         @default("[]")
+  queryParams  String         @default("[]") @map("query_params")
+  bodyType     String         @default("none") @map("body_type")
+  body         String         @default("")
+  authType     String         @default("none") @map("auth_type")
+  authConfig   String         @default("{}") @map("auth_config")
+  collectionId String?        @map("collection_id")
+  collection   ApiCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  @@map("api_requests")
+}
+
+model ApiHistory {
+  id              String   @id @default(cuid())
+  requestId       String?  @map("request_id")
+  method          String
+  url             String
+  requestHeaders  String   @default("{}") @map("request_headers")
+  requestBody     String   @default("") @map("request_body")
+  status          Int
+  statusText      String   @default("") @map("status_text")
+  duration        Int
+  size            Int      @default(0)
+  responseHeaders String   @default("{}") @map("response_headers")
+  responseBody    String   @default("") @map("response_body")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@map("api_history")
+}

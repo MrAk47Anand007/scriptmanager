@@ -4,7 +4,9 @@
       "Bash(npx prisma migrate dev:*)",
       "Bash(npx tsc:*)",
       "Bash(npx next build)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(DATABASE_URL=\"file:./data/scriptmanager.db\" npx prisma migrate dev:*)",
+      "Bash(DATABASE_URL=\"file:./data/scriptmanager.db\" npx next build:*)"
     ]
   }
 }
