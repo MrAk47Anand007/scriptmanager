@@ -3,13 +3,13 @@
 import { cn } from '@/lib/utils'
 
 const METHOD_COLORS: Record<string, string> = {
-  GET: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400',
-  POST: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400',
-  PUT: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400',
-  PATCH: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400',
-  DELETE: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400',
-  HEAD: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400',
-  OPTIONS: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+  GET:     'text-green-600  bg-green-50   dark:text-green-400  dark:bg-green-950/40',
+  POST:    'text-blue-600   bg-blue-50    dark:text-blue-400   dark:bg-blue-950/40',
+  PUT:     'text-yellow-600 bg-yellow-50  dark:text-yellow-400 dark:bg-yellow-950/40',
+  PATCH:   'text-orange-600 bg-orange-50  dark:text-orange-400 dark:bg-orange-950/40',
+  DELETE:  'text-red-600    bg-red-50     dark:text-red-400    dark:bg-red-950/40',
+  HEAD:    'text-purple-600 bg-purple-50  dark:text-purple-400 dark:bg-purple-950/40',
+  OPTIONS: 'text-slate-600  bg-slate-100  dark:text-slate-400  dark:bg-slate-800',
 }
 
 interface MethodBadgeProps {
@@ -24,8 +24,8 @@ export function MethodBadge({ method, className, small }: MethodBadgeProps) {
   return (
     <span
       className={cn(
-        'inline-flex items-center font-mono font-semibold rounded',
-        small ? 'text-[10px] px-1 py-0' : 'text-xs px-1.5 py-0.5',
+        'inline-flex items-center font-mono font-bold rounded uppercase',
+        small ? 'text-[10px] px-1.5 py-0.5' : 'text-[10px] px-1.5 py-0.5',
         colors,
         className
       )}
