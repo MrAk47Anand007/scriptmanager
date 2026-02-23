@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { KeyValueTable } from './KeyValueTable'
 import { MethodBadge } from './MethodBadge'
-import { Loader2, Save, Play, Copy } from 'lucide-react'
+import { Loader2, Save, Play, Copy, Lock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import dynamic from 'next/dynamic'
 import { useTheme } from 'next-themes'
@@ -22,10 +22,10 @@ const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
 const COMMON_HEADERS = [
   'Content-Type', 'Authorization', 'Accept', 'Accept-Language',
   'Cache-Control', 'Cookie', 'User-Agent', 'X-Requested-With',
-  'X-API-Key', 'X-Auth-Token', 'Origin', 'Referer'
+  'X-API-Key', 'X-Auth-Token', 'Origin', 'Referer',
 ]
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── URL helpers ──────────────────────────────────────────────────────────────
 
 function buildUrlFromParts(baseUrl: string, enabledParams: KeyValueRow[]): string {
   if (!baseUrl) return ''
@@ -80,17 +80,21 @@ interface PillToggleProps<T extends string> {
   options: PillToggleOption<T>[]
   value: T
   onChange: (v: T) => void
+  className?: string
 }
 
-function PillToggle<T extends string>({ options, value, onChange }: PillToggleProps<T>) {
+function PillToggle<T extends string>({ options, value, onChange, className }: PillToggleProps<T>) {
   return (
-    <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 rounded-md p-0.5 w-fit">
+    <div className={cn(
+      'flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800/80 rounded-md p-0.5 w-fit',
+      className
+    )}>
       {options.map(opt => (
         <button
           key={opt.value}
           onClick={() => onChange(opt.value)}
           className={cn(
-            'text-[11px] px-2.5 py-0.5 rounded transition-colors font-medium',
+            'text-[11px] px-2.5 py-1 rounded transition-colors font-medium',
             value === opt.value
               ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm'
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
@@ -103,7 +107,7 @@ function PillToggle<T extends string>({ options, value, onChange }: PillTogglePr
   )
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export function ApiRequestEditor() {
   const dispatch = useAppDispatch()
@@ -130,7 +134,7 @@ export function ApiRequestEditor() {
     if (parsedParams.length > 0) {
       update({
         url: value,
-        queryParams: [...parsedParams, { id: crypto.randomUUID(), key: '', value: '', enabled: true }]
+        queryParams: [...parsedParams, { id: crypto.randomUUID(), key: '', value: '', enabled: true }],
       })
     } else {
       update({ url: stripQuery(value) })
@@ -160,8 +164,8 @@ export function ApiRequestEditor() {
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-slate-950">
 
-      {/* Name bar */}
-      <div className="flex items-center gap-2 px-3 pt-2 pb-1 shrink-0">
+      {/* ── Request name bar ─────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 shrink-0">
         {editingName ? (
           <Input
             value={draft.name}
@@ -169,11 +173,11 @@ export function ApiRequestEditor() {
             onBlur={() => setEditingName(false)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditingName(false) }}
             autoFocus
-            className="h-6 text-sm font-medium py-0 px-1 max-w-xs"
+            className="h-7 text-sm font-semibold py-0 px-2 max-w-xs bg-white dark:bg-slate-900"
           />
         ) : (
           <span
-            className="text-sm font-medium text-slate-700 dark:text-slate-300 cursor-text hover:text-slate-900 dark:hover:text-slate-100 truncate max-w-xs"
+            className="text-sm font-semibold text-slate-700 dark:text-slate-200 cursor-text truncate max-w-xs hover:text-slate-900 dark:hover:text-white"
             onClick={() => setEditingName(true)}
             title="Click to rename"
           >
@@ -186,21 +190,25 @@ export function ApiRequestEditor() {
             size="icon"
             onClick={handleCopyUrl}
             title="Copy URL"
-            className="h-6 w-6 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+            className="h-7 w-7 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
           >
-            <Copy className={cn('h-3 w-3', copied && 'text-green-500')} />
+            <Copy className={cn('h-3.5 w-3.5', copied && 'text-green-500')} />
           </Button>
-          <Button variant="outline" onClick={handleSave} className="h-6 px-2 text-xs gap-1">
+          <Button
+            variant="outline"
+            onClick={handleSave}
+            className="h-7 px-2.5 text-xs gap-1 border-slate-200 dark:border-slate-700"
+          >
             <Save className="h-3 w-3" />
             Save
           </Button>
         </div>
       </div>
 
-      {/* URL bar */}
-      <div className="flex items-center gap-2 px-3 pb-2 shrink-0">
+      {/* ── URL bar ──────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 px-3 py-2 shrink-0">
         <Select value={draft.method} onValueChange={(v) => update({ method: v })}>
-          <SelectTrigger className="w-28 h-8 shrink-0 text-xs font-mono border-slate-200 dark:border-slate-700">
+          <SelectTrigger className="w-[108px] h-9 shrink-0 text-xs font-mono border-slate-200 dark:border-slate-700">
             <SelectValue>
               <MethodBadge method={draft.method} />
             </SelectValue>
@@ -217,52 +225,66 @@ export function ApiRequestEditor() {
         <Input
           value={urlInput}
           onChange={(e) => handleUrlChange(e.target.value)}
-          placeholder="Enter request URL"
-          className="h-8 text-sm font-mono flex-1 min-w-0"
+          placeholder="https://api.example.com/endpoint"
+          className="h-9 text-sm font-mono flex-1 min-w-0"
           onKeyDown={(e) => { if (e.key === 'Enter') handleSend() }}
         />
 
         <Button
           onClick={handleSend}
           disabled={isSending || !draft.url}
-          className="h-8 px-4 text-xs shrink-0 gap-1.5 bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500"
+          className="h-9 px-4 text-sm shrink-0 gap-1.5 bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 font-medium"
         >
           {isSending ? (
-            <><Loader2 className="h-3.5 w-3.5 animate-spin" />Sending...</>
+            <><Loader2 className="h-3.5 w-3.5 animate-spin" />Sending</>
           ) : (
-            <><Play className="h-3 w-3 fill-current" />Send</>
+            <><Play className="h-3.5 w-3.5 fill-current" />Send</>
           )}
         </Button>
       </div>
 
-      {/* Tabs */}
+      {/* ── Tabs ─────────────────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0 overflow-hidden border-t border-slate-100 dark:border-slate-800">
         <Tabs defaultValue="params" className="h-full flex flex-col">
-          <TabsList className="h-8 px-3 rounded-none border-b border-slate-100 dark:border-slate-800 justify-start bg-transparent shrink-0 gap-0">
+
+          {/* Tab bar */}
+          <TabsList className="h-9 px-3 rounded-none border-b border-slate-100 dark:border-slate-800 justify-start bg-transparent shrink-0 gap-0">
             {(['params', 'headers', 'body', 'auth'] as const).map(tab => {
               const count = tab === 'params' ? activeParamCount : tab === 'headers' ? activeHeaderCount : 0
-              const indicator = tab === 'body' && draft.bodyType !== 'none'
-                ? draft.bodyType
-                : tab === 'auth' && draft.authType !== 'none'
-                  ? draft.authType
-                  : count > 0 ? String(count) : null
+              const indicator =
+                tab === 'body' && draft.bodyType !== 'none'
+                  ? draft.bodyType
+                  : tab === 'auth' && draft.authType !== 'none'
+                    ? draft.authType
+                    : count > 0
+                      ? String(count)
+                      : null
 
-              const indicatorColor = tab === 'body'
-                ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-400'
-                : tab === 'auth'
-                  ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400'
-                  : 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+              const indicatorColor =
+                tab === 'body'
+                  ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-400'
+                  : tab === 'auth'
+                    ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400'
+                    : 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
 
-              const labels: Record<string, string> = { params: 'Params', headers: 'Headers', body: 'Body', auth: 'Auth' }
+              const labels: Record<string, string> = {
+                params: 'Params', headers: 'Headers', body: 'Body', auth: 'Auth',
+              }
+
               return (
                 <TabsTrigger
                   key={tab}
                   value={tab}
-                  className="text-xs h-7 px-3 data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-blue-500 data-[state=active]:shadow-none rounded-none gap-1"
+                  className={cn(
+                    'text-xs h-8 px-3 gap-1.5 rounded-none transition-colors',
+                    'data-[state=active]:bg-transparent data-[state=active]:border-b-2',
+                    'data-[state=active]:border-blue-500 data-[state=active]:shadow-none',
+                    'data-[state=inactive]:text-slate-500 dark:data-[state=inactive]:text-slate-400',
+                  )}
                 >
                   {labels[tab]}
                   {indicator && (
-                    <span className={cn('text-[10px] px-1 rounded font-medium', indicatorColor)}>
+                    <span className={cn('text-[10px] px-1.5 py-0 rounded-full font-semibold leading-4', indicatorColor)}>
                       {indicator}
                     </span>
                   )}
@@ -271,7 +293,7 @@ export function ApiRequestEditor() {
             })}
           </TabsList>
 
-          {/* Params */}
+          {/* ── Params ───────────────────────────────────────────────────── */}
           <TabsContent value="params" className="flex-1 overflow-y-auto p-3 m-0">
             <KeyValueTable
               rows={draft.queryParams}
@@ -281,7 +303,7 @@ export function ApiRequestEditor() {
             />
           </TabsContent>
 
-          {/* Headers */}
+          {/* ── Headers ──────────────────────────────────────────────────── */}
           <TabsContent value="headers" className="flex-1 overflow-y-auto p-3 m-0">
             <KeyValueTable
               rows={draft.headers}
@@ -289,18 +311,23 @@ export function ApiRequestEditor() {
               keyPlaceholder="Header"
               valuePlaceholder="Value"
             />
-            <div className="mt-3">
-              <p className="text-[11px] text-slate-400 mb-1.5">Quick add:</p>
+            <div className="mt-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-2">Quick add</p>
               <div className="flex flex-wrap gap-1">
                 {COMMON_HEADERS.map(h => (
                   <button
                     key={h}
                     onClick={() => {
                       if (!draft.headers.find(r => r.key === h)) {
-                        update({ headers: [...draft.headers, { id: crypto.randomUUID(), key: h, value: '', enabled: true }] })
+                        update({
+                          headers: [
+                            ...draft.headers,
+                            { id: crypto.randomUUID(), key: h, value: '', enabled: true },
+                          ],
+                        })
                       }
                     }}
-                    className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 font-mono"
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:text-blue-600 dark:hover:text-blue-400 font-mono transition-colors"
                   >
                     {h}
                   </button>
@@ -309,15 +336,17 @@ export function ApiRequestEditor() {
             </div>
           </TabsContent>
 
-          {/* Body */}
+          {/* ── Body ─────────────────────────────────────────────────────── */}
           <TabsContent value="body" className="flex-1 flex flex-col overflow-hidden p-0 m-0">
-            <div className="flex items-center gap-3 px-3 py-2 border-b border-slate-100 dark:border-slate-800 shrink-0">
+            {/* Body type header */}
+            <div className="flex items-center gap-3 px-3 py-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/30 shrink-0">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 shrink-0">Format</span>
               <PillToggle<ApiRequestDraft['bodyType']>
                 options={[
                   { value: 'none', label: 'None' },
                   { value: 'json', label: 'JSON' },
                   { value: 'form', label: 'Form' },
-                  { value: 'raw', label: 'Raw' }
+                  { value: 'raw', label: 'Raw' },
                 ]}
                 value={draft.bodyType}
                 onChange={(v) => update({ bodyType: v })}
@@ -325,8 +354,11 @@ export function ApiRequestEditor() {
             </div>
             <div className="flex-1 min-h-0 overflow-hidden">
               {draft.bodyType === 'none' && (
-                <div className="flex items-center justify-center h-full text-xs text-slate-400">
-                  No body
+                <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
+                  <div className="h-10 w-10 rounded-full bg-slate-100 dark:bg-slate-800/60 flex items-center justify-center">
+                    <span className="text-lg">∅</span>
+                  </div>
+                  <p className="text-xs text-slate-400 dark:text-slate-500">No request body</p>
                 </div>
               )}
               {(draft.bodyType === 'json' || draft.bodyType === 'raw') && (
@@ -338,7 +370,7 @@ export function ApiRequestEditor() {
                   theme={editorTheme}
                   options={{
                     minimap: { enabled: false }, fontSize: 12, lineNumbers: 'on',
-                    automaticLayout: true, wordWrap: 'on', scrollBeyondLastLine: false, tabSize: 2
+                    automaticLayout: true, wordWrap: 'on', scrollBeyondLastLine: false, tabSize: 2,
                   }}
                 />
               )}
@@ -355,114 +387,136 @@ export function ApiRequestEditor() {
             </div>
           </TabsContent>
 
-          {/* Auth */}
-          <TabsContent value="auth" className="flex-1 overflow-y-auto p-3 m-0">
-            <div className="mb-4">
+          {/* ── Auth ─────────────────────────────────────────────────────── */}
+          <TabsContent value="auth" className="flex-1 overflow-hidden m-0 flex flex-col">
+
+            {/* Auth type selector — always-visible sticky header */}
+            <div className="flex items-center gap-3 px-3 py-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/30 shrink-0">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 shrink-0">Type</span>
               <PillToggle<ApiRequestDraft['authType']>
                 options={[
                   { value: 'none', label: 'None' },
                   { value: 'bearer', label: 'Bearer' },
                   { value: 'basic', label: 'Basic' },
-                  { value: 'apikey', label: 'API Key' }
+                  { value: 'apikey', label: 'API Key' },
                 ]}
                 value={draft.authType}
                 onChange={(v) => update({ authType: v, authConfig: {} })}
               />
             </div>
 
-            {draft.authType === 'none' && (
-              <p className="text-xs text-slate-400 text-center py-4">No authentication configured</p>
-            )}
+            {/* Auth content — scrollable */}
+            <div className="flex-1 overflow-y-auto p-4">
 
-            {draft.authType === 'bearer' && (
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block">Token</label>
-                <div className="flex gap-2">
-                  <Input
-                    value={draft.authConfig.token ?? ''}
-                    onChange={(e) => update({ authConfig: { ...draft.authConfig, token: e.target.value } })}
-                    placeholder="Enter bearer token"
-                    className="h-8 text-xs font-mono flex-1"
-                  />
-                  <Button
-                    variant="ghost" size="icon" className="h-8 w-8 shrink-0"
-                    onClick={() => navigator.clipboard.writeText(draft.authConfig.token ?? '')}
-                    title="Copy token"
-                  >
-                    <Copy className="h-3 w-3" />
-                  </Button>
+              {draft.authType === 'none' && (
+                <div className="flex flex-col items-center justify-center py-8 gap-3 text-center">
+                  <div className="h-12 w-12 rounded-full bg-slate-100 dark:bg-slate-800/80 flex items-center justify-center">
+                    <Lock className="h-5 w-5 text-slate-300 dark:text-slate-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400">No authentication</p>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                      Select a type above to configure credentials
+                    </p>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-400">
-                  Adds <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded font-mono">Authorization: Bearer …</code> header
-                </p>
-              </div>
-            )}
+              )}
 
-            {draft.authType === 'basic' && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block">Username</label>
-                    <Input
-                      value={draft.authConfig.username ?? ''}
-                      onChange={(e) => update({ authConfig: { ...draft.authConfig, username: e.target.value } })}
-                      placeholder="Username"
-                      className="h-8 text-xs"
-                    />
+              {draft.authType === 'bearer' && (
+                <div className="space-y-3 max-w-lg">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block">Token</label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={draft.authConfig.token ?? ''}
+                        onChange={(e) => update({ authConfig: { ...draft.authConfig, token: e.target.value } })}
+                        placeholder="Enter bearer token"
+                        className="h-9 text-xs font-mono flex-1"
+                      />
+                      <Button
+                        variant="ghost" size="icon"
+                        className="h-9 w-9 shrink-0 text-slate-400 hover:text-slate-600"
+                        onClick={() => navigator.clipboard.writeText(draft.authConfig.token ?? '')}
+                        title="Copy token"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block">Password</label>
-                    <Input
-                      type="password"
-                      value={draft.authConfig.password ?? ''}
-                      onChange={(e) => update({ authConfig: { ...draft.authConfig, password: e.target.value } })}
-                      placeholder="Password"
-                      className="h-8 text-xs"
-                    />
-                  </div>
+                  <p className="text-[11px] text-slate-400 bg-slate-50 dark:bg-slate-800/60 px-3 py-2 rounded-md">
+                    Sends <code className="font-mono text-blue-600 dark:text-blue-400">Authorization: Bearer &lt;token&gt;</code> header
+                  </p>
                 </div>
-                <p className="text-[11px] text-slate-400">
-                  Adds <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded font-mono">Authorization: Basic base64(user:pass)</code>
-                </p>
-              </div>
-            )}
+              )}
 
-            {draft.authType === 'apikey' && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block">Key Name</label>
-                    <Input
-                      value={draft.authConfig.keyName ?? ''}
-                      onChange={(e) => update({ authConfig: { ...draft.authConfig, keyName: e.target.value } })}
-                      placeholder="X-API-Key"
-                      className="h-8 text-xs font-mono"
-                    />
+              {draft.authType === 'basic' && (
+                <div className="space-y-3 max-w-lg">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block">Username</label>
+                      <Input
+                        value={draft.authConfig.username ?? ''}
+                        onChange={(e) => update({ authConfig: { ...draft.authConfig, username: e.target.value } })}
+                        placeholder="Username"
+                        className="h-9 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block">Password</label>
+                      <Input
+                        type="password"
+                        value={draft.authConfig.password ?? ''}
+                        onChange={(e) => update({ authConfig: { ...draft.authConfig, password: e.target.value } })}
+                        placeholder="Password"
+                        className="h-9 text-xs"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block">Key Value</label>
-                    <Input
-                      value={draft.authConfig.keyValue ?? ''}
-                      onChange={(e) => update({ authConfig: { ...draft.authConfig, keyValue: e.target.value } })}
-                      placeholder="Your API key"
-                      className="h-8 text-xs font-mono"
+                  <p className="text-[11px] text-slate-400 bg-slate-50 dark:bg-slate-800/60 px-3 py-2 rounded-md">
+                    Sends <code className="font-mono text-blue-600 dark:text-blue-400">Authorization: Basic base64(user:pass)</code> header
+                  </p>
+                </div>
+              )}
+
+              {draft.authType === 'apikey' && (
+                <div className="space-y-3 max-w-lg">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block">Key Name</label>
+                      <Input
+                        value={draft.authConfig.keyName ?? ''}
+                        onChange={(e) => update({ authConfig: { ...draft.authConfig, keyName: e.target.value } })}
+                        placeholder="X-API-Key"
+                        className="h-9 text-xs font-mono"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block">Key Value</label>
+                      <Input
+                        value={draft.authConfig.keyValue ?? ''}
+                        onChange={(e) => update({ authConfig: { ...draft.authConfig, keyValue: e.target.value } })}
+                        placeholder="Your API key"
+                        className="h-9 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block">Add to</label>
+                    <PillToggle
+                      options={[
+                        { value: 'header', label: 'Header' },
+                        { value: 'query', label: 'Query Param' },
+                      ]}
+                      value={(draft.authConfig.keyLocation as 'header' | 'query') ?? 'header'}
+                      onChange={(v) => update({ authConfig: { ...draft.authConfig, keyLocation: v } })}
                     />
                   </div>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block">Add to</label>
-                  <PillToggle
-                    options={[
-                      { value: 'header', label: 'Header' },
-                      { value: 'query', label: 'Query Param' }
-                    ]}
-                    value={(draft.authConfig.keyLocation as 'header' | 'query') ?? 'header'}
-                    onChange={(v) => update({ authConfig: { ...draft.authConfig, keyLocation: v } })}
-                  />
-                </div>
-              </div>
-            )}
+              )}
+
+            </div>
           </TabsContent>
+
         </Tabs>
       </div>
     </div>
