@@ -5,9 +5,11 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchScripts, fetchCollections, fetchTemplates, fetchAllTags, setAutoSaveEnabled } from '@/features/scripts/scriptsSlice'
 import { fetchSettings } from '@/features/settings/settingsSlice'
 import { setOpsMode, fetchProjects, fetchServerProfiles } from '@/features/ops/opsSlice'
+import { fetchApiCollections, fetchApiRequests } from '@/features/api/apiSlice'
 import { ScriptsManager } from '@/components/ScriptsManager'
 import { SettingsManager } from '@/components/SettingsManager'
-import { Settings, Code2 } from 'lucide-react'
+import { ApiManager } from '@/components/api/ApiManager'
+import { Settings, Code2, Globe } from 'lucide-react'
 import { ModeToggle } from '@/components/ModeToggle'
 import { OpsModeToggle } from '@/components/OpsModeToggle'
 import { Switch } from '@/components/ui/switch'
@@ -16,7 +18,7 @@ import { Label } from '@/components/ui/label'
 export default function Home() {
   const dispatch = useAppDispatch()
   const { autoSaveEnabled } = useAppSelector((state) => state.scripts)
-  const [activeTab, setActiveTab] = useState<'scripts' | 'settings'>('scripts')
+  const [activeTab, setActiveTab] = useState<'scripts' | 'settings' | 'api'>('scripts')
 
   // Centralized initial data fetching — done once on mount
   useEffect(() => {
@@ -41,6 +43,10 @@ export default function Home() {
     // Load ops mode data
     dispatch(fetchProjects())
     dispatch(fetchServerProfiles())
+
+    // Load API mode data
+    dispatch(fetchApiCollections())
+    dispatch(fetchApiRequests())
   }, [dispatch])
 
   const toggleAutoSave = (enabled: boolean) => {
@@ -65,6 +71,16 @@ export default function Home() {
               }`}
           >
             Scripts
+          </button>
+          <button
+            onClick={() => setActiveTab('api')}
+            className={`px-3 py-1.5 text-xs rounded-md transition-colors flex items-center gap-1.5 ${activeTab === 'api'
+              ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900'
+              }`}
+          >
+            <Globe className="h-3 w-3" />
+            API
           </button>
           <button
             onClick={() => setActiveTab('settings')}
@@ -96,6 +112,9 @@ export default function Home() {
       <main className="flex-1 overflow-hidden">
         <div className={activeTab === 'scripts' ? 'h-full' : 'hidden'}>
           <ScriptsManager />
+        </div>
+        <div className={activeTab === 'api' ? 'h-full' : 'hidden'}>
+          <ApiManager />
         </div>
         <div className={activeTab === 'settings' ? 'h-full overflow-y-auto' : 'hidden'}>
           <SettingsManager />
