@@ -136,7 +136,7 @@ export const ScriptsManager = () => {
         }
     }, [currentBuildOutput]);
 
-    const handleSave = async (options: { skipGist?: boolean } = {}) => {
+    const handleSave = async (options: { skipGist?: boolean, isAutoSave?: boolean } = {}) => {
         if (activeScriptId) {
             const script = scripts.find(s => s.id === activeScriptId);
             if (script) {
@@ -154,8 +154,10 @@ export const ScriptsManager = () => {
                 }));
 
                 if (saveScript.fulfilled.match(result)) {
-                    // Refresh version list after save
-                    dispatch(fetchVersions(activeScriptId));
+                    // Refresh version list after manual save only (autosaves don't create new version entries)
+                    if (!options.isAutoSave) {
+                        dispatch(fetchVersions(activeScriptId));
+                    }
                     if (!options.skipGist) {
                         setGistDirty(false);
                     }
@@ -177,7 +179,7 @@ export const ScriptsManager = () => {
 
         const timer = setTimeout(() => {
             // Save locally, skip Gist
-            handleSave({ skipGist: true });
+            handleSave({ skipGist: true, isAutoSave: true });
             // Mark Gist as dirty if Gist sync is enabled
             if (script.sync_to_gist) {
                 setGistDirty(true);

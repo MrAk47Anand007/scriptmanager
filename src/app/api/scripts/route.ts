@@ -53,7 +53,7 @@ export async function POST(req: Request) {
   // Invalidate cache on create/update
   await cache.del('all_scripts')
 
-  const { id, name, content, sync_to_gist, language, interpreter, parameters, timeout_ms } = data
+  const { id, name, description, content, sync_to_gist, language, interpreter, parameters, timeout_ms } = data
 
   // Serialize parameters to JSON string for storage
   let parametersJson = '[]'
@@ -104,6 +104,7 @@ export async function POST(req: Request) {
       where: { id },
       data: {
         name,
+        description: description !== undefined ? description : script.description,
         language: language ?? script.language,
         interpreter: language === 'custom' ? (interpreter ?? null) : null,
         syncToGist: sync_to_gist ?? script.syncToGist,
@@ -139,6 +140,7 @@ export async function POST(req: Request) {
     script = await prisma.script.create({
       data: {
         name,
+        description,
         filename,
         language: language ?? 'python',
         interpreter: language === 'custom' ? (interpreter ?? null) : null,

@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useAppDispatch, useAppSelector, useAppStore } from '@/store/hooks';
 import type { RootState } from '@/store/store';
 import {
-    setActiveScript, createScript, createCollection, deleteCollection, moveScript,
+    setActiveScript, createScript, createCollection, deleteCollection, moveScript, moveCollection,
     saveAsTemplate, duplicateScript, deleteScript,
 } from '@/features/scripts/scriptsSlice';
 import type { Script, Collection, ScriptTemplate } from '@/features/scripts/scriptsSlice';
@@ -154,26 +154,35 @@ const DroppableCollection = ({
     onDelete: () => void,
     onCreateScript: () => void
 }) => {
-    const { setNodeRef, isOver } = useDroppable({
-        id: collection.id,
+    const { setNodeRef: setDroppableNodeRef, isOver } = useDroppable({
+        id: `drop-col-${collection.id}`,
+        data: { type: 'collection', collection }
+    });
+
+    const { attributes, listeners, setNodeRef: setDraggableNodeRef, isDragging } = useDraggable({
+        id: `drag-col-${collection.id}`,
         data: { type: 'collection', collection }
     });
 
     return (
         <ContextMenu>
             <ContextMenuTrigger>
-                <div ref={setNodeRef} className={cn("space-y-0.5 rounded-md transition-colors", isOver && "bg-blue-50 ring-1 ring-blue-200")}>
+                <div ref={setDroppableNodeRef} className={cn("space-y-0.5 rounded-md transition-colors", isOver && "bg-blue-50 dark:bg-blue-900/40 ring-1 ring-blue-200 dark:ring-blue-800")}>
                     <div
-                        className="flex items-center gap-1 px-2 py-1.5 text-sm font-medium rounded-md hover:bg-slate-200/50 group cursor-pointer"
+                        ref={setDraggableNodeRef}
+                        {...attributes}
+                        {...listeners}
+                        className={cn("flex items-center gap-1 px-2 py-1.5 text-sm font-medium rounded-md hover:bg-slate-200/50 dark:hover:bg-slate-800 group cursor-pointer", isDragging && "opacity-50 line-through")}
                         onClick={toggle}
                     >
+                        <GripVertical className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                         {isExpanded ? (
-                            <ChevronDown className="h-3 w-3 text-slate-400" />
+                            <ChevronDown className="h-3 w-3 text-slate-400 flex-shrink-0" />
                         ) : (
-                            <ChevronRight className="h-3 w-3 text-slate-400" />
+                            <ChevronRight className="h-3 w-3 text-slate-400 flex-shrink-0" />
                         )}
-                        <Folder className={cn("h-4 w-4", isOver ? "text-blue-500" : "text-slate-500")} />
-                        <span className="truncate flex-1 text-slate-700">{collection.name}</span>
+                        <Folder className={cn("h-4 w-4 flex-shrink-0", isOver ? "text-blue-500" : "text-slate-500")} />
+                        <span className="truncate flex-1 text-slate-700 dark:text-slate-300">{collection.name}</span>
                         <Button
                             variant="ghost"
                             size="icon"
@@ -218,6 +227,80 @@ const DroppableCollection = ({
     );
 };
 
+// Droppable Project Component
+const DroppableProject = ({
+    project,
+    isExpanded,
+    toggleProject,
+    handleCreateScript,
+    handleCreateCollection,
+    handleDeleteProject,
+    children
+}: {
+    project: any;
+    isExpanded: boolean;
+    toggleProject: () => void;
+    handleCreateScript: () => void;
+    handleCreateCollection: () => void;
+    handleDeleteProject: () => void;
+    children: React.ReactNode;
+}) => {
+    const { setNodeRef, isOver } = useDroppable({
+        id: `drop-proj-${project.id}`,
+        data: { type: 'project', project }
+    });
+
+    const envLabels: Record<string, string> = {
+        development: 'DEV',
+        qa: 'QA',
+        uat: 'UAT',
+        production: 'PROD',
+    };
+
+    return (
+        <div ref={setNodeRef} className={cn("space-y-0.5 rounded-md transition-colors", isOver && "bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-200 dark:ring-amber-800")}>
+            <div
+                className="flex items-center gap-1 px-2 py-1.5 text-xs font-semibold rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 group cursor-pointer"
+                onClick={toggleProject}
+            >
+                {isExpanded ? <ChevronDown className="h-3 w-3 text-slate-400 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 text-slate-400 flex-shrink-0" />}
+                <Layers className="h-3.5 w-3.5 flex-shrink-0" style={{ color: project.color }} />
+                <span className="flex-1 truncate text-slate-700 dark:text-slate-300">{project.name}</span>
+                <span
+                    className="text-[9px] font-bold px-1 py-0.5 rounded flex-shrink-0"
+                    style={{ backgroundColor: project.color + '22', color: project.color }}
+                >
+                    {envLabels[project.environment] ?? project.environment.toUpperCase()}
+                </span>
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-5 w-5 opacity-0 group-hover:opacity-100 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                            <MoreVertical className="h-3 w-3" />
+                        </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={e => { e.stopPropagation(); handleCreateScript(); }}>
+                            <FileCode className="mr-2 h-4 w-4" /> New Script
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={e => { e.stopPropagation(); handleCreateCollection(); }}>
+                            <Folder className="mr-2 h-4 w-4" /> New Collection
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={e => { e.stopPropagation(); handleDeleteProject(); }}>
+                            <Trash2 className="mr-2 h-4 w-4" /> Delete Project
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            </div>
+            {isExpanded && (
+                <div className="pl-3 space-y-0.5">
+                    {children}
+                </div>
+            )}
+        </div>
+    );
+};
+
 export const ScriptsSidebar = () => {
     const dispatch = useAppDispatch();
     const store = useAppStore();
@@ -233,11 +316,15 @@ export const ScriptsSidebar = () => {
     const [expandedCollections, setExpandedCollections] = useState<Record<string, boolean>>({});
     const [isCreatingCollection, setIsCreatingCollection] = useState(false);
     const [newCollectionName, setNewCollectionName] = useState('');
+    const [parentProjectId, setParentProjectId] = useState<string | null>(null);
     const [activeDragScript, setActiveDragScript] = useState<Script | null>(null);
+    const [activeDragCollection, setActiveDragCollection] = useState<Collection | null>(null);
 
     // New Script Dialog State
     const [isCreateScriptOpen, setIsCreateScriptOpen] = useState(false);
     const [newScriptName, setNewScriptName] = useState('');
+    const [newScriptDescription, setNewScriptDescription] = useState('');
+    const [isCreatingScript, setIsCreatingScript] = useState(false);
     const [parentCollectionId, setParentCollectionId] = useState<string | null>(null);
     const [syncToGistOverride, setSyncToGistOverride] = useState(false);
 
@@ -319,6 +406,8 @@ export const ScriptsSidebar = () => {
         if (isCreateScriptOpen) {
             setSyncToGistOverride(settings['gist_sync_enabled'] === 'true');
             setNewScriptName('');
+            setNewScriptDescription('');
+            setIsCreatingScript(false);
         }
     }, [isCreateScriptOpen, settings]);
 
@@ -353,37 +442,44 @@ export const ScriptsSidebar = () => {
     };
 
     const handleCreateScriptSubmit = async () => {
-        if (!newScriptName.trim()) return;
+        if (!newScriptName.trim() || isCreatingScript) return;
 
-        let content = '';
-        let language = 'python';
+        setIsCreatingScript(true);
+        try {
+            let content = '';
+            let language = 'python';
 
-        const lowerName = newScriptName.toLowerCase();
-        if (lowerName.endsWith('.py')) {
-            language = 'python';
-            content = 'print("Hello World")';
-        } else if (lowerName.endsWith('.js') || lowerName.endsWith('.ts')) {
-            language = 'node';
-            content = 'console.log("Hello World");';
-        } else if (lowerName.endsWith('.sh')) {
-            language = 'shell';
-            content = '#!/bin/bash\necho "Hello World"';
-        }
-
-        const result = await dispatch(createScript({
-            name: newScriptName,
-            syncToGist: syncToGistOverride,
-            content,
-            language
-        }));
-
-        if (createScript.fulfilled.match(result)) {
-            if (parentCollectionId) {
-                await dispatch(moveScript({ scriptId: result.payload.id, collectionId: parentCollectionId }));
-                setExpandedCollections(prev => ({ ...prev, [parentCollectionId]: true }));
+            const lowerName = newScriptName.toLowerCase();
+            if (lowerName.endsWith('.py')) {
+                language = 'python';
+                content = 'print("Hello World")';
+            } else if (lowerName.endsWith('.js') || lowerName.endsWith('.ts')) {
+                language = 'node';
+                content = 'console.log("Hello World");';
+            } else if (lowerName.endsWith('.sh')) {
+                language = 'shell';
+                content = '#!/bin/bash\necho "Hello World"';
             }
-            setIsCreateScriptOpen(false);
-            setNewScriptName('');
+
+            const result = await dispatch(createScript({
+                name: newScriptName,
+                description: newScriptDescription.trim() || undefined,
+                syncToGist: syncToGistOverride,
+                content,
+                language
+            }));
+
+            if (createScript.fulfilled.match(result)) {
+                if (parentCollectionId) {
+                    await dispatch(moveScript({ scriptId: result.payload.id, collectionId: parentCollectionId }));
+                    setExpandedCollections(prev => ({ ...prev, [parentCollectionId]: true }));
+                }
+                setIsCreateScriptOpen(false);
+                setNewScriptName('');
+                setNewScriptDescription('');
+            }
+        } finally {
+            setIsCreatingScript(false);
         }
     };
 
@@ -393,9 +489,10 @@ export const ScriptsSidebar = () => {
 
     const handleCreateCollection = async () => {
         if (!newCollectionName.trim()) return;
-        await dispatch(createCollection(newCollectionName));
+        await dispatch(createCollection({ name: newCollectionName.trim(), projectId: parentProjectId }));
         setNewCollectionName('');
         setIsCreatingCollection(false);
+        setParentProjectId(null);
     };
 
     const handleDeleteCollection = async (id: string) => {
@@ -406,23 +503,38 @@ export const ScriptsSidebar = () => {
 
     const handleDragStart = (event: DragStartEvent) => {
         const { active } = event;
-        const script = scripts.find(s => s.id === active.id);
-        if (script) setActiveDragScript(script);
+        const data = active.data.current;
+        if (data?.type === 'script') {
+            setActiveDragScript(data.script);
+        } else if (data?.type === 'collection') {
+            setActiveDragCollection(data.collection);
+        }
     };
 
     const handleDragEnd = async (event: DragEndEvent) => {
         const { active, over } = event;
         setActiveDragScript(null);
+        setActiveDragCollection(null);
 
         if (!over) return;
 
-        const scriptId = active.id as string;
-        const collectionId = over.id as string;
+        const activeData = active.data.current;
+        const overData = over.data.current;
 
-        const script = scripts.find(s => s.id === scriptId);
-        if (script && script.collection_id !== collectionId) {
-            await dispatch(moveScript({ scriptId, collectionId }));
-            setExpandedCollections(prev => ({ ...prev, [collectionId]: true }));
+        if (activeData?.type === 'script' && overData?.type === 'collection') {
+            const scriptId = activeData.script.id;
+            const collectionId = overData.collection.id;
+            if (activeData.script.collection_id !== collectionId) {
+                await dispatch(moveScript({ scriptId, collectionId }));
+                setExpandedCollections(prev => ({ ...prev, [collectionId]: true }));
+            }
+        } else if (activeData?.type === 'collection' && overData?.type === 'project') {
+            const collectionId = activeData.collection.id;
+            const projectId = overData.project.id;
+            if (activeData.collection.project_id !== projectId) {
+                await dispatch(moveCollection({ collectionId, projectId }));
+                setExpandedProjects(prev => ({ ...prev, [projectId]: true }));
+            }
         }
     };
 
@@ -574,7 +686,7 @@ export const ScriptsSidebar = () => {
                                             <LayoutTemplate className="mr-2 h-4 w-4" /> New from Template
                                         </DropdownMenuItem>
                                         <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => setIsCreatingCollection(true)}>
+                                        <DropdownMenuItem onClick={() => { setParentProjectId(null); setIsCreatingCollection(true); }}>
                                             <Folder className="mr-2 h-4 w-4" /> New Collection
                                         </DropdownMenuItem>
                                         {isModeActive && (
@@ -687,73 +799,46 @@ export const ScriptsSidebar = () => {
                                         production: 'PROD',
                                     };
                                     return (
-                                        <div key={project.id} className="space-y-0.5">
-                                            <div
-                                                className="flex items-center gap-1 px-2 py-1.5 text-xs font-semibold rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 group cursor-pointer"
-                                                onClick={() => toggleProject(project.id)}
-                                            >
-                                                {isExpanded ? <ChevronDown className="h-3 w-3 text-slate-400" /> : <ChevronRight className="h-3 w-3 text-slate-400" />}
-                                                <Layers className="h-3.5 w-3.5" style={{ color: project.color }} />
-                                                <span className="flex-1 truncate text-slate-700 dark:text-slate-300">{project.name}</span>
-                                                <span
-                                                    className="text-[9px] font-bold px-1 py-0.5 rounded"
-                                                    style={{ backgroundColor: project.color + '22', color: project.color }}
-                                                >
-                                                    {envLabels[project.environment] ?? project.environment.toUpperCase()}
-                                                </span>
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" size="icon" className="h-5 w-5 opacity-0 group-hover:opacity-100" onClick={e => e.stopPropagation()}>
-                                                            <MoreVertical className="h-3 w-3" />
-                                                        </Button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end">
-                                                        <DropdownMenuItem onClick={e => { e.stopPropagation(); handleCreateScript(); }}>
-                                                            <FileCode className="mr-2 h-4 w-4" /> New Script
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={e => { e.stopPropagation(); setIsCreatingCollection(true); }}>
-                                                            <Folder className="mr-2 h-4 w-4" /> New Collection
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuSeparator />
-                                                        <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={e => { e.stopPropagation(); handleDeleteProject(project.id); }}>
-                                                            <Trash2 className="mr-2 h-4 w-4" /> Delete Project
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
+                                        <DroppableProject
+                                            key={project.id}
+                                            project={project}
+                                            isExpanded={isExpanded}
+                                            toggleProject={() => toggleProject(project.id)}
+                                            handleCreateScript={() => handleCreateScript()}
+                                            handleCreateCollection={() => { setParentProjectId(project.id); setIsCreatingCollection(true); }}
+                                            handleDeleteProject={() => handleDeleteProject(project.id)}
+                                        >
+                                            <div className="space-y-0.5">
+                                                {projectCollections.map(collection => (
+                                                    <DroppableCollection
+                                                        key={collection.id}
+                                                        collection={collection}
+                                                        isExpanded={!!expandedCollections[collection.id]}
+                                                        toggle={() => toggleCollection(collection.id)}
+                                                        onDelete={() => handleDeleteCollection(collection.id)}
+                                                        onCreateScript={() => handleCreateScript(collection.id)}
+                                                    >
+                                                        {grouped.result[collection.id]?.length === 0 && (
+                                                            <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
+                                                        )}
+                                                        {(grouped.result[collection.id] ?? []).map(script => (
+                                                            <DraggableScript
+                                                                key={script.id}
+                                                                script={script}
+                                                                isActive={activeScriptId === script.id}
+                                                                onClick={() => dispatch(setActiveScript(script.id))}
+                                                                onSaveAsTemplate={() => openSaveAsTemplate(script)}
+                                                                onDuplicate={() => dispatch(duplicateScript(script.id))}
+                                                                onDelete={() => handleDeleteScriptRequest(script)}
+                                                            />
+                                                        ))}
+                                                    </DroppableCollection>
+                                                ))}
+                                                {projectCollections.length === 0 && (
+                                                    <div className="px-4 py-1 text-xs text-slate-400 italic">No collections</div>
+                                                )}
                                             </div>
-                                            {isExpanded && (
-                                                <div className="pl-3 space-y-0.5">
-                                                    {projectCollections.map(collection => (
-                                                        <DroppableCollection
-                                                            key={collection.id}
-                                                            collection={collection}
-                                                            isExpanded={!!expandedCollections[collection.id]}
-                                                            toggle={() => toggleCollection(collection.id)}
-                                                            onDelete={() => handleDeleteCollection(collection.id)}
-                                                            onCreateScript={() => handleCreateScript(collection.id)}
-                                                        >
-                                                            {grouped.result[collection.id]?.length === 0 && (
-                                                                <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
-                                                            )}
-                                                            {(grouped.result[collection.id] ?? []).map(script => (
-                                                                <DraggableScript
-                                                                    key={script.id}
-                                                                    script={script}
-                                                                    isActive={activeScriptId === script.id}
-                                                                    onClick={() => dispatch(setActiveScript(script.id))}
-                                                                    onSaveAsTemplate={() => openSaveAsTemplate(script)}
-                                                                    onDuplicate={() => dispatch(duplicateScript(script.id))}
-                                                                    onDelete={() => handleDeleteScriptRequest(script)}
-                                                                />
-                                                            ))}
-                                                        </DroppableCollection>
-                                                    ))}
-                                                    {projectCollections.length === 0 && (
-                                                        <div className="px-4 py-1 text-xs text-slate-400 italic">No collections</div>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
+                                        </DroppableProject>
                                     );
                                 })}
 
@@ -762,7 +847,7 @@ export const ScriptsSidebar = () => {
                                     const unassigned = collections.filter(c => !c.project_id);
                                     if (unassigned.length === 0 && grouped.unsorted.length === 0) return null;
                                     return (
-                                        <div className="space-y-0.5">
+                                        <div className="space-y-0.5 mt-2">
                                             {(unassigned.length > 0 || grouped.unsorted.length > 0) && (
                                                 <div className="px-2 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                                                     <Folder className="h-3 w-3" /> Unassigned
@@ -813,7 +898,7 @@ export const ScriptsSidebar = () => {
                         {/* === Normal Mode (or search active): flat collection → script view === */}
                         {(!isModeActive || searchQuery.trim()) && (
                             <>
-                                {collections.map(collection => (
+                                {(searchQuery.trim() ? collections : collections.filter(c => !c.project_id)).map(collection => (
                                     <DroppableCollection
                                         key={collection.id}
                                         collection={collection}
@@ -839,7 +924,7 @@ export const ScriptsSidebar = () => {
                                     </DroppableCollection>
                                 ))}
 
-                                {grouped.unsorted.length > 0 && collections.length > 0 && (
+                                {grouped.unsorted.length > 0 && (!isModeActive || searchQuery.trim()) && (
                                     <div className="px-2 py-2 text-xs font-semibold text-slate-400 uppercase">Unsorted</div>
                                 )}
                                 {grouped.unsorted.map((script) => (
@@ -872,23 +957,29 @@ export const ScriptsSidebar = () => {
                                     <span className="truncate text-xs">{activeDragScript.name}</span>
                                 </div>
                             )}
+                            {activeDragCollection && (
+                                <div className="flex items-center gap-2 px-2 py-1.5 text-sm font-medium rounded-md bg-white border border-slate-200 shadow-lg opacity-80 w-64">
+                                    <Folder className="h-3.5 w-3.5 text-blue-500" />
+                                    <span className="truncate text-xs font-semibold">{activeDragCollection.name}</span>
+                                </div>
+                            )}
                         </DragOverlay>,
                         document.body
                     )
                 }
 
                 {/* Create new script dialog */}
-                <Dialog open={isCreateScriptOpen} onOpenChange={setIsCreateScriptOpen}>
+                <Dialog open={isCreateScriptOpen} onOpenChange={(open) => !isCreatingScript && setIsCreateScriptOpen(open)}>
                     <DialogContent className="sm:max-w-md">
                         <DialogHeader>
                             <DialogTitle>Create New Script</DialogTitle>
                             <DialogDescription>
-                                Enter a name for your new script. It will be saved to your local scripts folder.
+                                Enter details for your new script. It will be saved to your local scripts folder.
                             </DialogDescription>
                         </DialogHeader>
                         <div className="flex flex-col gap-4 py-4">
                             <div className="flex flex-col gap-2">
-                                <Label htmlFor="name" className="text-right text-left">
+                                <Label htmlFor="name" className="text-left">
                                     Script Name
                                 </Label>
                                 <Input
@@ -897,6 +988,20 @@ export const ScriptsSidebar = () => {
                                     value={newScriptName}
                                     onChange={(e) => setNewScriptName(e.target.value)}
                                     autoFocus
+                                    disabled={isCreatingScript}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleCreateScriptSubmit()}
+                                />
+                            </div>
+                            <div className="flex flex-col gap-2">
+                                <Label htmlFor="description" className="text-left">
+                                    Description <span className="text-slate-400 font-normal">(optional)</span>
+                                </Label>
+                                <Input
+                                    id="description"
+                                    placeholder="What does this script do?"
+                                    value={newScriptDescription}
+                                    onChange={(e) => setNewScriptDescription(e.target.value)}
+                                    disabled={isCreatingScript}
                                     onKeyDown={(e) => e.key === 'Enter' && handleCreateScriptSubmit()}
                                 />
                             </div>
@@ -905,6 +1010,7 @@ export const ScriptsSidebar = () => {
                                     id="syncToGist"
                                     checked={syncToGistOverride}
                                     onCheckedChange={(checked) => setSyncToGistOverride(!!checked)}
+                                    disabled={isCreatingScript}
                                 />
                                 <label
                                     htmlFor="syncToGist"
@@ -915,11 +1021,18 @@ export const ScriptsSidebar = () => {
                             </div>
                         </div>
                         <DialogFooter>
-                            <Button variant="secondary" onClick={() => setIsCreateScriptOpen(false)}>
+                            <Button variant="secondary" onClick={() => setIsCreateScriptOpen(false)} disabled={isCreatingScript}>
                                 Cancel
                             </Button>
-                            <Button onClick={handleCreateScriptSubmit} disabled={!newScriptName.trim()}>
-                                Create Script
+                            <Button onClick={handleCreateScriptSubmit} disabled={!newScriptName.trim() || isCreatingScript}>
+                                {isCreatingScript ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Creating...
+                                    </>
+                                ) : (
+                                    'Create Script'
+                                )}
                             </Button>
                         </DialogFooter>
                     </DialogContent>

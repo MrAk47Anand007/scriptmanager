@@ -152,6 +152,7 @@ export const fetchScriptContent = createAsyncThunk('scripts/fetchScriptContent',
 
 export const createScript = createAsyncThunk('scripts/createScript', async (payload: string | {
     name: string
+    description?: string
     syncToGist?: boolean
     content?: string
     language?: string
@@ -159,6 +160,7 @@ export const createScript = createAsyncThunk('scripts/createScript', async (payl
     parameters?: ScriptParameter[]
 }) => {
     const name = typeof payload === 'string' ? payload : payload.name
+    const description = typeof payload === 'string' ? undefined : payload.description
     const syncToGist = typeof payload === 'string' ? undefined : payload.syncToGist
     const content = typeof payload === 'string' ? undefined : payload.content
     const language = typeof payload === 'string' ? undefined : payload.language
@@ -166,6 +168,7 @@ export const createScript = createAsyncThunk('scripts/createScript', async (payl
     const parameters = typeof payload === 'string' ? undefined : payload.parameters
     const response = await axios.post('/api/scripts', {
         name,
+        description,
         content: content ?? '# New script\nprint("Hello World")',
         sync_to_gist: syncToGist,
         language,
@@ -290,8 +293,8 @@ export const fetchCollections = createAsyncThunk('scripts/fetchCollections', asy
     return response.data
 })
 
-export const createCollection = createAsyncThunk('scripts/createCollection', async (name: string) => {
-    const response = await axios.post('/api/collections', { name })
+export const createCollection = createAsyncThunk('scripts/createCollection', async (payload: { name: string, projectId?: string | null }) => {
+    const response = await axios.post('/api/collections', { name: payload.name, project_id: payload.projectId })
     return response.data
 })
 
@@ -303,6 +306,11 @@ export const deleteCollection = createAsyncThunk('scripts/deleteCollection', asy
 export const moveScript = createAsyncThunk('scripts/moveScript', async ({ scriptId, collectionId }: { scriptId: string, collectionId: string | null }) => {
     const response = await axios.put(`/api/scripts/${scriptId}/move`, { collection_id: collectionId })
     return { scriptId, collectionId: response.data.collection_id }
+})
+
+export const moveCollection = createAsyncThunk('scripts/moveCollection', async ({ collectionId, projectId }: { collectionId: string, projectId: string | null }) => {
+    const response = await axios.put(`/api/collections/${collectionId}`, { project_id: projectId })
+    return { collectionId, projectId: response.data.project_id }
 })
 
 // --- Env Var Thunks ---
@@ -437,8 +445,11 @@ const scriptsSlice = createSlice({
                 const idx = state.items.findIndex(s => s.id === action.payload.id)
                 if (idx !== -1) {
                     state.items[idx] = { ...state.items[idx], ...action.payload }
+                    if (action.meta.arg.content !== undefined) {
+                        state.items[idx].content = action.meta.arg.content
+                    }
                 } else {
-                    state.items.push(action.payload)
+                    state.items.push({ ...action.payload, content: action.meta.arg.content })
                     state.activeScriptId = action.payload.id
                 }
             })
@@ -501,6 +512,12 @@ const scriptsSlice = createSlice({
                 const script = state.items.find(s => s.id === action.payload.scriptId)
                 if (script) {
                     script.collection_id = action.payload.collectionId
+                }
+            })
+            .addCase(moveCollection.fulfilled, (state, action) => {
+                const collection = state.collections.find(c => c.id === action.payload.collectionId)
+                if (collection) {
+                    collection.project_id = action.payload.projectId
                 }
             })
             .addCase(forceSyncGist.fulfilled, (state, action) => {
