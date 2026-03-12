@@ -166,14 +166,15 @@ export function ServerProfilesPanel() {
     return (
         <div className="border-b dark:border-slate-700">
             {/* Header */}
-            <div className="px-3 py-2 flex items-center justify-between">
-                <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1.5">
-                    <Server className="h-3 w-3 text-amber-500" /> Server Profiles
-                    <span className="ml-1 text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded px-1 font-bold">
+            <div className="px-3 py-2 flex items-center justify-between gap-2 overflow-hidden">
+                <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1.5 flex-1 min-w-0">
+                    <Server className="h-3 w-3 text-amber-500 shrink-0" />
+                    <span className="truncate">Server Profiles</span>
+                    <span className="ml-1 text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded px-1 font-bold shrink-0">
                         {serverProfiles.length}
                     </span>
                 </h3>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 shrink-0">
                     <Button
                         variant="ghost"
                         size="icon"

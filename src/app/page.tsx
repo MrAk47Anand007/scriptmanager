@@ -109,17 +109,18 @@ export default function Home() {
       </header>
 
       {/* Main content — CSS display toggle preserves component state across tab switches */}
-      <main className="flex-1 overflow-hidden">
-        <div className={activeTab === 'scripts' ? 'h-full' : 'hidden'}>
+      <main className="flex-1 overflow-hidden relative">
+        <div className={activeTab === 'scripts' ? 'absolute inset-0 opacity-100 z-10' : 'absolute inset-0 opacity-0 pointer-events-none -z-10'}>
           <ScriptsManager />
         </div>
-        <div className={activeTab === 'api' ? 'h-full' : 'hidden'}>
+        <div className={activeTab === 'api' ? 'absolute inset-0 opacity-100 z-10' : 'absolute inset-0 opacity-0 pointer-events-none -z-10'}>
           <ApiManager />
         </div>
-        <div className={activeTab === 'settings' ? 'h-full overflow-y-auto' : 'hidden'}>
+        <div className={activeTab === 'settings' ? 'absolute inset-0 overflow-y-auto bg-white dark:bg-slate-950 opacity-100 z-10' : 'absolute inset-0 opacity-0 pointer-events-none -z-10'}>
           <SettingsManager />
         </div>
       </main>
     </div>
   )
 }
+

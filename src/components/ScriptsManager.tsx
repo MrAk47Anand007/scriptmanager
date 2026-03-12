@@ -34,6 +34,7 @@ import { Input } from '@/components/ui/input';
 import { ScriptsSidebar } from './ScriptsSidebar';
 import { ParametersPanel } from './ParametersPanel';
 import { RunInputsDialog } from './RunInputsDialog';
+
 import { useTheme } from "next-themes";
 import type { ScriptParameter } from '@/lib/types';
 import {
@@ -458,14 +459,16 @@ export const ScriptsManager = () => {
     }, []);
 
     return (
-        <div className="flex h-screen bg-white dark:bg-slate-950">
-            {/* Sidebar List */}
-            <ScriptsSidebar />
+        <div className="flex h-screen bg-white dark:bg-slate-950 overflow-hidden">
+            {/* ── Left Sidebar ── */}
+            <div className="w-[250px] flex-shrink-0 border-r dark:border-slate-800">
+                <ScriptsSidebar />
+            </div>
 
-            {/* Main Editor Area */}
-            <div className="flex-1 flex flex-col min-w-0">
+            {/* ── Main Editor Area ── */}
+            <div className="flex-1 min-w-0 flex flex-col relative h-full">
                 {activeScriptId ? (
-                    <>
+                    <div className="h-full flex flex-col">
                         <div className="border-b px-4 py-2 flex items-center justify-between bg-white dark:bg-slate-950 dark:border-slate-800">
                             <div className="flex items-center gap-4">
                                 <span className="font-semibold text-sm text-slate-700 dark:text-slate-200">
@@ -606,7 +609,7 @@ export const ScriptsManager = () => {
                                 />
                             )}
                         </div>
-                    </>
+                    </div>
                 ) : (
                     <div className="flex-1 flex flex-col items-center justify-center text-slate-400 text-sm gap-2">
                         <span>Select a script to start editing</span>
@@ -615,234 +618,237 @@ export const ScriptsManager = () => {
                 )}
             </div>
 
-            {/* Right Panel */}
-            <div className="w-96 border-l dark:border-slate-800 flex flex-col bg-slate-50 dark:bg-slate-900 overflow-y-auto">
-                {isModeActive && <ServerProfilesPanel />}
-                {isModeActive && <RemoteExecutionPanel />}
-                {isModeActive && <AuditTrailPanel />}
-                <div className="flex-none flex flex-col h-[250px] min-h-[200px] border-b">
-                    <div className="px-3 py-2 border-b bg-amber-50 dark:bg-slate-950 text-xs font-semibold text-amber-900/80 dark:text-slate-400 uppercase flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <Terminal className="h-3 w-3" /> Console Output
-                        </div>
-                        {(!isTerminalOpen || isTerminalMinimized) && (
-                            <Button variant="ghost" size="sm" className="h-5 text-[10px] text-amber-800/60 dark:text-slate-500 hover:text-amber-900 dark:hover:text-slate-300" onClick={() => { setIsTerminalOpen(true); setIsTerminalMinimized(false); }}>
-                                {isTerminalMinimized ? 'Restore Terminal' : 'Open Terminal'}
-                            </Button>
-                        )}
-                    </div>
-                    <div
-                        ref={consoleRef}
-                        className="flex-1 overflow-y-auto bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-300 p-3 font-mono text-xs whitespace-pre-wrap"
-                    >
-                        {currentBuildOutput || <span className="text-slate-600 italic">Ready...</span>}
-                    </div>
-                </div>
-                {activeScriptId && (
-                    <div className="p-4 border-b dark:border-slate-800 bg-white dark:bg-slate-950 space-y-4">
-                        <div>
-                            <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1">
-                                    <LinkIcon className="h-3 w-3" /> Webhook
-                                </h3>
-                                <Button variant="ghost" size="icon" className="h-5 w-5" onClick={handleRegenerateWebhook} title="Regenerate Token">
-                                    <RefreshCw className="h-3 w-3 text-slate-400" />
+            {/* ── Right Panel ── */}
+            <div className="w-[350px] flex-shrink-0 border-l dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex flex-col h-full overflow-hidden">
+                <div className="flex-1 overflow-y-auto overflow-x-hidden">
+                    {isModeActive && <ServerProfilesPanel />}
+                    {isModeActive && <RemoteExecutionPanel />}
+                    {isModeActive && <AuditTrailPanel />}
+                    <div className="flex-none flex flex-col h-[250px] min-h-[200px] border-b">
+                        <div className="px-3 py-2 border-b bg-amber-50 dark:bg-slate-950 text-xs font-semibold text-amber-900/80 dark:text-slate-400 uppercase flex items-center gap-2 overflow-hidden">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <Terminal className="h-3 w-3 shrink-0" />
+                                <span className="truncate">Console Output</span>
+                            </div>
+                            {(!isTerminalOpen || isTerminalMinimized) && (
+                                <Button variant="ghost" size="sm" className="h-5 text-[10px] text-amber-800/60 dark:text-slate-500 hover:text-amber-900 dark:hover:text-slate-300 shrink-0 whitespace-nowrap px-1.5" onClick={() => { setIsTerminalOpen(true); setIsTerminalMinimized(false); }}>
+                                    {isTerminalMinimized ? 'Restore' : 'Terminal'}
                                 </Button>
-                            </div>
-                            <div className="bg-slate-100 dark:bg-slate-900 p-2 rounded border border-slate-200 dark:border-slate-700 text-[10px] font-mono break-all text-slate-600 dark:text-slate-400 select-all">
-                                {webhookUrl}
-                            </div>
-                            <p className="text-[10px] text-slate-400 mt-1">POST to this URL to trigger the script</p>
-
-                            {/* HMAC Signature Verification */}
-                            <div className="mt-2 border-t pt-2">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[10px] text-slate-500 flex items-center gap-1">
-                                        <ShieldCheck className="h-3 w-3" />
-                                        Require Signature
-                                    </span>
-                                    {isWebhookLoading ? (
-                                        <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
-                                    ) : (
-                                        <Switch
-                                            checked={activeScript?.require_webhook_signature ?? false}
-                                            onCheckedChange={async (checked) => {
-                                                if (!activeScriptId) return
-                                                setIsWebhookLoading(true)
-                                                try {
-                                                    const result = await dispatch(toggleWebhookSignature({ scriptId: activeScriptId, requireSignature: checked }))
-                                                    if (toggleWebhookSignature.fulfilled.match(result) && result.payload.webhook_secret) {
-                                                        setRevealedSecret(result.payload.webhook_secret)
-                                                    }
-                                                } finally {
-                                                    setIsWebhookLoading(false)
-                                                }
-                                            }}
-                                            className="scale-75 origin-right"
-                                        />
-                                    )}
-                                </div>
-                                <div className="flex items-center gap-1.5 mt-1.5">
-                                    <span className="text-[10px] text-slate-500 flex items-center gap-1">
-                                        <KeyRound className="h-3 w-3" />
-                                        {activeScript?.webhook_secret_set ? 'Secret configured' : 'No secret set'}
-                                    </span>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-4 text-[9px] text-blue-500 hover:text-blue-700 px-1"
-                                        onClick={async () => {
-                                            if (!activeScriptId) return
-                                            const result = await dispatch(regenerateWebhookSecret(activeScriptId))
-                                            if (regenerateWebhookSecret.fulfilled.match(result)) {
-                                                setRevealedSecret(result.payload.secret)
-                                            }
-                                        }}
-                                    >
-                                        {activeScript?.webhook_secret_set ? 'Rotate' : 'Generate'}
+                            )}
+                        </div>
+                        <div
+                            ref={consoleRef}
+                            className="flex-1 overflow-y-auto bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-300 p-3 font-mono text-xs whitespace-pre-wrap"
+                        >
+                            {currentBuildOutput || <span className="text-slate-600 italic">Ready...</span>}
+                        </div>
+                    </div>
+                    {activeScriptId && (
+                        <div className="p-4 border-b dark:border-slate-800 bg-white dark:bg-slate-950 space-y-4">
+                            <div>
+                                <div className="flex items-center gap-2 mb-2 overflow-hidden">
+                                    <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 flex-1 min-w-0">
+                                        <LinkIcon className="h-3 w-3 shrink-0" /> <span className="truncate">Webhook</span>
+                                    </h3>
+                                    <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={handleRegenerateWebhook} title="Regenerate Token">
+                                        <RefreshCw className="h-3 w-3 text-slate-400" />
                                     </Button>
                                 </div>
-                                {revealedSecret && (
-                                    <div className="mt-1.5">
-                                        <p className="text-[9px] text-amber-600 dark:text-amber-500 mb-1">⚠ Copy now — shown once only</p>
-                                        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-1.5 rounded text-[9px] font-mono break-all text-amber-800 dark:text-amber-200 select-all">
-                                            {revealedSecret}
+                                <div className="bg-slate-100 dark:bg-slate-900 p-2 rounded border border-slate-200 dark:border-slate-700 text-[10px] font-mono break-all text-slate-600 dark:text-slate-400 select-all">
+                                    {webhookUrl}
+                                </div>
+                                <p className="text-[10px] text-slate-400 mt-1">POST to this URL to trigger the script</p>
+
+                                {/* HMAC Signature Verification */}
+                                <div className="mt-2 border-t pt-2">
+                                    <div className="flex items-center gap-2 overflow-hidden">
+                                        <span className="text-[10px] text-slate-500 flex items-center gap-1 flex-1 min-w-0">
+                                            <ShieldCheck className="h-3 w-3 shrink-0" />
+                                            <span className="truncate">Require Signature</span>
+                                        </span>
+                                        {isWebhookLoading ? (
+                                            <Loader2 className="h-4 w-4 animate-spin text-slate-500 shrink-0" />
+                                        ) : (
+                                            <Switch
+                                                checked={activeScript?.require_webhook_signature ?? false}
+                                                onCheckedChange={async (checked) => {
+                                                    if (!activeScriptId) return
+                                                    setIsWebhookLoading(true)
+                                                    try {
+                                                        const result = await dispatch(toggleWebhookSignature({ scriptId: activeScriptId, requireSignature: checked }))
+                                                        if (toggleWebhookSignature.fulfilled.match(result) && result.payload.webhook_secret) {
+                                                            setRevealedSecret(result.payload.webhook_secret)
+                                                        }
+                                                    } finally {
+                                                        setIsWebhookLoading(false)
+                                                    }
+                                                }}
+                                                className="scale-75 origin-right"
+                                            />
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-1.5 mt-1.5">
+                                        <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                                            <KeyRound className="h-3 w-3" />
+                                            {activeScript?.webhook_secret_set ? 'Secret configured' : 'No secret set'}
+                                        </span>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-4 text-[9px] text-blue-500 hover:text-blue-700 px-1"
+                                            onClick={async () => {
+                                                if (!activeScriptId) return
+                                                const result = await dispatch(regenerateWebhookSecret(activeScriptId))
+                                                if (regenerateWebhookSecret.fulfilled.match(result)) {
+                                                    setRevealedSecret(result.payload.secret)
+                                                }
+                                            }}
+                                        >
+                                            {activeScript?.webhook_secret_set ? 'Rotate' : 'Generate'}
+                                        </Button>
+                                    </div>
+                                    {revealedSecret && (
+                                        <div className="mt-1.5">
+                                            <p className="text-[9px] text-amber-600 dark:text-amber-500 mb-1">⚠ Copy now — shown once only</p>
+                                            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-1.5 rounded text-[9px] font-mono break-all text-amber-800 dark:text-amber-200 select-all">
+                                                {revealedSecret}
+                                            </div>
+                                            <p className="text-[9px] text-slate-400 mt-1">
+                                                Header: <code>X-Hub-Signature-256: sha256=&#123;HMAC_SHA256(secret, body)&#125;</code>
+                                            </p>
                                         </div>
-                                        <p className="text-[9px] text-slate-400 mt-1">
-                                            Header: <code>X-Hub-Signature-256: sha256=&#123;HMAC_SHA256(secret, body)&#125;</code>
-                                        </p>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div>
+                                <div className="flex items-center gap-2 mb-2 overflow-hidden">
+                                    <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 flex-1 min-w-0">
+                                        <Calendar className="h-3 w-3 shrink-0" /> <span className="truncate">Schedule</span>
+                                    </h3>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        <span className="text-[10px] text-slate-500 dark:text-slate-400">{scheduleEnabled ? 'On' : 'Off'}</span>
+                                        <Switch checked={scheduleEnabled} onCheckedChange={setScheduleEnabled} className="scale-75 origin-right" />
+                                    </div>
+                                </div>
+                                <div className="flex gap-2 flex-wrap">
+                                    <Input
+                                        className="h-7 text-xs font-mono bg-white dark:bg-slate-950 dark:border-slate-700 flex-1 min-w-0"
+                                        placeholder="Cron (e.g. */15 * * * *)"
+                                        value={cronExpression}
+                                        onChange={(e) => setCronExpression(e.target.value)}
+                                    />
+                                    <Button size="sm" variant="outline" className="h-7 text-xs flex-shrink-0" onClick={handleScheduleSave}>Save</Button>
+                                </div>
+                                {schedule.nextRun && (
+                                    <div className="mt-1 text-[10px] text-slate-400">
+                                        Next run: {new Date(schedule.nextRun).toLocaleString()}
                                     </div>
                                 )}
                             </div>
-                        </div>
 
-                        <div>
-                            <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1">
-                                    <Calendar className="h-3 w-3" /> Schedule
-                                </h3>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-[10px] text-slate-500 dark:text-slate-400">{scheduleEnabled ? 'On' : 'Off'}</span>
-                                    <Switch checked={scheduleEnabled} onCheckedChange={setScheduleEnabled} className="scale-75 origin-right" />
+                            {/* Timeout section */}
+                            <div>
+                                <div className="flex items-center gap-1 mb-1.5">
+                                    <Clock className="h-3 w-3 text-slate-400" />
+                                    <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Timeout</h3>
+                                </div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <Input
+                                        className="h-7 text-xs w-20 bg-white dark:bg-slate-950 dark:border-slate-700 flex-shrink-0"
+                                        type="number"
+                                        min="1"
+                                        placeholder="30"
+                                        value={timeoutSecs}
+                                        onChange={(e) => setTimeoutSecs(e.target.value)}
+                                        title="Execution timeout in seconds (empty = global default)"
+                                    />
+                                    <span className="text-[10px] text-slate-400">sec (empty = default)</span>
                                 </div>
                             </div>
-                            <div className="flex gap-2">
-                                <Input
-                                    className="h-7 text-xs font-mono bg-white dark:bg-slate-950 dark:border-slate-700"
-                                    placeholder="Cron (e.g. */15 * * * *)"
-                                    value={cronExpression}
-                                    onChange={(e) => setCronExpression(e.target.value)}
+
+                            {/* Parameters section */}
+                            <div>
+                                <ParametersPanel
+                                    parameters={scriptParameters}
+                                    onChange={setScriptParameters}
                                 />
-                                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleScheduleSave}>Save</Button>
                             </div>
-                            {schedule.nextRun && (
-                                <div className="mt-1 text-[10px] text-slate-400">
-                                    Next run: {new Date(schedule.nextRun).toLocaleString()}
+
+                            {/* Tags section */}
+                            {activeScriptId && (() => {
+                                const activeScript = scripts.find(s => s.id === activeScriptId)
+                                return (
+                                    <div>
+                                        <TagsInput
+                                            scriptId={activeScriptId}
+                                            tags={activeScript?.tags ?? []}
+                                            allTags={allTags}
+                                            onAdd={(name) => dispatch(addTagToScript({ scriptId: activeScriptId, name }))}
+                                            onRemove={(tagId) => dispatch(removeTagFromScript({ scriptId: activeScriptId, tagId }))}
+                                        />
+                                    </div>
+                                )
+                            })()}
+
+                            {/* Env Vars section */}
+                            {activeScriptId && (
+                                <div>
+                                    <EnvVarsPanel
+                                        envVars={envVars}
+                                        onAdd={(key, value, isSecret) => dispatch(upsertEnvVar({ scriptId: activeScriptId, key, value, isSecret }))}
+                                        onDelete={(key) => dispatch(deleteEnvVar({ scriptId: activeScriptId, key }))}
+                                    />
+                                </div>
+                            )}
+
+                            {/* Version History section */}
+                            {activeScriptId && (
+                                <div>
+                                    <VersionHistoryPanel
+                                        scriptId={activeScriptId}
+                                        currentContent={activeScriptContent}
+                                        language={scriptLanguage}
+                                        onRestore={(content) => {
+                                            dispatch(updateActiveScriptContent(content));
+                                        }}
+                                    />
                                 </div>
                             )}
                         </div>
+                    )}
 
-                        {/* Timeout section */}
-                        <div>
-                            <div className="flex items-center gap-1 mb-1.5">
-                                <Clock className="h-3 w-3 text-slate-400" />
-                                <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Timeout</h3>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Input
-                                    className="h-7 text-xs w-20 bg-white dark:bg-slate-950 dark:border-slate-700"
-                                    type="number"
-                                    min="1"
-                                    placeholder="30"
-                                    value={timeoutSecs}
-                                    onChange={(e) => setTimeoutSecs(e.target.value)}
-                                    title="Execution timeout in seconds (empty = global default)"
-                                />
-                                <span className="text-[10px] text-slate-400">seconds (empty = global default)</span>
-                            </div>
+                    <div className="h-1/3 flex flex-col border-b dark:border-slate-800 min-h-[150px]">
+                        <div className="px-3 py-2 border-b dark:border-slate-800 bg-slate-100 dark:bg-slate-900 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 overflow-hidden">
+                            <Clock className="h-3 w-3 shrink-0" />
+                            <span className="truncate flex-1 min-w-0">Build History</span>
                         </div>
-
-                        {/* Parameters section */}
-                        <div>
-                            <ParametersPanel
-                                parameters={scriptParameters}
-                                onChange={setScriptParameters}
-                            />
+                        <div className="flex-1 overflow-y-auto">
+                            {builds.length === 0 && <div className="p-4 text-xs text-slate-400 text-center italic">No builds yet</div>}
+                            {builds.map((build, index) => (
+                                <div
+                                    key={build.id}
+                                    className="px-3 py-2 border-b border-slate-100 dark:border-slate-800 hover:bg-white dark:hover:bg-slate-800 cursor-pointer transition-colors"
+                                    onClick={() => handleBuildClick(build.id)}
+                                >
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-xs font-medium text-slate-700 dark:text-slate-300">#{builds.length - index}</span>
+                                        <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full uppercase tracking-wide",
+                                            build.status === 'success' ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400" :
+                                                build.status === 'failure' ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" :
+                                                    build.status === 'timeout' ? "bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400" :
+                                                        "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400"
+                                        )}>{build.status}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between text-[10px] text-slate-400">
+                                        <span>{new Date(build.started_at).toLocaleTimeString()}</span>
+                                        <span>{build.triggered_by}</span>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
-
-                        {/* Tags section */}
-                        {activeScriptId && (() => {
-                            const activeScript = scripts.find(s => s.id === activeScriptId)
-                            return (
-                                <div>
-                                    <TagsInput
-                                        scriptId={activeScriptId}
-                                        tags={activeScript?.tags ?? []}
-                                        allTags={allTags}
-                                        onAdd={(name) => dispatch(addTagToScript({ scriptId: activeScriptId, name }))}
-                                        onRemove={(tagId) => dispatch(removeTagFromScript({ scriptId: activeScriptId, tagId }))}
-                                    />
-                                </div>
-                            )
-                        })()}
-
-                        {/* Env Vars section */}
-                        {activeScriptId && (
-                            <div>
-                                <EnvVarsPanel
-                                    envVars={envVars}
-                                    onAdd={(key, value, isSecret) => dispatch(upsertEnvVar({ scriptId: activeScriptId, key, value, isSecret }))}
-                                    onDelete={(key) => dispatch(deleteEnvVar({ scriptId: activeScriptId, key }))}
-                                />
-                            </div>
-                        )}
-
-                        {/* Version History section */}
-                        {activeScriptId && (
-                            <div>
-                                <VersionHistoryPanel
-                                    scriptId={activeScriptId}
-                                    currentContent={activeScriptContent}
-                                    language={scriptLanguage}
-                                    onRestore={(content) => {
-                                        dispatch(updateActiveScriptContent(content));
-                                    }}
-                                />
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                <div className="h-1/3 flex flex-col border-b dark:border-slate-800 min-h-[150px]">
-                    <div className="px-3 py-2 border-b dark:border-slate-800 bg-slate-100 dark:bg-slate-900 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-2">
-                        <Clock className="h-3 w-3" /> Build History
-                    </div>
-                    <div className="flex-1 overflow-y-auto">
-                        {builds.length === 0 && <div className="p-4 text-xs text-slate-400 text-center italic">No builds yet</div>}
-                        {builds.map((build, index) => (
-                            <div
-                                key={build.id}
-                                className="px-3 py-2 border-b border-slate-100 dark:border-slate-800 hover:bg-white dark:hover:bg-slate-800 cursor-pointer transition-colors"
-                                onClick={() => handleBuildClick(build.id)}
-                            >
-                                <div className="flex items-center justify-between mb-1">
-                                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300">#{builds.length - index}</span>
-                                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full uppercase tracking-wide",
-                                        build.status === 'success' ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400" :
-                                            build.status === 'failure' ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" :
-                                                build.status === 'timeout' ? "bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400" :
-                                                    "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400"
-                                    )}>{build.status}</span>
-                                </div>
-                                <div className="flex items-center justify-between text-[10px] text-slate-400">
-                                    <span>{new Date(build.started_at).toLocaleTimeString()}</span>
-                                    <span>{build.triggered_by}</span>
-                                </div>
-                            </div>
-                        ))}
                     </div>
                 </div>
-
             </div>
 
             {/* Run Inputs Dialog — shown when script has parameters */}

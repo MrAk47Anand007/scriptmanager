@@ -44,11 +44,11 @@ export function EnvVarsPanel({ envVars, onAdd, onDelete, disabled }: Props) {
 
     return (
         <div>
-            <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1">
-                    <Shield className="h-3 w-3" /> Env Variables
+            <div className="flex items-center justify-between mb-2 gap-2 overflow-hidden">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1 flex-1 min-w-0">
+                    <Shield className="h-3 w-3 shrink-0" /> <span className="truncate">Env Variables</span>
                 </h3>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 shrink-0">
                     <Button
                         variant="ghost"
                         size="icon"
@@ -136,7 +136,7 @@ export function EnvVarsPanel({ envVars, onAdd, onDelete, disabled }: Props) {
                         <div className="border border-blue-200 dark:border-blue-900/50 rounded p-2 bg-blue-50/40 dark:bg-blue-900/10 space-y-1.5">
                             <Input
                                 autoFocus
-                                className="h-6 text-xs font-mono bg-white dark:bg-slate-950 dark:border-slate-600"
+                                className="h-6 text-xs font-mono bg-white dark:bg-slate-950 dark:border-slate-600 min-w-0"
                                 placeholder="KEY_NAME"
                                 value={newKey}
                                 onChange={(e) => {
@@ -146,8 +146,8 @@ export function EnvVarsPanel({ envVars, onAdd, onDelete, disabled }: Props) {
                                 onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
                             />
                             <Input
-                                className="h-6 text-xs font-mono bg-white dark:bg-slate-950 dark:border-slate-600"
-                                placeholder="value"
+                                className="h-6 text-xs font-mono bg-white dark:bg-slate-950 dark:border-slate-600 min-w-0"
+                                placeholder="Value"
                                 type={newIsSecret ? 'password' : 'text'}
                                 value={newValue}
                                 onChange={(e) => setNewValue(e.target.value)}

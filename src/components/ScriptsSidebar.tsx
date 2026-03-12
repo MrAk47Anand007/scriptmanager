@@ -664,7 +664,7 @@ export const ScriptsSidebar = () => {
                 onSelect={handleCreateFromTemplate}
             />
             <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-                <div className="w-64 bg-white dark:bg-slate-950 border-r dark:border-slate-800 flex flex-col h-full">
+                <div className="bg-white dark:bg-slate-950 border-r dark:border-slate-800 flex flex-col h-full">
                     <div className="p-3 border-b dark:border-slate-800">
                         <div className="flex items-center justify-between mb-2">
                             <h2 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Scripts</h2>

@@ -94,18 +94,35 @@ export const TerminalComponent = ({ onClose, isMinimized, toggleMinimize }: Term
             }
         });
 
-        // Handle resize
+        // Handle resize — use ResizeObserver so panel drag also triggers re-fit
         const handleResize = () => {
-            if (!fitAddonRef.current || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
+            if (!fitAddonRef.current) return;
             fitAddonRef.current.fit();
-            const { cols, rows } = term;
-            socketRef.current.send(`\x01resize:${cols},${rows}`);
+            if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                const { cols, rows } = term;
+                socketRef.current.send(`\x01resize:${cols},${rows}`);
+            }
         };
 
         window.addEventListener('resize', handleResize);
 
+        // Observe container size changes (e.g. resizable panel drag)
+        let resizeObserver: ResizeObserver | null = null;
+        let resizeDebounce: ReturnType<typeof setTimeout> | null = null;
+        if (terminalRef.current) {
+            resizeObserver = new ResizeObserver(() => {
+                if (resizeDebounce) clearTimeout(resizeDebounce);
+                resizeDebounce = setTimeout(() => {
+                    requestAnimationFrame(handleResize);
+                }, 150);
+            });
+            resizeObserver.observe(terminalRef.current);
+        }
+
         return () => {
             window.removeEventListener('resize', handleResize);
+            resizeObserver?.disconnect();
+            if (resizeDebounce) clearTimeout(resizeDebounce);
             socket.close();
             term.dispose();
             xtermRef.current = null;

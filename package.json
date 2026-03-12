@@ -82,6 +82,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-redux": "^9.1.0",
+    "react-resizable-panels": "^4.6.5",
     "ssh2": "^1.17.0",
     "tailwind-merge": "^2.6.1",
     "tailwindcss-animate": "^1.0.7",

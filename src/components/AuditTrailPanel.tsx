@@ -9,11 +9,11 @@ import { cn } from '@/lib/utils'
 
 const STATUS_STYLES: Record<string, { badge: string; dot: string }> = {
     pending_approval: { badge: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400', dot: 'bg-amber-400' },
-    approved:         { badge: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400', dot: 'bg-green-400' },
-    rejected:         { badge: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400', dot: 'bg-red-400' },
-    running:          { badge: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400', dot: 'bg-blue-400' },
-    success:          { badge: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400', dot: 'bg-green-500' },
-    failure:          { badge: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400', dot: 'bg-red-500' },
+    approved: { badge: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400', dot: 'bg-green-400' },
+    rejected: { badge: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400', dot: 'bg-red-400' },
+    running: { badge: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400', dot: 'bg-blue-400' },
+    success: { badge: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400', dot: 'bg-green-500' },
+    failure: { badge: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400', dot: 'bg-red-500' },
 }
 
 function formatRelative(isoString: string): string {
@@ -54,7 +54,7 @@ export function AuditTrailPanel() {
 
     useEffect(() => {
         load(0)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [filterProfileId, filterScriptId])
 
     const toggleExpand = (id: string) => {
@@ -69,14 +69,15 @@ export function AuditTrailPanel() {
     return (
         <div className="border-b dark:border-slate-700">
             {/* Header */}
-            <div className="px-3 py-2 flex items-center justify-between">
-                <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1.5">
-                    <ClipboardList className="h-3 w-3 text-slate-400" /> Audit Trail
-                    <span className="ml-1 text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded px-1 font-bold">
+            <div className="px-3 py-2 flex items-center justify-between gap-2 overflow-hidden">
+                <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1.5 flex-1 min-w-0">
+                    <ClipboardList className="h-3 w-3 text-slate-400 shrink-0" />
+                    <span className="truncate">Audit Trail</span>
+                    <span className="ml-1 text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded px-1 font-bold shrink-0">
                         {auditLogTotal}
                     </span>
                 </h3>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 shrink-0">
                     <Button
                         variant="ghost"
                         size="icon"
@@ -103,11 +104,11 @@ export function AuditTrailPanel() {
             {isExpanded && (
                 <div className="px-3 pb-3 space-y-2">
                     {/* Filters */}
-                    <div className="flex gap-1.5">
+                    <div className="flex gap-1.5 flex-wrap">
                         <select
                             value={filterProfileId}
                             onChange={e => setFilterProfileId(e.target.value)}
-                            className="flex-1 h-6 text-[10px] rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 px-1"
+                            className="flex-1 h-6 text-[10px] rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 px-1 min-w-0"
                         >
                             <option value="">All servers</option>
                             {serverProfiles.map(p => (
@@ -117,7 +118,7 @@ export function AuditTrailPanel() {
                         <select
                             value={filterScriptId}
                             onChange={e => setFilterScriptId(e.target.value)}
-                            className="flex-1 h-6 text-[10px] rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 px-1"
+                            className="flex-1 h-6 text-[10px] rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 px-1 min-w-0"
                         >
                             <option value="">All scripts</option>
                             {scripts.map(s => (

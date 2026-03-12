@@ -44,11 +44,11 @@ export function ParametersPanel({ parameters, onChange }: Props) {
 
     return (
         <div>
-            <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1">
-                    <SlidersHorizontal className="h-3 w-3" /> Parameters
+            <div className="flex items-center justify-between mb-2 gap-2 overflow-hidden">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1 flex-1 min-w-0">
+                    <SlidersHorizontal className="h-3 w-3 shrink-0" /> <span className="truncate">Parameters</span>
                 </h3>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 shrink-0">
                     <Button
                         variant="ghost"
                         size="icon"
@@ -88,7 +88,7 @@ export function ParametersPanel({ parameters, onChange }: Props) {
                             {/* Name + type + delete row */}
                             <div className="flex items-center gap-1">
                                 <Input
-                                    className="h-6 text-xs font-mono flex-1"
+                                    className="h-6 text-xs font-mono flex-1 min-w-0"
                                     placeholder="PARAM_NAME"
                                     value={param.name}
                                     onChange={(e) =>
@@ -127,7 +127,7 @@ export function ParametersPanel({ parameters, onChange }: Props) {
 
                             {/* Default value */}
                             <Input
-                                className="h-6 text-[10px]"
+                                className="h-6 text-[10px] min-w-0"
                                 placeholder="Default value (optional)"
                                 value={param.defaultValue ?? ''}
                                 onChange={(e) =>
@@ -137,7 +137,7 @@ export function ParametersPanel({ parameters, onChange }: Props) {
 
                             {/* Description */}
                             <Input
-                                className="h-6 text-[10px]"
+                                className="h-6 text-[10px] min-w-0"
                                 placeholder="Description (optional)"
                                 value={param.description ?? ''}
                                 onChange={(e) =>
