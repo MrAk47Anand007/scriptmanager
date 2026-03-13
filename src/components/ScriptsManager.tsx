@@ -71,10 +71,12 @@ export const ScriptsManager = () => {
 
     const [isTerminalOpen, setIsTerminalOpen] = useState(false);
     const [isTerminalMinimized, setIsTerminalMinimized] = useState(false);
+    const [pendingTerminalCommand, setPendingTerminalCommand] = useState<string | null>(null);
 
     // Parameters state
     const [scriptParameters, setScriptParameters] = useState<ScriptParameter[]>([]);
     const [showRunDialog, setShowRunDialog] = useState(false);
+    const [runTarget, setRunTarget] = useState<'background' | 'terminal'>('background');
 
     // Timeout state (empty string = use global default)
     const [timeoutSecs, setTimeoutSecs] = useState<string>('');
@@ -162,9 +164,11 @@ export const ScriptsManager = () => {
                     if (!options.skipGist) {
                         setGistDirty(false);
                     }
+                    return true;
                 }
             }
         }
+        return false;
     };
 
     // Auto-save effect (Local DB only)
@@ -268,6 +272,7 @@ export const ScriptsManager = () => {
 
         if (runScript.fulfilled.match(resultAction)) {
             const buildId = resultAction.payload.build_id;
+            dispatch(fetchBuilds(activeScriptId));
 
             const es = new EventSource(`/api/builds/${buildId}/stream`);
             eventSourceRef.current = es;
@@ -281,17 +286,6 @@ export const ScriptsManager = () => {
                     dispatch(fetchBuildOutput({ scriptId: activeScriptId, buildId }));
                     return;
                 }
-                const cleanData = event.data.replace(/^data: /, '').trim();
-                // SSE sends "data: " prefix sometimes if manual parsing not handled by EventSource class (browser handles it, but our raw string check might be loose)
-                // Actually EventSource.onmessage event.data is the payload.
-                // Our server sends: `data: ${line}\n\n`
-                // Browser EventSource parses this and event.data = line.
-                // So event.data is the line content.
-                // But we should check if line is just newline?
-
-                // Server sends: controller.enqueue(encoder.encode(`data: ${line}\n\n`))
-                // If line has newlines, SSE spec says they are joined by newline.
-                // We just append it.
                 dispatch(appendBuildOutput(event.data));
             };
 
@@ -306,6 +300,7 @@ export const ScriptsManager = () => {
 
     const handleRun = async () => {
         if (!activeScriptId) return;
+        setRunTarget('background');
         // If the script has parameters, show the fill-in dialog first
         if (scriptParameters.length > 0) {
             setShowRunDialog(true);
@@ -313,6 +308,42 @@ export const ScriptsManager = () => {
         }
         // No parameters — run immediately
         await executeRun({});
+    };
+
+    const executeRunInTerminal = async (paramValues: Record<string, string>) => {
+        if (!activeScriptId) return;
+
+        const saved = await handleSave({ skipGist: true });
+        if (!saved) return;
+
+        const res = await fetch(`/api/scripts/${activeScriptId}/terminal-command`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paramValues }),
+        });
+
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({ error: 'Failed to build terminal command' }));
+            alert(data.error ?? 'Failed to build terminal command');
+            return;
+        }
+
+        const data = await res.json() as { command: string }
+        setIsTerminalOpen(true);
+        setIsTerminalMinimized(false);
+        setPendingTerminalCommand(data.command);
+    };
+
+    const handleRunInTerminal = async () => {
+        if (!activeScriptId) return;
+        setRunTarget('terminal');
+
+        if (scriptParameters.length > 0) {
+            setShowRunDialog(true);
+            return;
+        }
+
+        await executeRunInTerminal({});
     };
 
     const handleBuildClick = async (buildId: string) => {
@@ -557,6 +588,10 @@ export const ScriptsManager = () => {
                                     <Save className="h-3 w-3" />
                                     {saveStatus === 'saving' ? 'Saving...' : 'Save'}
                                 </Button>
+                                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleRunInTerminal}>
+                                    <Terminal className="h-3 w-3" />
+                                    Run in Terminal
+                                </Button>
                                 <Button size="sm" className="h-7 text-xs gap-1 bg-green-600 hover:bg-green-700 text-white" onClick={handleRun} disabled={runStatus === 'running'}>
                                     {runStatus === 'running' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
                                     {runStatus === 'running' ? 'Running...' : 'Run'}
@@ -606,6 +641,8 @@ export const ScriptsManager = () => {
                                     isMinimized={isTerminalMinimized}
                                     toggleMinimize={() => setIsTerminalMinimized(!isTerminalMinimized)}
                                     onClose={() => setIsTerminalOpen(false)}
+                                    pendingCommand={pendingTerminalCommand}
+                                    onCommandSent={() => setPendingTerminalCommand(null)}
                                 />
                             )}
                         </div>
@@ -858,7 +895,11 @@ export const ScriptsManager = () => {
                 parameters={scriptParameters}
                 onRun={(values) => {
                     setShowRunDialog(false);
-                    executeRun(values);
+                    if (runTarget === 'terminal') {
+                        executeRunInTerminal(values);
+                    } else {
+                        executeRun(values);
+                    }
                 }}
                 onCancel={() => setShowRunDialog(false)}
             />

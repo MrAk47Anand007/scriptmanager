@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { execRemote } from '@/lib/sshService'
+import { buildRemoteCommand } from '@/lib/executionSafety'
 
 export async function POST(
     req: Request,
@@ -38,21 +39,8 @@ export async function POST(
         return NextResponse.json({ error: 'Script not found' }, { status: 404 })
     }
 
-    // Build remote command (same logic as in remote-exec route)
     const paramValues = execution.paramValues ? JSON.parse(execution.paramValues) : {}
-    const dir = execution.remotePath?.endsWith('/') ? execution.remotePath : (execution.remotePath ? execution.remotePath + '/' : '/tmp/')
-    const scriptPath = `${dir}${script.filename}`
-
-    const envPrefix = Object.keys(paramValues).length > 0
-        ? Object.entries(paramValues as Record<string, string>)
-            .map(([k, v]) => `${k.replace(/[^a-zA-Z0-9_]/g, '_')}=${JSON.stringify(v)}`)
-            .join(' ') + ' '
-        : ''
-
-    let command: string
-    if (script.filename.endsWith('.py')) command = `${envPrefix}python3 "${scriptPath}"`
-    else if (script.filename.endsWith('.js')) command = `${envPrefix}node "${scriptPath}"`
-    else command = `${envPrefix}bash "${scriptPath}"`
+    const command = buildRemoteCommand(script.filename, execution.remotePath ?? undefined, paramValues as Record<string, string>)
 
     // Fire-and-forget
     execRemote({ profileId: execution.profileId, command, remoteExecId: id }).catch(console.error)

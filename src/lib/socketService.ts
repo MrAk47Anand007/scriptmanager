@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import * as pty from 'node-pty';
 import { Server } from 'http';
 import os from 'os';
+import { isAuthenticatedCookieHeader } from '@/lib/session';
 
 interface TerminalSession {
     process: pty.IPty;
@@ -12,10 +13,25 @@ const sessions = new Map<WebSocket, TerminalSession>();
 
 export const initWebSocketServer = (server: Server) => {
     const wss = new WebSocketServer({ server, path: '/api/terminal' });
+    const defaultShouldHandle = wss.shouldHandle.bind(wss);
+
+    wss.shouldHandle = (req) => {
+        const allowed = defaultShouldHandle(req) && isAuthenticatedCookieHeader(req.headers.cookie);
+        if (!allowed) {
+            console.warn('[Terminal] Rejected unauthenticated terminal upgrade');
+        }
+        return allowed;
+    };
 
     console.log('[Terminal] WebSocket server initialized at /api/terminal');
 
-    wss.on('connection', (ws) => {
+    wss.on('connection', (ws, req) => {
+        if (!isAuthenticatedCookieHeader(req.headers.cookie)) {
+            console.warn('[Terminal] Rejected unauthenticated terminal connection');
+            ws.close(1008, 'Unauthorized');
+            return;
+        }
+
         console.log('[Terminal] Client connected');
 
         const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';

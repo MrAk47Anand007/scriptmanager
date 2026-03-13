@@ -6,6 +6,7 @@ import fs from 'fs'
 import { v4 as uuidv4 } from 'uuid'
 
 import { cache } from '@/lib/cache'
+import { sanitizeScriptFilename } from '@/lib/executionSafety'
 
 export async function GET() {
   const cachedScripts = await cache.get('all_scripts')
@@ -116,9 +117,7 @@ export async function POST(req: Request) {
     })
   } else {
     // Create new script
-    const filename = name.endsWith('.py') || name.endsWith('.js') || name.endsWith('.sh')
-      ? name
-      : `${name}.py`
+    const filename = sanitizeScriptFilename(name, '.py')
 
     const filePath = await getScriptFilePath(filename)
 

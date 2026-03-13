@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { ensureScriptsDirExists, getScriptFilePath } from '@/lib/scriptRunner'
 import fs from 'fs'
 import { v4 as uuidv4 } from 'uuid'
+import { sanitizeScriptFilename } from '@/lib/executionSafety'
 
 // POST /api/scripts/[id]/duplicate — create a copy of a script
 export async function POST(
@@ -43,8 +44,7 @@ export async function POST(
 
   // Derive filename from the new name
   const ext = original.filename.includes('.') ? `.${original.filename.split('.').pop()}` : '.py'
-  const safeBase = newName.replace(/[^a-zA-Z0-9_.-]/g, '_')
-  const newFilename = `${safeBase}${ext.startsWith('.') ? ext : `.${ext}`}`
+  const newFilename = sanitizeScriptFilename(newName, ext)
 
   const newPath = await getScriptFilePath(newFilename)
   fs.writeFileSync(newPath, content, 'utf8')

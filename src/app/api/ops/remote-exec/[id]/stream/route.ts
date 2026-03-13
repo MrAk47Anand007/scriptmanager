@@ -24,8 +24,8 @@ export async function GET(
                 controller.enqueue(encoder.encode(`data: ${line}\n\n`))
             }
 
-            const onDone = () => {
-                controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+            const onDone = (exitCode: number) => {
+                controller.enqueue(encoder.encode(`data: ${exitCode === 0 ? '[DONE]' : '[ERROR]'}\n\n`))
                 cleanup()
                 controller.close()
             }

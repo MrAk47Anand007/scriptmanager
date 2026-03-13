@@ -1,23 +1,31 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import {
   setActiveRequest,
   newRequest,
+  updateDraft,
   deleteApiRequest,
   deleteApiCollection,
   createApiCollection,
   updateApiCollection,
   saveApiRequest,
-  fetchApiRequests,
-  fetchApiCollections,
   clearApiHistory,
   loadHistoryEntry,
   type ApiRequest,
   type ApiCollection,
   type ApiHistoryEntry,
-  type ApiRequestDraft
+  type ApiRequestDraft,
+  type KeyValueRow,
+  type ApiEnvironment,
+  saveApiEnvironment,
+  deleteApiEnvironment,
+  setActiveEnvironment,
+  saveApiGlobals,
+  runApiCollection,
+  setActiveCollectionRun,
+  type ApiCollectionRun,
 } from '@/features/api/apiSlice'
 import {
   ContextMenu,
@@ -36,6 +44,15 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { MethodBadge } from './MethodBadge'
+import { VariableEditorDialog } from './VariableEditorDialog'
+import { CollectionRunDialog } from './CollectionRunDialog'
+import { parseVariableRows } from '@/lib/apiRequestMaterialization'
+import {
+  buildNativeApiExport,
+  buildPostmanCollectionExport,
+  buildPostmanEnvironmentExport,
+  importPostmanData,
+} from '@/lib/postmanInterop'
 import {
   Plus,
   ChevronRight,
@@ -46,11 +63,23 @@ import {
   Trash2,
   Globe,
   MoreHorizontal,
-  FolderPlus
+  FolderPlus,
+  FlaskConical,
+  Settings2,
+  Play,
+  Download,
+  Upload,
+  Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+function blankRow(): KeyValueRow {
+  return { id: crypto.randomUUID(), key: '', value: '', enabled: true }
+}
+
+function ensureRows(rows: KeyValueRow[]): KeyValueRow[] {
+  return rows.length > 0 ? rows : [blankRow()]
+}
 
 function truncateUrl(url: string, maxLen = 38): string {
   try {
@@ -70,8 +99,18 @@ function parseDraft(request: ApiRequest): ApiRequestDraft {
     name: request.name,
     method: request.method,
     url: request.url,
-    headers: (() => { try { return JSON.parse(request.headers) } catch { return [] } })(),
-    queryParams: (() => { try { return JSON.parse(request.query_params) } catch { return [] } })(),
+    headers: ensureRows((() => { try { return JSON.parse(request.headers) } catch { return [] } })()),
+    queryParams: ensureRows((() => { try { return JSON.parse(request.query_params) } catch { return [] } })()),
+    variables: ensureRows(parseVariableRows(request.variables).map((row) => ({
+      id: row.id ?? crypto.randomUUID(),
+      key: row.key,
+      value: row.value,
+      enabled: row.enabled,
+    }))),
+    requestOptions: (() => { try { return JSON.parse(request.request_options) } catch { return { useCookieJar: false } } })(),
+    preRequestScript: request.pre_request_script ?? '',
+    testScript: request.test_script ?? '',
+    responseMappings: (() => { try { return JSON.parse(request.response_mappings) } catch { return [] } })(),
     bodyType: request.body_type as ApiRequestDraft['bodyType'],
     body: request.body,
     authType: request.auth_type as ApiRequestDraft['authType'],
@@ -79,8 +118,6 @@ function parseDraft(request: ApiRequest): ApiRequestDraft {
     collectionId: request.collection_id
   }
 }
-
-// ─── Request Item ─────────────────────────────────────────────────────────────
 
 interface RequestItemProps {
   request: ApiRequest
@@ -100,12 +137,10 @@ function RequestItem({ request, active, collections, indent }: RequestItemProps)
   const handleDuplicate = async () => {
     const draft = { ...parseDraft(request), id: undefined, name: `${request.name} (Copy)` }
     await dispatch(saveApiRequest(draft))
-    dispatch(fetchApiRequests())
   }
 
   const handleMoveToCollection = async (collectionId: string | null) => {
     await dispatch(saveApiRequest({ ...parseDraft(request), collectionId }))
-    dispatch(fetchApiRequests())
   }
 
   return (
@@ -127,7 +162,6 @@ function RequestItem({ request, active, collections, indent }: RequestItemProps)
         {request.name}
       </span>
 
-      {/* More menu — visible on hover or when open */}
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <button
@@ -176,26 +210,48 @@ function RequestItem({ request, active, collections, indent }: RequestItemProps)
   )
 }
 
-// ─── Collection Item ─────────────────────────────────────────────────────────
-
 interface CollectionItemProps {
   collection: ApiCollection
   requests: ApiRequest[]
   allCollections: ApiCollection[]
   activeRequestId: string | null
+  onEditVariables: (collection: ApiCollection) => void
+  onRunCollection: (collection: ApiCollection) => void
+  onAddRequest: (collection: ApiCollection) => void
+  onExportCollection: (collection: ApiCollection) => void
 }
 
-function CollectionItem({ collection, requests, allCollections, activeRequestId }: CollectionItemProps) {
+function CollectionItem({
+  collection,
+  requests,
+  allCollections,
+  activeRequestId,
+  onEditVariables,
+  onRunCollection,
+  onAddRequest,
+  onExportCollection,
+}: CollectionItemProps) {
   const dispatch = useAppDispatch()
   const [expanded, setExpanded] = useState(true)
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(collection.name)
 
   const collectionRequests = requests.filter(r => r.collection_id === collection.id)
+  const variableCount = parseVariableRows(collection.variables).filter((row) => row.enabled && row.key).length
 
   const handleRename = async () => {
     if (renameValue.trim() && renameValue.trim() !== collection.name) {
-      await dispatch(updateApiCollection({ id: collection.id, name: renameValue.trim() }))
+      await dispatch(updateApiCollection({
+        id: collection.id,
+        name: renameValue.trim(),
+        description: collection.description,
+        variables: ensureRows(parseVariableRows(collection.variables).map((row) => ({
+          id: row.id ?? crypto.randomUUID(),
+          key: row.key,
+          value: row.value,
+          enabled: row.enabled,
+        }))),
+      }))
     }
     setRenaming(false)
   }
@@ -208,7 +264,6 @@ function CollectionItem({ collection, requests, allCollections, activeRequestId 
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div>
-          {/* Collection header row */}
           <div
             className="group flex items-center gap-1 px-2 py-1 rounded cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/60 select-none"
             onClick={() => setExpanded(v => !v)}
@@ -240,12 +295,26 @@ function CollectionItem({ collection, requests, allCollections, activeRequestId 
                 {collection.name}
               </span>
             )}
+            {variableCount > 0 && (
+              <span className="text-[10px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                {variableCount} vars
+              </span>
+            )}
+            <button
+              className="h-5 w-5 shrink-0 flex items-center justify-center rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 opacity-0 group-hover:opacity-100"
+              title="Add request to collection"
+              onClick={(e) => {
+                e.stopPropagation()
+                onAddRequest(collection)
+              }}
+            >
+              <Plus className="h-3 w-3" />
+            </button>
             <span className="text-[10px] text-slate-400 shrink-0 tabular-nums">
               {collectionRequests.length}
             </span>
           </div>
 
-          {/* Children */}
           {expanded && (
             <div>
               {collectionRequests.map(r => (
@@ -271,6 +340,15 @@ function CollectionItem({ collection, requests, allCollections, activeRequestId 
         >
           Rename
         </ContextMenuItem>
+        <ContextMenuItem className="text-xs" onClick={() => onEditVariables(collection)}>
+          Edit Variables
+        </ContextMenuItem>
+        <ContextMenuItem className="text-xs" onClick={() => onRunCollection(collection)}>
+          Run Collection
+        </ContextMenuItem>
+        <ContextMenuItem className="text-xs" onClick={() => onExportCollection(collection)}>
+          Export as Postman
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
           className="text-xs text-red-600 dark:text-red-400 focus:text-red-600"
@@ -283,30 +361,283 @@ function CollectionItem({ collection, requests, allCollections, activeRequestId 
   )
 }
 
-// ─── Main Sidebar ─────────────────────────────────────────────────────────────
+interface EnvironmentItemProps {
+  environment: ApiEnvironment
+  active: boolean
+  onEdit: (environment: ApiEnvironment) => void
+}
+
+function EnvironmentItem({ environment, active, onEdit }: EnvironmentItemProps) {
+  const dispatch = useAppDispatch()
+  const variableCount = parseVariableRows(environment.variables).filter((row) => row.enabled && row.key).length
+
+  return (
+    <div
+      className={cn(
+        'group flex items-center gap-2 px-2 py-1 rounded cursor-pointer',
+        active
+          ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300'
+          : 'hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300'
+      )}
+      onClick={() => dispatch(setActiveEnvironment(environment.id))}
+    >
+      <FlaskConical className="h-3.5 w-3.5 shrink-0" />
+      <span className="text-xs truncate flex-1">{environment.name}</span>
+      {variableCount > 0 && (
+        <span className="text-[10px] text-slate-400 shrink-0">{variableCount}</span>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            className="opacity-0 group-hover:opacity-100 h-5 w-5 shrink-0 flex items-center justify-center rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <MoreHorizontal className="h-3 w-3" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40" onClick={(e) => e.stopPropagation()}>
+          <DropdownMenuItem className="text-xs" onClick={() => onEdit(environment)}>
+            Edit
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="text-xs text-red-600 dark:text-red-400 focus:text-red-600"
+            onClick={() => dispatch(deleteApiEnvironment(environment.id))}
+          >
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
 
 export function ApiSidebar() {
   const dispatch = useAppDispatch()
-  const { collections, requests, activeRequestId, history } = useAppSelector(s => s.api)
-  const [activeSection, setActiveSection] = useState<'requests' | 'history'>('requests')
+  const {
+    collections,
+    requests,
+    activeRequestId,
+    history,
+    collectionRuns,
+    activeCollectionRun,
+    environments,
+    activeEnvironmentId,
+    globalVariables,
+    isRunningCollection,
+  } = useAppSelector(s => s.api)
+  const [activeSection, setActiveSection] = useState<'requests' | 'history' | 'runs'>('requests')
   const [newCollectionName, setNewCollectionName] = useState('')
   const [showNewCollection, setShowNewCollection] = useState(false)
+  const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false)
+  const [editingEnvironmentId, setEditingEnvironmentId] = useState<string | null>(null)
+  const [environmentName, setEnvironmentName] = useState('')
+  const [environmentVariables, setEnvironmentVariables] = useState<KeyValueRow[]>([blankRow()])
+  const [globalsDialogOpen, setGlobalsDialogOpen] = useState(false)
+  const [globalsDraft, setGlobalsDraft] = useState<KeyValueRow[]>([blankRow()])
+  const [collectionVariablesOpen, setCollectionVariablesOpen] = useState(false)
+  const [collectionVariableTarget, setCollectionVariableTarget] = useState<ApiCollection | null>(null)
+  const [collectionVariableRows, setCollectionVariableRows] = useState<KeyValueRow[]>([blankRow()])
+  const [runDialogOpen, setRunDialogOpen] = useState(false)
+  const [isCreatingCollection, setIsCreatingCollection] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const importInputRef = useRef<HTMLInputElement | null>(null)
 
   const uncollectedRequests = requests.filter(r => !r.collection_id)
+  const activeEnvironment = useMemo(
+    () => environments.find((environment) => environment.id === activeEnvironmentId) ?? null,
+    [environments, activeEnvironmentId]
+  )
+
+  const openEnvironmentDialog = (environment?: ApiEnvironment) => {
+    setEditingEnvironmentId(environment?.id ?? null)
+    setEnvironmentName(environment?.name ?? '')
+    setEnvironmentVariables(ensureRows(parseVariableRows(environment?.variables).map((row) => ({
+      id: row.id ?? crypto.randomUUID(),
+      key: row.key,
+      value: row.value,
+      enabled: row.enabled,
+    }))))
+    setEnvironmentDialogOpen(true)
+  }
+
+  const openGlobalsDialog = () => {
+    setGlobalsDraft(ensureRows(globalVariables))
+    setGlobalsDialogOpen(true)
+  }
+
+  const openCollectionVariablesDialog = (collection: ApiCollection) => {
+    setCollectionVariableTarget(collection)
+    setCollectionVariableRows(ensureRows(parseVariableRows(collection.variables).map((row) => ({
+      id: row.id ?? crypto.randomUUID(),
+      key: row.key,
+      value: row.value,
+      enabled: row.enabled,
+    }))))
+    setCollectionVariablesOpen(true)
+  }
 
   const handleCreateCollection = async () => {
     if (newCollectionName.trim()) {
-      await dispatch(createApiCollection({ name: newCollectionName.trim() }))
-      dispatch(fetchApiCollections())
-      setNewCollectionName('')
-      setShowNewCollection(false)
+      setIsCreatingCollection(true)
+      try {
+        await dispatch(createApiCollection({ name: newCollectionName.trim() }))
+        setNewCollectionName('')
+        setShowNewCollection(false)
+      } finally {
+        setIsCreatingCollection(false)
+      }
     }
+  }
+
+  const handleSaveEnvironment = async () => {
+    if (!environmentName.trim()) return
+    await dispatch(saveApiEnvironment({
+      id: editingEnvironmentId ?? undefined,
+      name: environmentName.trim(),
+      variables: environmentVariables,
+    }))
+    setEnvironmentDialogOpen(false)
+  }
+
+  const handleSaveGlobals = async () => {
+    await dispatch(saveApiGlobals(globalsDraft))
+    setGlobalsDialogOpen(false)
+  }
+
+  const handleSaveCollectionVariables = async () => {
+    if (!collectionVariableTarget) return
+    await dispatch(updateApiCollection({
+      id: collectionVariableTarget.id,
+      name: collectionVariableTarget.name,
+      description: collectionVariableTarget.description,
+      variables: collectionVariableRows,
+    }))
+    setCollectionVariablesOpen(false)
+  }
+
+  const handleRunCollection = async (collection: ApiCollection) => {
+    const result = await dispatch(runApiCollection({
+      collectionId: collection.id,
+      environmentId: activeEnvironmentId,
+    }))
+    if (runApiCollection.fulfilled.match(result)) {
+      dispatch(setActiveCollectionRun(result.payload))
+      setRunDialogOpen(true)
+    }
+  }
+
+  const handleImportPostman = async (file: File) => {
+    setIsImporting(true)
+    try {
+      const raw = await file.text()
+      const imported = importPostmanData(raw)
+
+      for (const environment of imported.environments) {
+        await dispatch(saveApiEnvironment({ name: environment.name, variables: environment.variables }))
+      }
+
+      for (const collection of imported.collections) {
+        const createdCollection = await dispatch(createApiCollection({ name: collection.name }))
+        if (!createApiCollection.fulfilled.match(createdCollection)) continue
+
+        for (const request of collection.requests) {
+          await dispatch(saveApiRequest({
+            name: request.name ?? 'Imported Request',
+            method: request.method ?? 'GET',
+            url: request.url ?? '',
+            headers: request.headers ?? [blankRow()],
+            queryParams: request.queryParams ?? [blankRow()],
+            variables: request.variables ?? [blankRow()],
+            requestOptions: request.requestOptions ?? { useCookieJar: false },
+            preRequestScript: request.preRequestScript ?? '',
+            testScript: request.testScript ?? '',
+            responseMappings: request.responseMappings ?? [],
+            bodyType: request.bodyType ?? 'none',
+            body: request.body ?? '',
+            authType: request.authType ?? 'none',
+            authConfig: request.authConfig ?? {},
+            collectionId: createdCollection.payload.id,
+          }))
+        }
+      }
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  const handleExportWorkspace = () => {
+    setIsExporting(true)
+    try {
+      const payload = buildNativeApiExport({
+        collections,
+        requests,
+        environments,
+        globalVariables,
+      })
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `scriptmanager-api-export-${Date.now()}.json`
+      anchor.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      window.setTimeout(() => setIsExporting(false), 250)
+    }
+  }
+
+  const downloadJson = (filename: string, payload: unknown) => {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExportPostmanCollection = () => {
+    setIsExporting(true)
+    downloadJson(
+      `scriptmanager-postman-collection-${Date.now()}.json`,
+      buildPostmanCollectionExport({ collections, requests })
+    )
+    window.setTimeout(() => setIsExporting(false), 250)
+  }
+
+  const handleExportPostmanEnvironment = () => {
+    setIsExporting(true)
+    downloadJson(
+      `scriptmanager-postman-environment-${activeEnvironment?.name?.replace(/\s+/g, '-').toLowerCase() ?? 'default'}.json`,
+      buildPostmanEnvironmentExport({ environment: activeEnvironment })
+    )
+    window.setTimeout(() => setIsExporting(false), 250)
+  }
+
+  const handleExportSingleCollection = (collection: ApiCollection) => {
+    setIsExporting(true)
+    downloadJson(
+      `scriptmanager-postman-${collection.name.replace(/\s+/g, '-').toLowerCase() || 'collection'}.json`,
+      buildPostmanCollectionExport({
+        collections: [collection],
+        requests: requests.filter((request) => request.collection_id === collection.id),
+      })
+    )
+    window.setTimeout(() => setIsExporting(false), 250)
+  }
+
+  const handleAddRequestToCollection = (collection: ApiCollection) => {
+    dispatch(newRequest())
+    dispatch(updateDraft({
+      name: `${collection.name} Request`,
+      collectionId: collection.id,
+    }))
   }
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-slate-950">
-
-      {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
         <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 flex-1 truncate">
           API Client
@@ -319,9 +650,54 @@ export function ApiSidebar() {
           <Plus className="h-3 w-3" />
           New
         </Button>
+        <button
+          className="h-6 w-6 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
+          title="Import Postman JSON"
+          disabled={isImporting}
+          onClick={() => importInputRef.current?.click()}
+        >
+          {isImporting
+            ? <Loader2 className="h-3.5 w-3.5 mx-auto animate-spin" />
+            : <Download className="h-3.5 w-3.5 mx-auto" />}
+        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="h-6 w-6 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
+              title="Export"
+              disabled={isExporting}
+            >
+              {isExporting
+                ? <Loader2 className="h-3.5 w-3.5 mx-auto animate-spin" />
+                : <Upload className="h-3.5 w-3.5 mx-auto" />}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem className="text-xs" onClick={handleExportWorkspace}>
+              Export Native Workspace
+            </DropdownMenuItem>
+            <DropdownMenuItem className="text-xs" onClick={handleExportPostmanCollection}>
+              Export Postman Collection
+            </DropdownMenuItem>
+            <DropdownMenuItem className="text-xs" onClick={handleExportPostmanEnvironment}>
+              Export Postman Environment
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept="application/json"
+          className="hidden"
+          onChange={async (event) => {
+            const file = event.target.files?.[0]
+            if (!file) return
+            await handleImportPostman(file)
+            event.target.value = ''
+          }}
+        />
       </div>
 
-      {/* Section tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-800 shrink-0">
         <button
           onClick={() => setActiveSection('requests')}
@@ -346,14 +722,23 @@ export function ApiSidebar() {
           <Clock className="h-3 w-3" />
           History
         </button>
+        <button
+          onClick={() => setActiveSection('runs')}
+          className={cn(
+            'flex-1 text-[11px] py-1.5 font-medium transition-colors flex items-center justify-center gap-1',
+            activeSection === 'runs'
+              ? 'text-slate-900 dark:text-slate-100 border-b-2 border-blue-500'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+          )}
+        >
+          <Play className="h-3 w-3" />
+          Runs
+        </button>
       </div>
 
-      {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto min-h-0">
-
         {activeSection === 'requests' && (
           <div className="py-1">
-            {/* Collections section label + add button */}
             <div className="flex items-center justify-between px-3 pt-2 pb-1">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                 Collections
@@ -367,7 +752,6 @@ export function ApiSidebar() {
               </button>
             </div>
 
-            {/* New collection inline input */}
             {showNewCollection && (
               <div className="flex items-center gap-1 px-2 py-1">
                 <Input
@@ -378,16 +762,24 @@ export function ApiSidebar() {
                     if (e.key === 'Escape') { setShowNewCollection(false); setNewCollectionName('') }
                   }}
                   placeholder="Collection name"
+                  disabled={isCreatingCollection}
                   autoFocus
                   className="h-6 text-xs py-0 px-1.5 flex-1"
                 />
-                <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" onClick={handleCreateCollection}>
-                  <Plus className="h-3 w-3" />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 shrink-0"
+                  onClick={handleCreateCollection}
+                  disabled={isCreatingCollection}
+                >
+                  {isCreatingCollection
+                    ? <Loader2 className="h-3 w-3 animate-spin" />
+                    : <Plus className="h-3 w-3" />}
                 </Button>
               </div>
             )}
 
-            {/* Collections */}
             {collections.map(col => (
               <CollectionItem
                 key={col.id}
@@ -395,10 +787,13 @@ export function ApiSidebar() {
                 requests={requests}
                 allCollections={collections}
                 activeRequestId={activeRequestId}
+                onEditVariables={openCollectionVariablesDialog}
+                onRunCollection={handleRunCollection}
+                onAddRequest={handleAddRequestToCollection}
+                onExportCollection={handleExportSingleCollection}
               />
             ))}
 
-            {/* Uncollected requests */}
             {uncollectedRequests.length > 0 && (
               <>
                 {collections.length > 0 && (
@@ -420,7 +815,64 @@ export function ApiSidebar() {
               </>
             )}
 
-            {/* Empty state */}
+            <div className="mx-3 my-2 border-t border-slate-100 dark:border-slate-800" />
+
+            <div className="flex items-center justify-between px-3 pt-1 pb-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                Environments
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={openGlobalsDialog}
+                  className="h-4 w-4 flex items-center justify-center rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title="Global variables"
+                >
+                  <Settings2 className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() => openEnvironmentDialog()}
+                  className="h-4 w-4 flex items-center justify-center rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title="New environment"
+                >
+                  <Plus className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+
+            <button
+              className={cn(
+                'mx-2 mb-1 flex w-[calc(100%-1rem)] items-center gap-2 rounded px-2 py-1 text-left text-xs',
+                activeEnvironmentId === null
+                  ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+              )}
+              onClick={() => dispatch(setActiveEnvironment(null))}
+            >
+              <Globe className="h-3.5 w-3.5" />
+              No environment
+            </button>
+
+            {environments.map((environment) => (
+              <EnvironmentItem
+                key={environment.id}
+                environment={environment}
+                active={environment.id === activeEnvironmentId}
+                onEdit={openEnvironmentDialog}
+              />
+            ))}
+
+            <div className="px-3 pt-2">
+              <button
+                className="w-full rounded border border-dashed border-slate-200 dark:border-slate-800 px-3 py-2 text-left hover:border-slate-300 dark:hover:border-slate-700"
+                onClick={openGlobalsDialog}
+              >
+                <p className="text-xs font-medium text-slate-600 dark:text-slate-300">Global Variables</p>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
+                  {globalVariables.filter((row) => row.enabled && row.key).length} shared values available
+                </p>
+              </button>
+            </div>
+
             {collections.length === 0 && uncollectedRequests.length === 0 && (
               <div className="flex flex-col items-center justify-center py-10 px-4 text-center gap-3">
                 <Globe className="h-9 w-9 text-slate-200 dark:text-slate-700" />
@@ -501,7 +953,101 @@ export function ApiSidebar() {
             )}
           </div>
         )}
+
+        {activeSection === 'runs' && (
+          <div className="py-1">
+            <div className="flex items-center justify-between px-3 pt-2 pb-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Collection Runs ({collectionRuns.length})
+                </span>
+                {isRunningCollection && (
+                  <span className="text-[10px] text-blue-600 dark:text-blue-300 flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Running…
+                  </span>
+                )}
+              </div>
+
+            {collectionRuns.map((run: ApiCollectionRun) => (
+              <div
+                key={run.id}
+                onClick={() => {
+                  dispatch(setActiveCollectionRun(run))
+                  setRunDialogOpen(true)
+                }}
+                className="mx-2 mb-1 rounded border border-slate-100 dark:border-slate-800 px-3 py-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900/40"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">{run.collection_name}</span>
+                  <span className={cn(
+                    'text-[10px] px-1.5 py-0.5 rounded-full shrink-0',
+                    run.failed_requests > 0
+                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                  )}>
+                    {run.failed_requests > 0 ? 'Issues' : 'Passed'}
+                  </span>
+                </div>
+                <div className="mt-1 text-[11px] text-slate-400 flex items-center gap-1">
+                  <span>{run.passed_requests}/{run.total_requests} passed</span>
+                  {run.environment_name && <><span>·</span><span>{run.environment_name}</span></>}
+                  {run.duration_ms !== null && <><span>·</span><span>{run.duration_ms}ms</span></>}
+                </div>
+              </div>
+            ))}
+
+            {collectionRuns.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-10 px-4 text-center gap-2">
+                <Play className="h-9 w-9 text-slate-200 dark:text-slate-700" />
+                <div>
+                  <p className="text-xs font-medium text-slate-500">No collection runs yet</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-600 mt-0.5">
+                    Run a collection to see aggregate results here
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      <VariableEditorDialog
+        open={environmentDialogOpen}
+        onOpenChange={setEnvironmentDialogOpen}
+        title={editingEnvironmentId ? 'Edit Environment' : 'New Environment'}
+        description="Environment variables are local to this machine and can be referenced with {{name}}."
+        name={environmentName}
+        onNameChange={setEnvironmentName}
+        rows={environmentVariables}
+        onRowsChange={setEnvironmentVariables}
+        onSave={handleSaveEnvironment}
+      />
+
+      <VariableEditorDialog
+        open={globalsDialogOpen}
+        onOpenChange={setGlobalsDialogOpen}
+        title="Global Variables"
+        description="Globals are available to all requests unless overridden by environment, collection, or request variables."
+        rows={globalsDraft}
+        onRowsChange={setGlobalsDraft}
+        onSave={handleSaveGlobals}
+      />
+
+      <VariableEditorDialog
+        open={collectionVariablesOpen}
+        onOpenChange={setCollectionVariablesOpen}
+        title={collectionVariableTarget ? `${collectionVariableTarget.name} Variables` : 'Collection Variables'}
+        description="Collection variables apply to every request inside this collection unless a request overrides them."
+        rows={collectionVariableRows}
+        onRowsChange={setCollectionVariableRows}
+        onSave={handleSaveCollectionVariables}
+      />
+
+      <CollectionRunDialog
+        open={runDialogOpen}
+        onOpenChange={setRunDialogOpen}
+        run={activeCollectionRun}
+      />
     </div>
   )
 }

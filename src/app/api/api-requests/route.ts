@@ -5,10 +5,10 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const collectionId = searchParams.get('collectionId')
 
-  const requests = await prisma.apiRequest.findMany({
+  const requests = await (prisma.apiRequest as any).findMany({
     where: collectionId ? { collectionId } : undefined,
     orderBy: { updatedAt: 'desc' }
-  })
+  }) as Array<any>
 
   return NextResponse.json(requests.map(r => ({
     id: r.id,
@@ -17,6 +17,11 @@ export async function GET(req: Request) {
     url: r.url,
     headers: r.headers,
     query_params: r.queryParams,
+    variables: r.variables,
+    request_options: r.requestOptions,
+    pre_request_script: r.preRequestScript,
+    test_script: r.testScript,
+    response_mappings: r.responseMappings,
     body_type: r.bodyType,
     body: r.body,
     auth_type: r.authType,
@@ -28,19 +33,24 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const { name, method, url, headers, query_params, body_type, body, auth_type, auth_config, collection_id } = await req.json()
+  const { name, method, url, headers, query_params, variables, request_options, pre_request_script, test_script, response_mappings, body_type, body, auth_type, auth_config, collection_id } = await req.json()
 
   if (!name?.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
 
-  const request = await prisma.apiRequest.create({
+  const request = await (prisma.apiRequest as any).create({
     data: {
       name: name.trim(),
       method: method ?? 'GET',
       url: url ?? '',
       headers: headers ?? '[]',
       queryParams: query_params ?? '[]',
+      variables: variables ?? '[]',
+      requestOptions: request_options ?? '{}',
+      preRequestScript: pre_request_script ?? '',
+      testScript: test_script ?? '',
+      responseMappings: response_mappings ?? '[]',
       bodyType: body_type ?? 'none',
       body: body ?? '',
       authType: auth_type ?? 'none',
@@ -56,6 +66,11 @@ export async function POST(req: Request) {
     url: request.url,
     headers: request.headers,
     query_params: request.queryParams,
+    variables: request.variables,
+    request_options: request.requestOptions,
+    pre_request_script: request.preRequestScript,
+    test_script: request.testScript,
+    response_mappings: request.responseMappings,
     body_type: request.bodyType,
     body: request.body,
     auth_type: request.authType,

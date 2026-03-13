@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { execRemote } from '@/lib/sshService'
 import crypto from 'crypto'
+import { buildRemoteCommand } from '@/lib/executionSafety'
 
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
@@ -91,26 +92,4 @@ export async function POST(req: Request) {
         requires_approval: requiresApproval,
         environment,
     })
-}
-
-function buildRemoteCommand(
-    filename: string,
-    remotePath?: string,
-    paramValues?: Record<string, string>
-): string {
-    const dir = remotePath?.endsWith('/') ? remotePath : (remotePath ? remotePath + '/' : '/tmp/')
-    const scriptPath = `${dir}${filename}`
-
-    // Build env var prefix for parameter injection
-    const envPrefix = paramValues
-        ? Object.entries(paramValues)
-            .map(([k, v]) => `${k.replace(/[^a-zA-Z0-9_]/g, '_')}=${JSON.stringify(v)}`)
-            .join(' ') + ' '
-        : ''
-
-    // Determine interpreter from extension
-    if (filename.endsWith('.py')) return `${envPrefix}python3 "${scriptPath}"`
-    if (filename.endsWith('.js')) return `${envPrefix}node "${scriptPath}"`
-    if (filename.endsWith('.sh')) return `${envPrefix}bash "${scriptPath}"`
-    return `${envPrefix}bash "${scriptPath}"`
 }

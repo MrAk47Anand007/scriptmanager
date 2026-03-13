@@ -2,10 +2,10 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 
 export async function GET() {
-  const history = await prisma.apiHistory.findMany({
+  const history = await (prisma.apiHistory as any).findMany({
     orderBy: { createdAt: 'desc' },
     take: 100
-  })
+  }) as Array<any>
 
   return NextResponse.json(history.map(h => ({
     id: h.id,
@@ -20,6 +20,8 @@ export async function GET() {
     size: h.size,
     response_headers: h.responseHeaders,
     response_body: h.responseBody,
+    console_logs: h.consoleLogs,
+    test_results: h.testResults,
     created_at: h.createdAt.toISOString()
   })))
 }

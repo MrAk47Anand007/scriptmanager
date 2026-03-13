@@ -3,7 +3,7 @@ import { EventEmitter } from 'events'
 import { prisma } from '@/lib/db'
 import path from 'path'
 import fs from 'fs'
-import type { ScriptParameter } from '@/lib/types'
+import { assertSafeStoredFilename } from '@/lib/executionSafety'
 
 // Module-level map: buildId -> EventEmitter (Node.js equivalent of Python's _output_queues dict)
 const buildEmitters = new Map<string, EventEmitter>()
@@ -38,7 +38,7 @@ function resolveInterpreter(language: string, interpreter: string | null | undef
     case 'python': {
       // Use 'python' on Windows, 'python3' elsewhere
       const cmd = process.platform === 'win32' ? 'python' : 'python3'
-      return [cmd, [scriptPath]]
+      return [cmd, ['-u', scriptPath]]
     }
     case 'node':
       return ['node', [scriptPath]]
@@ -60,8 +60,7 @@ export async function executeScriptAsync(
   script: ScriptInfo,
   paramValues?: Record<string, string>
 ): Promise<void> {
-  const emitter = new EventEmitter()
-  buildEmitters.set(buildId, emitter)
+  const emitter = ensureBuildEmitter(buildId)
 
   const scriptsDir = await getScriptsDir()
   const buildsDir = getBuildsDir()
@@ -126,7 +125,7 @@ export async function executeScriptAsync(
 
     const child = spawn(cmd, args, {
       // Precedence: process.env < script env vars < param values (most specific wins)
-      env: { ...process.env, ...scriptEnv, ...paramEnv },
+      env: { ...process.env, PYTHONUNBUFFERED: '1', ...scriptEnv, ...paramEnv },
       stdio: ['ignore', 'pipe', 'pipe']
     })
 
@@ -205,9 +204,26 @@ export function getBuildEmitter(buildId: string): EventEmitter | undefined {
   return buildEmitters.get(buildId)
 }
 
+export function ensureBuildEmitter(buildId: string): EventEmitter {
+  const existing = buildEmitters.get(buildId)
+  if (existing) return existing
+
+  const emitter = new EventEmitter()
+  buildEmitters.set(buildId, emitter)
+  return emitter
+}
+
 export async function getScriptFilePath(filename: string): Promise<string> {
   const scriptsDir = await getScriptsDir()
-  return path.join(scriptsDir, filename)
+  const safeFilename = assertSafeStoredFilename(filename)
+  const resolvedPath = path.resolve(scriptsDir, safeFilename)
+  const resolvedDir = path.resolve(scriptsDir)
+
+  if (!resolvedPath.startsWith(`${resolvedDir}${path.sep}`) && resolvedPath !== resolvedDir) {
+    throw new Error('Unsafe script path')
+  }
+
+  return resolvedPath
 }
 
 export async function ensureScriptsDirExists(): Promise<void> {

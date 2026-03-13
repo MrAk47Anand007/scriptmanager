@@ -45,8 +45,13 @@ function saveConfig(cfg) {
 // HTTP helpers
 // ---------------------------------------------------------------------------
 
+function buildAuthHeaders(cfg) {
+  return cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}
+}
+
 function request(method, urlStr, body) {
   return new Promise((resolve, reject) => {
+    const cfg = loadConfig()
     const url = new URL(urlStr)
     const mod = url.protocol === 'https:' ? https : http
     const bodyStr = body !== undefined ? JSON.stringify(body) : undefined
@@ -57,6 +62,7 @@ function request(method, urlStr, body) {
       method,
       headers: {
         'Content-Type': 'application/json',
+        ...buildAuthHeaders(cfg),
         ...(bodyStr ? { 'Content-Length': Buffer.byteLength(bodyStr) } : {})
       }
     }
@@ -80,6 +86,7 @@ function request(method, urlStr, body) {
 
 function streamSSE(urlStr, onLine, onDone) {
   return new Promise((resolve, reject) => {
+    const cfg = loadConfig()
     const url = new URL(urlStr)
     const mod = url.protocol === 'https:' ? https : http
     const options = {
@@ -87,7 +94,10 @@ function streamSSE(urlStr, onLine, onDone) {
       port: url.port || (url.protocol === 'https:' ? 443 : 80),
       path: url.pathname + url.search,
       method: 'GET',
-      headers: { Accept: 'text/event-stream' }
+      headers: {
+        Accept: 'text/event-stream',
+        ...buildAuthHeaders(cfg)
+      }
     }
     const req = mod.request(options, res => {
       let buf = ''
@@ -260,11 +270,21 @@ async function cmdConfig(opts) {
   const cfg = loadConfig()
   if (opts.url) {
     cfg.baseUrl = opts.url.replace(/\/$/, '')
-    saveConfig(cfg)
-    console.log(`✓  Base URL set to: ${cfg.baseUrl}`)
-  } else {
-    console.log(JSON.stringify(cfg, null, 2))
   }
+  if (opts.apiKey) {
+    cfg.apiKey = opts.apiKey
+  }
+  if (opts.clearApiKey) {
+    delete cfg.apiKey
+  }
+
+  if (opts.url || opts.apiKey || opts.clearApiKey) {
+    saveConfig(cfg)
+    console.log(JSON.stringify(cfg, null, 2))
+    return
+  }
+
+  console.log(JSON.stringify(cfg, null, 2))
 }
 
 // ---------------------------------------------------------------------------
@@ -283,7 +303,8 @@ Usage:
   sm run <name> [--param KEY=VALUE ...]     Run a script and stream output
   sm logs <name>                            Show last build output
   sm new <name> [--language python|node|shell]  Create a new script
-  sm config [--url <base-url>]              Get/set config (default URL: http://localhost:3000)
+  sm config [--url <base-url>] [--api-key <token>] [--clear-api-key]
+                                            Get/set config (default URL: http://localhost:3000)
 
 Config file: ~/.scriptmanager/config.json
 `.trimStart())
@@ -314,7 +335,14 @@ try {
     })
     await cmdNew(name, values)
   } else if (command === 'config') {
-    const { values } = parseArgs({ args: subArgs, options: { url: { type: 'string' } } })
+    const { values } = parseArgs({
+      args: subArgs,
+      options: {
+        url: { type: 'string' },
+        apiKey: { type: 'string' },
+        clearApiKey: { type: 'boolean', default: false }
+      }
+    })
     await cmdConfig(values)
   } else {
     console.error(`Unknown command: ${command}. Run 'sm --help' for usage.`)

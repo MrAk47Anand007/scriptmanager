@@ -1,0 +1,79 @@
+#!/usr/bin/env node
+
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { spawn } from 'node:child_process'
+
+const projectRoot = process.cwd()
+const nextDir = path.join(projectRoot, '.next')
+
+async function removeNextDir() {
+  try {
+    await fs.rm(nextDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+  } catch (err) {
+    if (process.platform !== 'win32') {
+      throw err
+    }
+
+    await new Promise((resolve, reject) => {
+      const child = spawn(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-ExecutionPolicy', 'Bypass',
+          '-Command',
+          `if (Test-Path '${nextDir}') { Remove-Item -LiteralPath '${nextDir}' -Recurse -Force -ErrorAction Stop }`,
+        ],
+        { stdio: 'inherit' }
+      )
+
+      child.on('exit', (code) => {
+        if (code === 0) resolve()
+        else reject(new Error(`Failed to clean .next directory (exit ${code})`))
+      })
+      child.on('error', reject)
+    })
+  }
+}
+
+async function main() {
+  await removeNextDir()
+
+  const child = process.platform === 'win32'
+    ? spawn(
+      'cmd.exe',
+      ['/d', '/s', '/c', 'npx ts-node -r tsconfig-paths/register --project tsconfig.server.json server.ts'],
+      {
+        cwd: projectRoot,
+        stdio: 'inherit',
+        env: process.env,
+      }
+    )
+    : spawn(
+      'npx',
+      ['ts-node', '-r', 'tsconfig-paths/register', '--project', 'tsconfig.server.json', 'server.ts'],
+      {
+        cwd: projectRoot,
+        stdio: 'inherit',
+        env: process.env,
+      }
+    )
+
+  child.on('exit', (code, signal) => {
+    if (signal) {
+      process.kill(process.pid, signal)
+      return
+    }
+    process.exit(code ?? 0)
+  })
+
+  child.on('error', (err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}
+
+main().catch((err) => {
+  console.error(err)
+  process.exit(1)
+})

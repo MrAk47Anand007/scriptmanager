@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { isAuthenticatedSessionToken, SESSION_COOKIE } from '@/lib/session'
+import { verifyApiToken } from '@/lib/auth'
+import { prisma } from '@/lib/db'
 
 export const config = {
   // Match everything except Next.js internals and static assets
@@ -7,9 +10,6 @@ export const config = {
   // Run in Node.js runtime, not Edge, so we can use node:crypto
   runtime: 'nodejs',
 }
-
-const SESSION_COOKIE = 'sm_session'
-const SESSION_SECRET = process.env.SESSION_SECRET ?? 'scriptmanager-dev-secret-change-me'
 
 // Public paths that do not require authentication
 const PUBLIC_PREFIXES = [
@@ -21,33 +21,18 @@ const PUBLIC_PREFIXES = [
   '/favicon.ico',
 ]
 
-function validateToken(token: string | undefined): boolean {
+async function hasValidApiToken(request: NextRequest): Promise<boolean> {
+  const authHeader = request.headers.get('authorization')
+  if (!authHeader?.startsWith('Bearer ')) return false
+
+  const token = authHeader.slice('Bearer '.length).trim()
   if (!token) return false
 
-  // Desktop Electron bypass — cookie value is "desktop:{DESKTOP_AUTH_SECRET}"
-  if (token.startsWith('desktop:')) {
-    const secret = process.env.DESKTOP_AUTH_SECRET
-    return !!secret && token === `desktop:${secret}`
-  }
-
-  try {
-    const [payload, sig] = token.split('.')
-    if (!payload || !sig) return false
-
-    // Re-implement sign using synchronous Node.js crypto (available in Node.js runtime middleware)
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const crypto = require('crypto') as typeof import('crypto')
-    const expectedSig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url')
-    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) return false
-
-    const { expiry } = JSON.parse(Buffer.from(payload, 'base64url').toString())
-    return Date.now() < expiry
-  } catch {
-    return false
-  }
+  const stored = await prisma.setting.findUnique({ where: { key: 'api_token_hash' } })
+  return verifyApiToken(token, stored?.value)
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Allow public paths
@@ -57,7 +42,12 @@ export function middleware(request: NextRequest) {
 
   // Check for a valid session cookie
   const token = request.cookies.get(SESSION_COOKIE)?.value
-  if (validateToken(token)) {
+  if (isAuthenticatedSessionToken(token)) {
+    return NextResponse.next()
+  }
+
+  // Allow API clients to authenticate with a bearer token
+  if (pathname.startsWith('/api/') && await hasValidApiToken(request)) {
     return NextResponse.next()
   }
 

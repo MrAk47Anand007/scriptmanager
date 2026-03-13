@@ -202,9 +202,11 @@ model ApiCollection {
   id          String       @id @default(cuid())
   name        String
   description String       @default("")
+  variables   String       @default("[]")
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
   requests    ApiRequest[]
+  runs        ApiCollectionRun[]
 
   @@map("api_collections")
 }
@@ -216,6 +218,11 @@ model ApiRequest {
   url          String         @default("")
   headers      String         @default("[]")
   queryParams  String         @default("[]") @map("query_params")
+  variables    String         @default("[]")
+  requestOptions String       @default("{}") @map("request_options")
+  preRequestScript String     @default("") @map("pre_request_script")
+  testScript   String         @default("") @map("test_script")
+  responseMappings String     @default("[]") @map("response_mappings")
   bodyType     String         @default("none") @map("body_type")
   body         String         @default("")
   authType     String         @default("none") @map("auth_type")
@@ -226,6 +233,36 @@ model ApiRequest {
   updatedAt    DateTime       @updatedAt @map("updated_at")
 
   @@map("api_requests")
+}
+
+model ApiCollectionRun {
+  id             String        @id @default(cuid())
+  collectionId   String        @map("collection_id")
+  collectionName String        @map("collection_name")
+  environmentId  String?       @map("environment_id")
+  environmentName String?      @map("environment_name")
+  status         String        @default("running")
+  totalRequests  Int           @default(0) @map("total_requests")
+  passedRequests Int           @default(0) @map("passed_requests")
+  failedRequests Int           @default(0) @map("failed_requests")
+  results        String        @default("[]")
+  startedAt      DateTime      @default(now()) @map("started_at")
+  finishedAt     DateTime?     @map("finished_at")
+  durationMs     Int?          @map("duration_ms")
+
+  collection     ApiCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@map("api_collection_runs")
+}
+
+model ApiEnvironment {
+  id        String   @id @default(cuid())
+  name      String
+  variables String   @default("[]")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("api_environments")
 }
 
 model ApiHistory {
@@ -241,6 +278,8 @@ model ApiHistory {
   size            Int      @default(0)
   responseHeaders String   @default("{}") @map("response_headers")
   responseBody    String   @default("") @map("response_body")
+  consoleLogs     String   @default("[]") @map("console_logs")
+  testResults     String   @default("[]") @map("test_results")
   createdAt       DateTime @default(now()) @map("created_at")
 
   @@map("api_history")

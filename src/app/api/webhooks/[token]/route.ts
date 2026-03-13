@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { executeScriptAsync } from '@/lib/scriptRunner'
+import { ensureBuildEmitter, executeScriptAsync } from '@/lib/scriptRunner'
 import type { ScriptParameter } from '@/lib/types'
 import crypto from 'crypto'
 
@@ -76,6 +76,8 @@ export async function POST(
       webhookPayload: payload
     }
   })
+
+  ensureBuildEmitter(build.id)
 
   // Fire-and-forget
   executeScriptAsync(build.id, script, paramValues).catch(err => {

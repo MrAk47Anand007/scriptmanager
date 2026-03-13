@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { fetchApiCollections, fetchApiRequests, fetchApiHistory, newRequest } from '@/features/api/apiSlice'
+import { fetchApiCollections, fetchApiRequests, fetchApiHistory, fetchApiEnvironments, fetchApiGlobals, fetchApiCollectionRuns, newRequest } from '@/features/api/apiSlice'
 import { ApiSidebar } from './ApiSidebar'
 import { ApiRequestEditor } from './ApiRequestEditor'
 import { ApiResponseViewer } from './ApiResponseViewer'
@@ -18,6 +18,9 @@ export function ApiManager() {
     dispatch(fetchApiCollections())
     dispatch(fetchApiRequests())
     dispatch(fetchApiHistory())
+    dispatch(fetchApiCollectionRuns())
+    dispatch(fetchApiEnvironments())
+    dispatch(fetchApiGlobals())
   }, [dispatch])
 
   return (

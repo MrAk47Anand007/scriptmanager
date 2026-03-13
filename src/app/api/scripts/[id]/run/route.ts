@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { executeScriptAsync } from '@/lib/scriptRunner'
+import { ensureBuildEmitter, executeScriptAsync } from '@/lib/scriptRunner'
 
 export async function POST(
   req: Request,
@@ -31,6 +31,8 @@ export async function POST(
       triggeredBy: 'manual'
     }
   })
+
+  ensureBuildEmitter(build.id)
 
   // Fire-and-forget - don't await
   executeScriptAsync(build.id, script, paramValues).catch(err => {

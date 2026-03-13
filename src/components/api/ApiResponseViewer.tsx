@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { StatusBadge } from './StatusBadge'
 import { MethodBadge } from './MethodBadge'
-import { AlertTriangle, Clock, Database, Globe, Copy, Check } from 'lucide-react'
+import { AlertTriangle, Clock, Database, Globe, Copy, Check, TerminalSquare, Beaker, ArrowDownToLine } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import dynamic from 'next/dynamic'
 import { useTheme } from 'next-themes'
@@ -47,6 +47,7 @@ function formatSize(bytes: number): string {
 export function ApiResponseViewer() {
   const { response, history, activeRequestId } = useAppSelector(s => s.api)
   const { resolvedTheme } = useTheme()
+  const [activeTab, setActiveTab] = useState<'body' | 'headers' | 'tests' | 'console' | 'output' | 'history'>('body')
   const [rawMode, setRawMode] = useState(false)
   const [copied, setCopied] = useState(false)
 
@@ -142,7 +143,7 @@ export function ApiResponseViewer() {
       )}
 
       {/* Response tabs */}
-      <Tabs defaultValue="body" className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)} className="flex-1 flex flex-col min-h-0 overflow-hidden">
         <TabsList className="h-8 px-3 rounded-none border-b border-slate-100 dark:border-slate-800 justify-start bg-transparent shrink-0 gap-0">
           <TabsTrigger value="body" className="text-xs h-7 px-3 data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-blue-500 data-[state=active]:shadow-none rounded-none">
             Body
@@ -159,164 +160,277 @@ export function ApiResponseViewer() {
               <span className="ml-1 text-[10px] text-slate-400">({requestHistory.length})</span>
             )}
           </TabsTrigger>
+          <TabsTrigger value="tests" className="text-xs h-7 px-3 data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-blue-500 data-[state=active]:shadow-none rounded-none">
+            Tests
+            {response.testResults && response.testResults.length > 0 && (
+              <span className="ml-1 text-[10px] text-slate-400">({response.testResults.length})</span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="console" className="text-xs h-7 px-3 data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-blue-500 data-[state=active]:shadow-none rounded-none">
+            Console
+            {response.consoleLogs && response.consoleLogs.length > 0 && (
+              <span className="ml-1 text-[10px] text-slate-400">({response.consoleLogs.length})</span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="output" className="text-xs h-7 px-3 data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-blue-500 data-[state=active]:shadow-none rounded-none">
+            Output
+            {response.mappingResults && response.mappingResults.length > 0 && (
+              <span className="ml-1 text-[10px] text-slate-400">({response.mappingResults.length})</span>
+            )}
+          </TabsTrigger>
         </TabsList>
 
-        {/* Body tab */}
-        <TabsContent value="body" className="flex-1 flex flex-col min-h-0 overflow-hidden m-0">
-          {response.error ? (
-            <div className="flex items-center justify-center flex-1 text-xs text-slate-400">
-              No response body
-            </div>
-          ) : (
-            <>
-              {/* Format bar */}
-              <div className="flex items-center justify-between px-3 py-1 border-b border-slate-100 dark:border-slate-800 shrink-0">
-                <span className="text-[10px] text-slate-400 uppercase tracking-wider font-medium">
-                  {language}
-                </span>
-                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 rounded p-0.5">
-                  <button
-                    onClick={() => setRawMode(false)}
-                    className={cn(
-                      'text-[10px] px-2 py-0.5 rounded transition-colors font-medium',
-                      !rawMode
-                        ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm'
-                        : 'text-slate-400 hover:text-slate-600'
-                    )}
-                  >
-                    Pretty
-                  </button>
-                  <button
-                    onClick={() => setRawMode(true)}
-                    className={cn(
-                      'text-[10px] px-2 py-0.5 rounded transition-colors font-medium',
-                      rawMode
-                        ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm'
-                        : 'text-slate-400 hover:text-slate-600'
-                    )}
-                  >
-                    Raw
-                  </button>
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {activeTab === 'body' && (
+            <TabsContent value="body" forceMount className="h-full flex flex-col min-h-0 overflow-hidden m-0">
+              {response.error ? (
+                <div className="flex items-center justify-center flex-1 text-xs text-slate-400">
+                  No response body
                 </div>
-              </div>
-
-              {/* Editor or pre */}
-              <div className="flex-1 min-h-0 overflow-hidden">
-                {response.body === '' ? (
-                  <div className="flex items-center justify-center h-full text-xs text-slate-400">
-                    Empty response body
+              ) : (
+                <>
+                  <div className="flex items-center justify-between px-3 py-1 border-b border-slate-100 dark:border-slate-800 shrink-0">
+                    <span className="text-[10px] text-slate-400 uppercase tracking-wider font-medium">
+                      {language}
+                    </span>
+                    <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 rounded p-0.5">
+                      <button
+                        onClick={() => setRawMode(false)}
+                        className={cn(
+                          'text-[10px] px-2 py-0.5 rounded transition-colors font-medium',
+                          !rawMode
+                            ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm'
+                            : 'text-slate-400 hover:text-slate-600'
+                        )}
+                      >
+                        Pretty
+                      </button>
+                      <button
+                        onClick={() => setRawMode(true)}
+                        className={cn(
+                          'text-[10px] px-2 py-0.5 rounded transition-colors font-medium',
+                          rawMode
+                            ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm'
+                            : 'text-slate-400 hover:text-slate-600'
+                        )}
+                      >
+                        Raw
+                      </button>
+                    </div>
                   </div>
-                ) : rawMode ? (
-                  <pre className="h-full overflow-auto p-3 text-xs font-mono text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap break-all bg-white dark:bg-slate-950">
-                    {response.body}
-                  </pre>
-                ) : (
-                  <MonacoEditor
-                    height="100%"
-                    language={language}
-                    value={displayBody}
-                    theme={editorTheme}
-                    options={{
-                      readOnly: true,
-                      minimap: { enabled: false },
-                      fontSize: 12,
-                      lineNumbers: 'off',
-                      automaticLayout: true,
-                      wordWrap: 'on',
-                      scrollBeyondLastLine: false,
-                      domReadOnly: true,
-                      renderLineHighlight: 'none'
-                    }}
-                  />
-                )}
-              </div>
-            </>
-          )}
-        </TabsContent>
 
-        {/* Headers tab */}
-        <TabsContent value="headers" className="flex-1 overflow-y-auto m-0">
-          <table className="w-full text-xs">
-            <tbody>
-              {Object.entries(response.headers).map(([key, value], idx) => (
-                <tr
-                  key={key}
-                  className={cn(
-                    'border-b border-slate-50 dark:border-slate-900/80',
-                    idx % 2 === 0
-                      ? 'bg-white dark:bg-slate-950'
-                      : 'bg-slate-50/50 dark:bg-slate-900/30'
-                  )}
-                >
-                  <td className="py-1.5 px-3 font-mono font-semibold text-slate-500 dark:text-slate-400 w-2/5 break-all align-top">
-                    {key}
-                  </td>
-                  <td className="py-1.5 px-3 font-mono text-slate-700 dark:text-slate-300 break-all">
-                    {value}
-                  </td>
-                </tr>
-              ))}
-              {Object.keys(response.headers).length === 0 && (
-                <tr>
-                  <td colSpan={2} className="py-6 px-3 text-center text-slate-400">
-                    No response headers
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </TabsContent>
-
-        {/* History tab */}
-        <TabsContent value="history" className="flex-1 overflow-y-auto m-0">
-          {requestHistory.length === 0 ? (
-            <div className="flex items-center justify-center py-8 text-xs text-slate-400">
-              No history for this request
-            </div>
-          ) : (
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
-                  <th className="py-1.5 px-3 text-left font-medium text-slate-500">Method</th>
-                  <th className="py-1.5 px-3 text-left font-medium text-slate-500">URL</th>
-                  <th className="py-1.5 px-3 text-left font-medium text-slate-500">Status</th>
-                  <th className="py-1.5 px-3 text-left font-medium text-slate-500">Time</th>
-                  <th className="py-1.5 px-3 text-left font-medium text-slate-500">Size</th>
-                </tr>
-              </thead>
-              <tbody>
-                {requestHistory.map((h, idx) => (
-                  <tr
-                    key={h.id}
-                    className={cn(
-                      'border-b border-slate-50 dark:border-slate-900/80',
-                      idx % 2 === 0 ? 'bg-white dark:bg-slate-950' : 'bg-slate-50/50 dark:bg-slate-900/30',
-                      'hover:bg-blue-50/50 dark:hover:bg-blue-950/20 transition-colors'
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    {response.body === '' ? (
+                      <div className="flex items-center justify-center h-full text-xs text-slate-400">
+                        Empty response body
+                      </div>
+                    ) : rawMode ? (
+                      <pre className="h-full overflow-auto p-3 text-xs font-mono text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap break-all bg-white dark:bg-slate-950">
+                        {response.body}
+                      </pre>
+                    ) : (
+                      <MonacoEditor
+                        height="100%"
+                        language={language}
+                        value={displayBody}
+                        theme={editorTheme}
+                        options={{
+                          readOnly: true,
+                          minimap: { enabled: false },
+                          fontSize: 12,
+                          lineNumbers: 'off',
+                          automaticLayout: true,
+                          wordWrap: 'on',
+                          scrollBeyondLastLine: false,
+                          domReadOnly: true,
+                          renderLineHighlight: 'none'
+                        }}
+                      />
                     )}
-                  >
-                    <td className="py-1.5 px-3">
-                      <MethodBadge method={h.method} />
-                    </td>
-                    <td className="py-1.5 px-3 font-mono text-slate-600 dark:text-slate-400 max-w-[200px] truncate">
-                      {h.url}
-                    </td>
-                    <td className="py-1.5 px-3">
-                      <span className={cn(
-                        'font-mono font-semibold',
-                        h.status >= 200 && h.status < 300 ? 'text-green-600 dark:text-green-400' :
-                        h.status >= 400 ? 'text-red-500 dark:text-red-400' : 'text-slate-500'
-                      )}>
-                        {h.status}
-                      </span>
-                    </td>
-                    <td className="py-1.5 px-3 text-slate-500 tabular-nums">{h.duration}ms</td>
-                    <td className="py-1.5 px-3 text-slate-500 tabular-nums">{formatSize(h.size)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                  </div>
+                </>
+              )}
+            </TabsContent>
           )}
-        </TabsContent>
+
+          {activeTab === 'headers' && (
+            <TabsContent value="headers" forceMount className="h-full overflow-y-auto m-0">
+              <table className="w-full text-xs">
+                <tbody>
+                  {Object.entries(response.headers).map(([key, value], idx) => (
+                    <tr
+                      key={key}
+                      className={cn(
+                        'border-b border-slate-50 dark:border-slate-900/80',
+                        idx % 2 === 0
+                          ? 'bg-white dark:bg-slate-950'
+                          : 'bg-slate-50/50 dark:bg-slate-900/30'
+                      )}
+                    >
+                      <td className="py-1.5 px-3 font-mono font-semibold text-slate-500 dark:text-slate-400 w-2/5 break-all align-top">
+                        {key}
+                      </td>
+                      <td className="py-1.5 px-3 font-mono text-slate-700 dark:text-slate-300 break-all">
+                        {value}
+                      </td>
+                    </tr>
+                  ))}
+                  {Object.keys(response.headers).length === 0 && (
+                    <tr>
+                      <td colSpan={2} className="py-6 px-3 text-center text-slate-400">
+                        No response headers
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </TabsContent>
+          )}
+
+          {activeTab === 'history' && (
+            <TabsContent value="history" forceMount className="h-full overflow-y-auto m-0">
+              {requestHistory.length === 0 ? (
+                <div className="flex items-center justify-center py-8 text-xs text-slate-400">
+                  No history for this request
+                </div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+                      <th className="py-1.5 px-3 text-left font-medium text-slate-500">Method</th>
+                      <th className="py-1.5 px-3 text-left font-medium text-slate-500">URL</th>
+                      <th className="py-1.5 px-3 text-left font-medium text-slate-500">Status</th>
+                      <th className="py-1.5 px-3 text-left font-medium text-slate-500">Time</th>
+                      <th className="py-1.5 px-3 text-left font-medium text-slate-500">Size</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {requestHistory.map((h, idx) => (
+                      <tr
+                        key={h.id}
+                        className={cn(
+                          'border-b border-slate-50 dark:border-slate-900/80',
+                          idx % 2 === 0 ? 'bg-white dark:bg-slate-950' : 'bg-slate-50/50 dark:bg-slate-900/30',
+                          'hover:bg-blue-50/50 dark:hover:bg-blue-950/20 transition-colors'
+                        )}
+                      >
+                        <td className="py-1.5 px-3">
+                          <MethodBadge method={h.method} />
+                        </td>
+                        <td className="py-1.5 px-3 font-mono text-slate-600 dark:text-slate-400 max-w-[200px] truncate">
+                          {h.url}
+                        </td>
+                        <td className="py-1.5 px-3">
+                          <span className={cn(
+                            'font-mono font-semibold',
+                            h.status >= 200 && h.status < 300 ? 'text-green-600 dark:text-green-400' :
+                            h.status >= 400 ? 'text-red-500 dark:text-red-400' : 'text-slate-500'
+                          )}>
+                            {h.status}
+                          </span>
+                        </td>
+                        <td className="py-1.5 px-3 text-slate-500 tabular-nums">{h.duration}ms</td>
+                        <td className="py-1.5 px-3 text-slate-500 tabular-nums">{formatSize(h.size)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </TabsContent>
+          )}
+
+          {activeTab === 'tests' && (
+            <TabsContent value="tests" forceMount className="h-full overflow-y-auto m-0">
+              {response.testResults && response.testResults.length > 0 ? (
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {response.testResults.map((result, index) => (
+                    <div key={`${result.name}-${index}`} className="px-3 py-3 flex items-start gap-3">
+                      <div className={cn(
+                        'mt-0.5 h-6 w-6 rounded-full flex items-center justify-center shrink-0',
+                        result.passed
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                          : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                      )}>
+                        <Beaker className="h-3.5 w-3.5" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">{result.name}</p>
+                        <p className={cn(
+                          'text-[11px] mt-1',
+                          result.passed ? 'text-emerald-600 dark:text-emerald-300' : 'text-red-500 dark:text-red-300'
+                        )}>
+                          {result.message}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-slate-400">
+                  No test results for this response
+                </div>
+              )}
+            </TabsContent>
+          )}
+
+          {activeTab === 'console' && (
+            <TabsContent value="console" forceMount className="h-full overflow-y-auto m-0 bg-slate-950">
+              {response.consoleLogs && response.consoleLogs.length > 0 ? (
+                <div className="divide-y divide-slate-800">
+                  {response.consoleLogs.map((entry, index) => (
+                    <div key={`${entry.phase}-${index}`} className="px-3 py-2 font-mono text-xs text-slate-200">
+                      <div className="flex items-center gap-2 mb-1">
+                        <TerminalSquare className="h-3.5 w-3.5 text-slate-500" />
+                        <span className="text-[10px] uppercase tracking-wider text-slate-500">{entry.phase}</span>
+                        <span className="text-[10px] uppercase tracking-wider text-slate-600">{entry.level}</span>
+                      </div>
+                      <pre className="whitespace-pre-wrap break-words text-slate-300">{entry.message}</pre>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-slate-500">
+                  No console output for this response
+                </div>
+              )}
+            </TabsContent>
+          )}
+
+          {activeTab === 'output' && (
+            <TabsContent value="output" forceMount className="h-full overflow-y-auto m-0">
+              {response.mappingResults && response.mappingResults.length > 0 ? (
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {response.mappingResults.map((item, index) => (
+                    <div key={`${item.variableName}-${index}`} className="px-3 py-3 flex items-start gap-3">
+                      <div className={cn(
+                        'mt-0.5 h-6 w-6 rounded-full flex items-center justify-center shrink-0',
+                        item.applied
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                          : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                      )}>
+                        <ArrowDownToLine className="h-3.5 w-3.5" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                          {item.variableName} <span className="text-slate-400 font-normal">from {item.sourcePath}</span>
+                        </p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                          {item.applied
+                            ? `Saved to ${item.targetScope}${item.value ? ` = ${item.value}` : ''}`
+                            : item.reason ?? 'Not applied'}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-slate-400">
+                  No response capture results for this response
+                </div>
+              )}
+            </TabsContent>
+          )}
+        </div>
       </Tabs>
     </div>
   )

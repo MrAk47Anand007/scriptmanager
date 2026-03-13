@@ -12,13 +12,16 @@ interface TerminalComponentProps {
     onClose: () => void;
     isMinimized: boolean;
     toggleMinimize: () => void;
+    pendingCommand?: string | null;
+    onCommandSent?: () => void;
 }
 
-export const TerminalComponent = ({ onClose, isMinimized, toggleMinimize }: TerminalComponentProps) => {
+export const TerminalComponent = ({ onClose, isMinimized, toggleMinimize, pendingCommand, onCommandSent }: TerminalComponentProps) => {
     const terminalRef = useRef<HTMLDivElement>(null);
     const xtermRef = useRef<Terminal | null>(null);
     const socketRef = useRef<WebSocket | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
+    const lastSentCommandRef = useRef<string | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const { resolvedTheme } = useTheme();
 
@@ -153,6 +156,20 @@ export const TerminalComponent = ({ onClose, isMinimized, toggleMinimize }: Term
             requestAnimationFrame(() => fitAddonRef.current?.fit());
         }
     }, [isMinimized]);
+
+    useEffect(() => {
+        if (!pendingCommand || !isConnected || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+            return;
+        }
+
+        if (lastSentCommandRef.current === pendingCommand) {
+            return;
+        }
+
+        socketRef.current.send(`${pendingCommand}\r`);
+        lastSentCommandRef.current = pendingCommand;
+        onCommandSent?.();
+    }, [pendingCommand, isConnected, onCommandSent]);
 
 
     if (isMinimized) {

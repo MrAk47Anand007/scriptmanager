@@ -12,7 +12,6 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Loader2, Save, Github, FolderIcon, Download, Upload, Package, Lock, LogOut } from 'lucide-react';
 import { useRef } from 'react';
 import axios from 'axios';
-import { useAppDispatch as _useAppDispatch } from '@/store/hooks';
 import { useRouter } from 'next/navigation';
 
 export const SettingsManager = () => {
@@ -34,6 +33,11 @@ export const SettingsManager = () => {
     const [passwordMessage, setPasswordMessage] = useState('');
     const [passwordError, setPasswordError] = useState('');
     const [isChangingPassword, setIsChangingPassword] = useState(false);
+    const [hasApiToken, setHasApiToken] = useState(false);
+    const [generatedApiToken, setGeneratedApiToken] = useState('');
+    const [apiTokenMessage, setApiTokenMessage] = useState('');
+    const [apiTokenError, setApiTokenError] = useState('');
+    const [isApiTokenLoading, setIsApiTokenLoading] = useState(false);
 
     // Import/Export state
     const [importStatus, setImportStatus] = useState<string>('');
@@ -63,6 +67,12 @@ export const SettingsManager = () => {
             dispatch(fetchSettings());
         }
     }, [status, dispatch]);
+
+    useEffect(() => {
+        axios.get('/api/auth/api-token')
+            .then((res) => setHasApiToken(!!res.data?.has_token))
+            .catch(() => setHasApiToken(false))
+    }, []);
 
     useEffect(() => {
         if (status === 'succeeded') {
@@ -128,6 +138,43 @@ export const SettingsManager = () => {
     const handleLogout = async () => {
         await axios.post('/api/auth/logout');
         router.push('/login');
+    };
+
+    const handleGenerateApiToken = async () => {
+        setApiTokenError('');
+        setApiTokenMessage('');
+        setGeneratedApiToken('');
+        setIsApiTokenLoading(true);
+
+        try {
+            const res = await axios.post('/api/auth/api-token');
+            setHasApiToken(true);
+            setGeneratedApiToken(res.data.token ?? '');
+            setApiTokenMessage(hasApiToken ? 'API token rotated. Update any CLI configs now.' : 'API token created successfully.');
+        } catch (err: unknown) {
+            const axiosErr = err as { response?: { data?: { error?: string } } };
+            setApiTokenError(axiosErr.response?.data?.error ?? 'Failed to generate API token');
+        } finally {
+            setIsApiTokenLoading(false);
+        }
+    };
+
+    const handleRevokeApiToken = async () => {
+        setApiTokenError('');
+        setApiTokenMessage('');
+        setGeneratedApiToken('');
+        setIsApiTokenLoading(true);
+
+        try {
+            await axios.delete('/api/auth/api-token');
+            setHasApiToken(false);
+            setApiTokenMessage('API token revoked.');
+        } catch (err: unknown) {
+            const axiosErr = err as { response?: { data?: { error?: string } } };
+            setApiTokenError(axiosErr.response?.data?.error ?? 'Failed to revoke API token');
+        } finally {
+            setIsApiTokenLoading(false);
+        }
     };
 
     if (status === 'loading' && Object.keys(settings).length === 0) {
@@ -340,6 +387,36 @@ export const SettingsManager = () => {
                         Change Password
                     </Button>
                     <div className="border-t pt-4">
+                        <div className="space-y-2 pb-4">
+                            <Label>CLI API Token</Label>
+                            <p className="text-xs text-slate-500">
+                                Use a bearer token for CLI and automation access. The raw token is only shown once when generated.
+                            </p>
+                            {apiTokenMessage && (
+                                <p className="text-xs text-green-600">{apiTokenMessage}</p>
+                            )}
+                            {apiTokenError && (
+                                <p className="text-xs text-red-500">{apiTokenError}</p>
+                            )}
+                            <p className="text-xs text-slate-500">
+                                Status: {hasApiToken ? 'Configured' : 'Not configured'}
+                            </p>
+                            {generatedApiToken && (
+                                <div className="rounded border border-amber-200 bg-amber-50 p-3">
+                                    <p className="text-xs font-medium text-amber-800">Copy this token now. It will not be shown again.</p>
+                                    <p className="mt-2 break-all font-mono text-xs text-amber-900">{generatedApiToken}</p>
+                                </div>
+                            )}
+                            <div className="flex gap-2">
+                                <Button variant="outline" onClick={handleGenerateApiToken} disabled={isApiTokenLoading}>
+                                    {isApiTokenLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Lock className="mr-2 h-4 w-4" />}
+                                    {hasApiToken ? 'Regenerate API Token' : 'Generate API Token'}
+                                </Button>
+                                <Button variant="ghost" onClick={handleRevokeApiToken} disabled={isApiTokenLoading || !hasApiToken}>
+                                    Revoke Token
+                                </Button>
+                            </div>
+                        </div>
                         <Button variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={handleLogout}>
                             <LogOut className="mr-2 h-4 w-4" />
                             Sign Out

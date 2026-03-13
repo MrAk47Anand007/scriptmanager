@@ -36,6 +36,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
 // ---------------------------------------------------------------------------
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+const API_TOKEN_PREFIX = 'sha256$'
 
 function sign(data: string): string {
   return crypto.createHmac('sha256', SESSION_SECRET).update(data).digest('base64url')
@@ -60,6 +61,22 @@ export function validateSessionToken(token: string | undefined): boolean {
   } catch {
     return false
   }
+}
+
+export function generateApiToken(): string {
+  return `smt_${crypto.randomBytes(32).toString('base64url')}`
+}
+
+export function hashApiToken(token: string): string {
+  const digest = crypto.createHash('sha256').update(token).digest('hex')
+  return `${API_TOKEN_PREFIX}${digest}`
+}
+
+export function verifyApiToken(token: string, storedHash: string | null | undefined): boolean {
+  if (!token || !storedHash?.startsWith(API_TOKEN_PREFIX)) return false
+
+  const expected = hashApiToken(token)
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(storedHash))
 }
 
 export const SESSION_COOKIE = 'sm_session'

@@ -147,6 +147,7 @@ export async function execRemote(opts: {
 
     let client: SshClient | null = null
     const outputLines: string[] = []
+    let exitCode = 1
 
     try {
         const config = await buildConnectConfig(profileId)
@@ -168,8 +169,9 @@ export async function execRemote(opts: {
                     emitter.emit('line', line)
                 })
 
-                stream.on('close', (code: number) => {
-                    emitter.emit('done', code)
+                stream.on('close', (code: number | null) => {
+                    exitCode = code ?? 1
+                    emitter.emit('done', exitCode)
                     resolve()
                 })
 
@@ -177,13 +179,12 @@ export async function execRemote(opts: {
             })
         })
 
-        // Determine final status and exit code from emitted done event
         const fullOutput = outputLines.join('')
         await prisma.remoteExecution.update({
             where: { id: remoteExecId },
             data: {
-                status: 'success',
-                exitCode: 0,
+                status: exitCode === 0 ? 'success' : 'failure',
+                exitCode,
                 finishedAt: new Date(),
                 logOutput: fullOutput.slice(0, 100000), // cap to 100KB
             },
@@ -192,13 +193,14 @@ export async function execRemote(opts: {
         const errMsg = `\n[Error] ${(err as Error).message}\n`
         outputLines.push(errMsg)
         emitter.emit('line', errMsg)
-        emitter.emit('done', 1)
+        exitCode = 1
+        emitter.emit('done', exitCode)
 
         await prisma.remoteExecution.update({
             where: { id: remoteExecId },
             data: {
                 status: 'failure',
-                exitCode: 1,
+                exitCode,
                 finishedAt: new Date(),
                 logOutput: outputLines.join('').slice(0, 100000),
             },

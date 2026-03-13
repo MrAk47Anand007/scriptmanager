@@ -16,11 +16,18 @@ function LoginForm() {
     const [error, setError] = useState('')
     const [loading, setLoading] = useState(false)
     const [isFirstRun, setIsFirstRun] = useState<boolean | null>(null)
+    const [initialSetupAllowed, setInitialSetupAllowed] = useState(true)
 
     useEffect(() => {
         fetch('/api/auth/login', { method: 'HEAD' })
-            .then(res => setIsFirstRun(res.status === 204))
-            .catch(() => setIsFirstRun(false))
+            .then(res => {
+                setIsFirstRun(res.status === 204)
+                setInitialSetupAllowed(res.headers.get('x-initial-setup-allowed') !== 'false')
+            })
+            .catch(() => {
+                setIsFirstRun(false)
+                setInitialSetupAllowed(true)
+            })
     }, [])
 
     const handleSubmit = async (e: FormEvent) => {
@@ -63,6 +70,11 @@ function LoginForm() {
                                 ? 'First run — set your master password'
                                 : 'Enter your password to continue'}
                         </p>
+                        {isFirstRun === true && !initialSetupAllowed && (
+                            <p className="text-xs text-amber-600">
+                                Initial setup is restricted to localhost unless `ALLOW_REMOTE_INITIAL_SETUP=true`.
+                            </p>
+                        )}
                     </div>
 
                     <form onSubmit={handleSubmit} className="space-y-4">
@@ -83,7 +95,11 @@ function LoginForm() {
                             <p className="text-sm text-red-500">{error}</p>
                         )}
 
-                        <Button type="submit" className="w-full" disabled={loading || !password}>
+                        <Button
+                            type="submit"
+                            className="w-full"
+                            disabled={loading || !password || (isFirstRun === true && !initialSetupAllowed)}
+                        >
                             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                             {isFirstRun === true ? 'Set Password & Enter' : 'Sign In'}
                         </Button>
