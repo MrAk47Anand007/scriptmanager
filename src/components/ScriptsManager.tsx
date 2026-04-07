@@ -1,8 +1,20 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import Editor, { Monaco } from '@monaco-editor/react';
+import { useEffect, useRef, useState, useCallback, Suspense } from 'react';
+import type { Monaco } from '@monaco-editor/react';
+import { EditorSkeleton } from '@/components/ui/EditorSkeleton';
+
+const Editor = dynamic(() => import('@monaco-editor/react').then(m => m.default), {
+    ssr: false,
+    loading: () => <EditorSkeleton />,
+});
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { shallowEqual } from 'react-redux';
+import {
+    selectScriptItems, selectCollections, selectActiveScriptId, selectActiveScriptContent,
+    selectBuilds, selectSaveStatus, selectSchedule, selectContentStatus, selectRunStatus,
+    selectAllTags, selectEnvVars, selectAutoSaveEnabled, selectActiveScript,
+} from '@/features/scripts/selectors';
 import dynamic from 'next/dynamic';
 
 const TerminalComponent = dynamic(() => import('./TerminalComponent').then(mod => mod.TerminalComponent), {
@@ -56,7 +68,19 @@ const LANGUAGE_OPTIONS = [
 
 export const ScriptsManager = () => {
     const dispatch = useAppDispatch();
-    const { items: scripts, collections, activeScriptId, activeScriptContent, builds, saveStatus, schedule, contentStatus, runStatus, allTags, envVars, autoSaveEnabled } = useAppSelector((state) => state.scripts);
+    const scripts = useAppSelector(selectScriptItems, shallowEqual);
+    const collections = useAppSelector(selectCollections, shallowEqual);
+    const activeScriptId = useAppSelector(selectActiveScriptId);
+    const activeScriptContent = useAppSelector(selectActiveScriptContent);
+    const builds = useAppSelector(selectBuilds, shallowEqual);
+    const saveStatus = useAppSelector(selectSaveStatus);
+    const schedule = useAppSelector(selectSchedule, shallowEqual);
+    const contentStatus = useAppSelector(selectContentStatus);
+    const runStatus = useAppSelector(selectRunStatus);
+    const allTags = useAppSelector(selectAllTags, shallowEqual);
+    const envVars = useAppSelector(selectEnvVars, shallowEqual);
+    const autoSaveEnabled = useAppSelector(selectAutoSaveEnabled);
+    const activeScript = useAppSelector(selectActiveScript);
     const { settings } = useAppSelector((state) => state.settings);
     const isModeActive = useAppSelector((state) => state.ops.isModeActive);
     const { resolvedTheme } = useTheme();
@@ -110,12 +134,13 @@ export const ScriptsManager = () => {
             }
 
             // Load language + parameter settings from script
-            const script = scripts.find(s => s.id === activeScriptId);
-            if (script) {
-                setScriptLanguage(script.language || 'python');
-                setCustomInterpreter(script.interpreter || '');
-                setScriptParameters(script.parameters || []);
-                setTimeoutSecs(script.timeout_ms ? String(script.timeout_ms / 1000) : '');
+            // (activeScript selector provides the current value; the separate useEffect below keeps it in sync)
+            const currentScript = scripts.find(s => s.id === activeScriptId);
+            if (currentScript) {
+                setScriptLanguage(currentScript.language || 'python');
+                setCustomInterpreter(currentScript.interpreter || '');
+                setScriptParameters(currentScript.parameters || []);
+                setTimeoutSecs(currentScript.timeout_ms ? String(currentScript.timeout_ms / 1000) : '');
             }
         }
     }, [activeScriptId, dispatch]);
@@ -124,18 +149,15 @@ export const ScriptsManager = () => {
         setScriptContent(activeScriptContent || '');
     }, [activeScriptId, activeScriptContent]);
 
-    // Also update language + params when scripts list updates (after fetch)
+    // Also update language + params when active script updates (after fetch)
     useEffect(() => {
-        if (activeScriptId) {
-            const script = scripts.find(s => s.id === activeScriptId);
-            if (script) {
-                setScriptLanguage(script.language || 'python');
-                setCustomInterpreter(script.interpreter || '');
-                setScriptParameters(script.parameters || []);
-                setTimeoutSecs(script.timeout_ms ? String(script.timeout_ms / 1000) : '');
-            }
+        if (activeScript) {
+            setScriptLanguage(activeScript.language || 'python');
+            setCustomInterpreter(activeScript.interpreter || '');
+            setScriptParameters(activeScript.parameters || []);
+            setTimeoutSecs(activeScript.timeout_ms ? String(activeScript.timeout_ms / 1000) : '');
         }
-    }, [scripts, activeScriptId]);
+    }, [activeScript]);
 
     useEffect(() => {
         setCronExpression(schedule.cron);
@@ -174,7 +196,7 @@ export const ScriptsManager = () => {
 
     const handleSave = async (options: { skipGist?: boolean, isAutoSave?: boolean } = {}) => {
         if (activeScriptId) {
-            const script = scripts.find(s => s.id === activeScriptId);
+            const script = activeScript;
             if (script) {
                 const timeoutMs = timeoutSecs.trim() ? Math.round(parseFloat(timeoutSecs) * 1000) : null;
                 const result = await dispatch(saveScript({
@@ -207,53 +229,44 @@ export const ScriptsManager = () => {
     // Auto-save effect (Local DB only)
     useEffect(() => {
         if (!autoSaveEnabled || !activeScriptId || saveStatus === 'saving') return;
+        if (!activeScript) return;
 
-        // Check if dirty
-        const script = scripts.find(s => s.id === activeScriptId);
-        if (!script) return;
-
-        const savedContent = script.content || '';
+        const savedContent = activeScript.content || '';
         if (savedContent === scriptContent) return; // Not dirty
 
         const timer = setTimeout(() => {
             // Save locally, skip Gist
             handleSave({ skipGist: true, isAutoSave: true });
             // Mark Gist as dirty if Gist sync is enabled
-            if (script.sync_to_gist) {
+            if (activeScript.sync_to_gist) {
                 setGistDirty(true);
             }
         }, 2000); // 2 seconds debounce
 
         return () => clearTimeout(timer);
-    }, [scriptContent, autoSaveEnabled, activeScriptId, scripts, saveStatus, scriptLanguage, customInterpreter, scriptParameters, timeoutSecs]);
+    }, [scriptContent, autoSaveEnabled, activeScriptId, activeScript, saveStatus, scriptLanguage, customInterpreter, scriptParameters, timeoutSecs]);
 
     // Gist Sync Interval Effect (Every 10 mins)
     useEffect(() => {
         const timer = setInterval(() => {
-            if (activeScriptId && gistDirty) {
-                const script = scripts.find(s => s.id === activeScriptId);
-                if (script && script.sync_to_gist) {
-                    console.log('[Gist] Auto-syncing to Gist...');
-                    handleSave({ skipGist: false });
-                }
+            if (activeScriptId && gistDirty && activeScript?.sync_to_gist) {
+                console.log('[Gist] Auto-syncing to Gist...');
+                handleSave({ skipGist: false });
             }
         }, 10 * 60 * 1000); // 10 minutes
 
         return () => clearInterval(timer);
-    }, [activeScriptId, gistDirty, scripts]);
+    }, [activeScriptId, gistDirty, activeScript]);
 
     // Sync Gist on unmount or script change
     useEffect(() => {
         return () => {
-            if (activeScriptId && gistDirty) {
-                const script = scripts.find(s => s.id === activeScriptId);
-                if (script && script.sync_to_gist) {
-                    console.log('[Gist] Syncing on close/change...');
-                    handleSave({ skipGist: false });
-                }
+            if (activeScriptId && gistDirty && activeScript?.sync_to_gist) {
+                console.log('[Gist] Syncing on close/change...');
+                handleSave({ skipGist: false });
             }
         };
-    }, [activeScriptId, gistDirty /* scripts omitted to avoid stale closure issues, but might need ref ref pattern if strict */]);
+    }, [activeScriptId, gistDirty, activeScript]);
 
     const toggleGistSync = async (enabled: boolean) => {
         if (enabled && !settings['github_token']) {
@@ -263,18 +276,15 @@ export const ScriptsManager = () => {
 
         try {
             setIsGistSyncing(true);
-            if (activeScriptId) {
-                const script = scripts.find(s => s.id === activeScriptId);
-                if (script) {
-                    await dispatch(saveScript({
-                        id: activeScriptId,
-                        name: script.name,
-                        content: scriptContent,
-                        sync_to_gist: enabled,
-                        language: scriptLanguage,
-                        interpreter: scriptLanguage === 'custom' ? customInterpreter : null
-                    }));
-                }
+            if (activeScriptId && activeScript) {
+                await dispatch(saveScript({
+                    id: activeScriptId,
+                    name: activeScript.name,
+                    content: scriptContent,
+                    sync_to_gist: enabled,
+                    language: scriptLanguage,
+                    interpreter: scriptLanguage === 'custom' ? customInterpreter : null
+                }));
             }
         } finally {
             setIsGistSyncing(false);
@@ -403,7 +413,6 @@ export const ScriptsManager = () => {
         }
     }
 
-    const activeScript = scripts.find(s => s.id === activeScriptId);
     const webhookUrl = activeScript?.webhook_token
         ? `${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/${activeScript.webhook_token}`
         : 'No webhook generated yet';
@@ -546,7 +555,7 @@ export const ScriptsManager = () => {
                         <div className="border-b px-4 py-2 flex items-center justify-between gap-3 bg-white dark:bg-slate-950 dark:border-slate-800">
                             <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
                                 <span className="min-w-0 max-w-[320px] truncate font-semibold text-sm text-slate-700 dark:text-slate-200" title={activeScript?.name}>
-                                    {scripts.find(s => s.id === activeScriptId)?.name}
+                                    {activeScript?.name}
                                 </span>
                                 <div className="flex shrink-0 items-center gap-2">
                                     <Folder className="h-3.5 w-3.5 text-slate-400" />
@@ -857,7 +866,6 @@ export const ScriptsManager = () => {
 
                             {/* Tags section */}
                             {activeScriptId && (() => {
-                                const activeScript = scripts.find(s => s.id === activeScriptId)
                                 return (
                                     <div>
                                         <TagsInput

@@ -5,6 +5,24 @@ import { useState, useEffect, useMemo, startTransition } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchScripts, fetchCollections, fetchTemplates, fetchAllTags, setAutoSaveEnabled } from '@/features/scripts/scriptsSlice'
 import { fetchSettings } from '@/features/settings/settingsSlice'
+
+/** Single round-trip to hydrate scripts + collections + settings on startup */
+async function loadBootstrap(dispatch: ReturnType<typeof import('@/store/hooks').useAppDispatch>) {
+  try {
+    const res = await fetch('/api/bootstrap')
+    if (!res.ok) throw new Error('bootstrap failed')
+    const data = await res.json()
+    // Reuse existing fulfilled reducers so cache invalidation logic stays in one place
+    dispatch(fetchScripts.fulfilled(data.scripts, 'bootstrap', undefined))
+    dispatch(fetchCollections.fulfilled(data.collections, 'bootstrap', undefined))
+    dispatch(fetchSettings.fulfilled(data.settings, 'bootstrap', undefined))
+  } catch {
+    // Fall back to individual fetches if bootstrap endpoint is unavailable
+    void dispatch(fetchScripts())
+    void dispatch(fetchCollections())
+    void dispatch(fetchSettings())
+  }
+}
 import { setOpsMode, fetchProjects, fetchServerProfiles } from '@/features/ops/opsSlice'
 import { fetchApiCollections, fetchApiRequests } from '@/features/api/apiSlice'
 import { Settings, Code2, Globe } from 'lucide-react'
@@ -64,7 +82,7 @@ function scheduleIdleWork(callback: () => void, delay = 180) {
 
 export default function Home() {
   const dispatch = useAppDispatch()
-  const { autoSaveEnabled } = useAppSelector((state) => state.scripts)
+  const autoSaveEnabled = useAppSelector((state) => state.scripts.autoSaveEnabled)
   const isOpsModeActive = useAppSelector((state) => state.ops.isModeActive)
   const [activeTab, setActiveTab] = useState<'scripts' | 'settings' | 'api'>('scripts')
   const [mountedTabs, setMountedTabs] = useState<Record<'scripts' | 'settings' | 'api', boolean>>({
@@ -76,9 +94,8 @@ export default function Home() {
   useEffect(() => {
     let isCancelled = false
 
-    void dispatch(fetchScripts())
-    void dispatch(fetchCollections())
-    void dispatch(fetchSettings())
+    // Single round-trip replaces 3 separate fetches
+    void loadBootstrap(dispatch)
 
     const stored = localStorage.getItem('scriptManager_autoSave')
     if (stored) {

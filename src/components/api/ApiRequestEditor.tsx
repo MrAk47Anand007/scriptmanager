@@ -18,8 +18,12 @@ import dynamic from 'next/dynamic'
 import { useTheme } from 'next-themes'
 import { materializeApiRequest, parseVariableRows, type ApiResponseMappingRow } from '@/lib/apiRequestMaterialization'
 import { analyzeCurlCommand } from '@/lib/curlImport'
+import { EditorSkeleton } from '@/components/ui/EditorSkeleton'
 
-const MonacoEditor = dynamic(() => import('@monaco-editor/react').then(m => m.Editor), { ssr: false })
+const MonacoEditor = dynamic(() => import('@monaco-editor/react').then(m => m.Editor), {
+    ssr: false,
+    loading: () => <EditorSkeleton />,
+})
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
 

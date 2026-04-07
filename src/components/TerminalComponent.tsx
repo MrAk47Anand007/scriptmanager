@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
+import { WebglAddon } from 'xterm-addon-webgl';
 import 'xterm/css/xterm.css';
 import { Loader2, Minimize2, Maximize2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -54,6 +55,19 @@ export const TerminalComponent = ({ onClose, isMinimized, toggleMinimize, pendin
         term.loadAddon(fitAddon);
 
         term.open(terminalRef.current);
+
+        // Attempt GPU-accelerated WebGL rendering (5–9x faster than canvas for large output)
+        // Falls back silently to canvas renderer if WebGL is unavailable (VM, RDP, etc.)
+        try {
+            const webglAddon = new WebglAddon();
+            webglAddon.onContextLoss(() => {
+                webglAddon.dispose();
+            });
+            term.loadAddon(webglAddon);
+        } catch {
+            // WebGL unavailable — canvas renderer is used automatically
+        }
+
         // Initial fit
         requestAnimationFrame(() => fitAddon.fit());
 
