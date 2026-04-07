@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, type ChangeEvent } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, type ChangeEvent, memo } from 'react';
 import { useAppDispatch, useAppSelector, useAppStore } from '@/store/hooks';
 import type { RootState } from '@/store/store';
 import {
@@ -87,8 +87,8 @@ const UnsavedIndicator = ({ scriptId }: { scriptId: string }) => {
     return <span className="text-amber-500 ml-1 font-bold" title="Unsaved changes">*</span>;
 };
 
-// Draggable Script Component
-const DraggableScript = ({
+// Draggable Script Component — memoized; only re-renders when script data or active state changes
+const DraggableScript = memo(({
     script,
     isActive,
     onClick,
@@ -142,10 +142,11 @@ const DraggableScript = ({
             </ContextMenuContent>
         </ContextMenu>
     );
-};
+// Only re-render when script data or active state changes (ignore inline callback reference changes)
+}, (prev, next) => prev.script === next.script && prev.isActive === next.isActive);
 
-// Droppable Collection Component
-const DroppableCollection = ({
+// Droppable Collection Component — memoized; only re-renders when collection data or expand state changes
+const DroppableCollection = memo(({
     collection,
     isExpanded,
     toggle,
@@ -248,7 +249,12 @@ const DroppableCollection = ({
             </ContextMenuContent>
         </ContextMenu>
     );
-};
+// Only re-render when collection data, expand state, or children change
+}, (prev, next) =>
+    prev.collection === next.collection &&
+    prev.isExpanded === next.isExpanded &&
+    prev.children === next.children
+);
 
 // Droppable Project Component
 const DroppableProject = ({
