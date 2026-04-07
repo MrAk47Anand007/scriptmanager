@@ -13,6 +13,7 @@ const DEFAULT_TIMEOUT_MS = 30_000 // 30 seconds
 interface ScriptInfo {
   id: string
   filename: string
+  sourcePath?: string | null
   language: string
   interpreter?: string | null
   timeoutMs?: number | null
@@ -62,9 +63,8 @@ export async function executeScriptAsync(
 ): Promise<void> {
   const emitter = ensureBuildEmitter(buildId)
 
-  const scriptsDir = await getScriptsDir()
   const buildsDir = getBuildsDir()
-  const scriptPath = path.join(scriptsDir, script.filename)
+  const scriptPath = await getScriptResolvedFilePath(script)
   const buildScriptDir = path.join(buildsDir, script.filename.replace(/[^a-zA-Z0-9_.-]/g, '_'))
   const logFile = path.join(buildScriptDir, `${buildId}.log`)
 
@@ -224,6 +224,14 @@ export async function getScriptFilePath(filename: string): Promise<string> {
   }
 
   return resolvedPath
+}
+
+export async function getScriptResolvedFilePath(script: { filename: string; sourcePath?: string | null }): Promise<string> {
+  if (script.sourcePath) {
+    return path.resolve(script.sourcePath)
+  }
+
+  return getScriptFilePath(script.filename)
 }
 
 export async function ensureScriptsDirExists(): Promise<void> {

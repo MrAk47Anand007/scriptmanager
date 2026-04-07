@@ -13,12 +13,14 @@ export async function GET() {
     description: c.description,
     script_count: c._count.scripts,
     project_id: c.projectId ?? null,
+    folder_path: c.folderPath ?? null,
+    is_temporary: c.isTemporary,
     created_at: c.createdAt.toISOString()
   })))
 }
 
 export async function POST(req: Request) {
-  const { name, description, project_id } = await req.json()
+  const { name, description, project_id, folder_path, is_temporary } = await req.json()
 
   if (!name?.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
@@ -28,7 +30,9 @@ export async function POST(req: Request) {
     data: {
       name: name.trim(),
       description: description ?? '',
-      projectId: project_id ?? null
+      projectId: project_id ?? null,
+      folderPath: folder_path ?? null,
+      isTemporary: !!is_temporary,
     }
   })
 
@@ -38,6 +42,8 @@ export async function POST(req: Request) {
     description: collection.description,
     script_count: 0,
     project_id: collection.projectId,
+    folder_path: collection.folderPath,
+    is_temporary: collection.isTemporary,
     created_at: collection.createdAt.toISOString()
   })
 }

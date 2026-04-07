@@ -4,7 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import { prisma } from './db'
 import { getEncryptionKey, decryptSecret, EncryptedPayload } from './crypto'
-import { getScriptFilePath } from './scriptRunner'
+import { getScriptResolvedFilePath } from './scriptRunner'
 
 // Module-level map: remoteExecId -> EventEmitter (mirrors buildEmitters in scriptRunner.ts)
 const remoteExecEmitters = new Map<string, EventEmitter>()
@@ -84,7 +84,7 @@ export async function scpScript(opts: {
     const script = await prisma.script.findUnique({ where: { id: scriptId } })
     if (!script) return { success: false, remote_path: '', error: 'Script not found' }
 
-    const localPath = await getScriptFilePath(script.filename)
+    const localPath = await getScriptResolvedFilePath(script)
     if (!fs.existsSync(localPath)) {
         return { success: false, remote_path: '', error: `Local script file not found: ${localPath}` }
     }

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getScriptFilePath } from '@/lib/scriptRunner'
+import { getScriptResolvedFilePath } from '@/lib/scriptRunner'
 import fs from 'fs'
 
 type Params = Promise<{ id: string }>
@@ -23,7 +23,7 @@ export async function GET(
   // Read script file content
   let content = ''
   try {
-    const filePath = await getScriptFilePath(script.filename)
+    const filePath = await getScriptResolvedFilePath(script)
     content = fs.readFileSync(filePath, 'utf8')
   } catch {
     // File missing — export with empty content

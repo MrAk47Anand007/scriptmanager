@@ -11,7 +11,7 @@ const TerminalComponent = dynamic(() => import('./TerminalComponent').then(mod =
 });
 import {
     fetchScriptContent, saveScript, runScript, fetchBuilds, fetchBuildOutput,
-    updateActiveScriptContent, appendBuildOutput, clearBuildOutput,
+    clearBuildOutput,
     regenerateWebhook, fetchSchedule, saveSchedule,
     moveScript, addTagToScript, removeTagFromScript, fetchAllTags,
     fetchEnvVars, upsertEnvVar, deleteEnvVar,
@@ -56,12 +56,14 @@ const LANGUAGE_OPTIONS = [
 
 export const ScriptsManager = () => {
     const dispatch = useAppDispatch();
-    const { items: scripts, collections, activeScriptId, activeScriptContent, builds, currentBuildOutput, saveStatus, schedule, contentStatus, runStatus, allTags, envVars, autoSaveEnabled } = useAppSelector((state) => state.scripts);
+    const { items: scripts, collections, activeScriptId, activeScriptContent, builds, saveStatus, schedule, contentStatus, runStatus, allTags, envVars, autoSaveEnabled } = useAppSelector((state) => state.scripts);
     const { settings } = useAppSelector((state) => state.settings);
     const isModeActive = useAppSelector((state) => state.ops.isModeActive);
     const { resolvedTheme } = useTheme();
     const consoleRef = useRef<HTMLDivElement>(null);
     const eventSourceRef = useRef<EventSource | null>(null);
+    const buildOutputBufferRef = useRef('');
+    const buildOutputFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [cronExpression, setCronExpression] = useState('');
     const [scheduleEnabled, setScheduleEnabled] = useState(false);
     const [scriptLanguage, setScriptLanguage] = useState('python');
@@ -72,6 +74,8 @@ export const ScriptsManager = () => {
     const [isTerminalOpen, setIsTerminalOpen] = useState(false);
     const [isTerminalMinimized, setIsTerminalMinimized] = useState(false);
     const [pendingTerminalCommand, setPendingTerminalCommand] = useState<string | null>(null);
+    const [scriptContent, setScriptContent] = useState('');
+    const [buildOutput, setBuildOutput] = useState('');
 
     // Parameters state
     const [scriptParameters, setScriptParameters] = useState<ScriptParameter[]>([]);
@@ -91,6 +95,8 @@ export const ScriptsManager = () => {
         if (activeScriptId) {
             setShowRunDialog(false);
             setRevealedSecret(null);
+            setBuildOutput('');
+            buildOutputBufferRef.current = '';
 
             dispatch(fetchScriptContent(activeScriptId));
             dispatch(fetchBuilds(activeScriptId));
@@ -102,7 +108,6 @@ export const ScriptsManager = () => {
                 eventSourceRef.current.close();
                 eventSourceRef.current = null;
             }
-            dispatch(clearBuildOutput());
 
             // Load language + parameter settings from script
             const script = scripts.find(s => s.id === activeScriptId);
@@ -114,6 +119,10 @@ export const ScriptsManager = () => {
             }
         }
     }, [activeScriptId, dispatch]);
+
+    useEffect(() => {
+        setScriptContent(activeScriptContent || '');
+    }, [activeScriptId, activeScriptContent]);
 
     // Also update language + params when scripts list updates (after fetch)
     useEffect(() => {
@@ -137,7 +146,31 @@ export const ScriptsManager = () => {
         if (consoleRef.current) {
             consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
         }
-    }, [currentBuildOutput]);
+    }, [buildOutput]);
+
+    useEffect(() => {
+        return () => {
+            if (buildOutputFlushTimerRef.current) {
+                clearTimeout(buildOutputFlushTimerRef.current);
+            }
+        };
+    }, []);
+
+    const flushBuildOutput = useCallback(() => {
+        if (!buildOutputBufferRef.current) return;
+        const buffered = buildOutputBufferRef.current;
+        buildOutputBufferRef.current = '';
+        setBuildOutput((current) => current + buffered);
+        buildOutputFlushTimerRef.current = null;
+    }, []);
+
+    const queueBuildOutput = useCallback((chunk: string) => {
+        buildOutputBufferRef.current += chunk;
+        if (buildOutputFlushTimerRef.current) return;
+        buildOutputFlushTimerRef.current = setTimeout(() => {
+            flushBuildOutput();
+        }, 40);
+    }, [flushBuildOutput]);
 
     const handleSave = async (options: { skipGist?: boolean, isAutoSave?: boolean } = {}) => {
         if (activeScriptId) {
@@ -147,7 +180,7 @@ export const ScriptsManager = () => {
                 const result = await dispatch(saveScript({
                     id: activeScriptId,
                     name: script.name,
-                    content: activeScriptContent,
+                    content: scriptContent,
                     sync_to_gist: script.sync_to_gist,
                     language: scriptLanguage,
                     interpreter: scriptLanguage === 'custom' ? customInterpreter : null,
@@ -180,7 +213,7 @@ export const ScriptsManager = () => {
         if (!script) return;
 
         const savedContent = script.content || '';
-        if (savedContent === activeScriptContent) return; // Not dirty
+        if (savedContent === scriptContent) return; // Not dirty
 
         const timer = setTimeout(() => {
             // Save locally, skip Gist
@@ -192,7 +225,7 @@ export const ScriptsManager = () => {
         }, 2000); // 2 seconds debounce
 
         return () => clearTimeout(timer);
-    }, [activeScriptContent, autoSaveEnabled, activeScriptId, scripts, saveStatus, scriptLanguage, customInterpreter, scriptParameters, timeoutSecs]);
+    }, [scriptContent, autoSaveEnabled, activeScriptId, scripts, saveStatus, scriptLanguage, customInterpreter, scriptParameters, timeoutSecs]);
 
     // Gist Sync Interval Effect (Every 10 mins)
     useEffect(() => {
@@ -236,7 +269,7 @@ export const ScriptsManager = () => {
                     await dispatch(saveScript({
                         id: activeScriptId,
                         name: script.name,
-                        content: activeScriptContent,
+                        content: scriptContent,
                         sync_to_gist: enabled,
                         language: scriptLanguage,
                         interpreter: scriptLanguage === 'custom' ? customInterpreter : null
@@ -267,7 +300,8 @@ export const ScriptsManager = () => {
             eventSourceRef.current.close();
         }
 
-        dispatch(clearBuildOutput());
+        setBuildOutput('');
+        buildOutputBufferRef.current = '';
         const resultAction = await dispatch(runScript({ id: activeScriptId, paramValues }));
 
         if (runScript.fulfilled.match(resultAction)) {
@@ -283,16 +317,21 @@ export const ScriptsManager = () => {
                     eventSourceRef.current = null;
                     dispatch(fetchBuilds(activeScriptId));
                     // Fetch full output to ensure we didn't miss anything (race condition for fast scripts)
-                    dispatch(fetchBuildOutput({ scriptId: activeScriptId, buildId }));
+                    dispatch(fetchBuildOutput({ scriptId: activeScriptId, buildId })).then((result) => {
+                        if (fetchBuildOutput.fulfilled.match(result)) {
+                            setBuildOutput(result.payload);
+                            buildOutputBufferRef.current = '';
+                        }
+                    });
                     return;
                 }
-                dispatch(appendBuildOutput(event.data));
+                queueBuildOutput(event.data);
             };
 
             es.onerror = () => {
                 es.close();
                 eventSourceRef.current = null;
-                dispatch(appendBuildOutput('\n[Connection closed]'));
+                queueBuildOutput('\n[Connection closed]');
                 dispatch(fetchBuilds(activeScriptId));
             };
         }
@@ -348,7 +387,11 @@ export const ScriptsManager = () => {
 
     const handleBuildClick = async (buildId: string) => {
         if (!activeScriptId) return;
-        await dispatch(fetchBuildOutput({ scriptId: activeScriptId, buildId }));
+        const result = await dispatch(fetchBuildOutput({ scriptId: activeScriptId, buildId }));
+        if (fetchBuildOutput.fulfilled.match(result)) {
+            setBuildOutput(result.payload);
+            buildOutputBufferRef.current = '';
+        }
     };
 
     const handleMoveScript = async (collectionId: string) => {
@@ -500,18 +543,18 @@ export const ScriptsManager = () => {
             <div className="flex-1 min-w-0 flex flex-col relative h-full">
                 {activeScriptId ? (
                     <div className="h-full flex flex-col">
-                        <div className="border-b px-4 py-2 flex items-center justify-between bg-white dark:bg-slate-950 dark:border-slate-800">
-                            <div className="flex items-center gap-4">
-                                <span className="font-semibold text-sm text-slate-700 dark:text-slate-200">
+                        <div className="border-b px-4 py-2 flex items-center justify-between gap-3 bg-white dark:bg-slate-950 dark:border-slate-800">
+                            <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
+                                <span className="min-w-0 max-w-[320px] truncate font-semibold text-sm text-slate-700 dark:text-slate-200" title={activeScript?.name}>
                                     {scripts.find(s => s.id === activeScriptId)?.name}
                                 </span>
-                                <div className="flex items-center gap-2">
+                                <div className="flex shrink-0 items-center gap-2">
                                     <Folder className="h-3.5 w-3.5 text-slate-400" />
                                     <Select
                                         value={activeScript?.collection_id || 'unsorted'}
                                         onValueChange={handleMoveScript}
                                     >
-                                        <SelectTrigger className="h-6 w-[140px] text-xs border-slate-200">
+                                        <SelectTrigger className="h-6 w-[160px] text-xs border-slate-200">
                                             <SelectValue placeholder="Collection" />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -523,7 +566,7 @@ export const ScriptsManager = () => {
                                     </Select>
                                 </div>
                                 {/* Language selector */}
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex shrink-0 items-center gap-1.5">
                                     <Select value={scriptLanguage} onValueChange={setScriptLanguage}>
                                         <SelectTrigger className="h-6 w-[140px] text-xs border-slate-200">
                                             <SelectValue placeholder="Language" />
@@ -544,14 +587,14 @@ export const ScriptsManager = () => {
                                     )}
                                 </div>
                             </div>
-                            <div className="flex gap-2 items-center">
+                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                                 {activeScript?.gist_url && (
-                                    <a href={activeScript.gist_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-600 hover:underline mr-2" title="View on GitHub Gist">
+                                    <a href={activeScript.gist_url} target="_blank" rel="noopener noreferrer" className="mr-2 flex items-center gap-1 text-xs text-blue-600 hover:underline" title="View on GitHub Gist">
                                         <Github className="h-3.5 w-3.5" />
                                     </a>
                                 )}
 
-                                <div className="flex flex-col items-center gap-1 mr-4" title="Sync to GitHub Gist">
+                                <div className="mr-4 flex shrink-0 flex-col items-center gap-1" title="Sync to GitHub Gist">
                                     {isGistSyncing ? (
                                         <div className="h-4 flex items-center">
                                             <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
@@ -574,7 +617,7 @@ export const ScriptsManager = () => {
                                 <Button
                                     size="sm"
                                     variant="outline"
-                                    className="h-7 text-xs gap-1"
+                                    className="h-7 shrink-0 text-xs gap-1"
                                     title="Export script as JSON"
                                     onClick={() => {
                                         if (activeScriptId) {
@@ -584,15 +627,15 @@ export const ScriptsManager = () => {
                                 >
                                     <Download className="h-3 w-3" />
                                 </Button>
-                                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => handleSave({ skipGist: false })} disabled={saveStatus === 'saving'}>
+                                <Button size="sm" variant="outline" className="h-7 shrink-0 text-xs gap-1" onClick={() => handleSave({ skipGist: false })} disabled={saveStatus === 'saving'}>
                                     <Save className="h-3 w-3" />
                                     {saveStatus === 'saving' ? 'Saving...' : 'Save'}
                                 </Button>
-                                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleRunInTerminal}>
+                                <Button size="sm" variant="outline" className="h-7 shrink-0 text-xs gap-1" onClick={handleRunInTerminal}>
                                     <Terminal className="h-3 w-3" />
                                     Run in Terminal
                                 </Button>
-                                <Button size="sm" className="h-7 text-xs gap-1 bg-green-600 hover:bg-green-700 text-white" onClick={handleRun} disabled={runStatus === 'running'}>
+                                <Button size="sm" className="h-7 shrink-0 text-xs gap-1 bg-green-600 hover:bg-green-700 text-white" onClick={handleRun} disabled={runStatus === 'running'}>
                                     {runStatus === 'running' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
                                     {runStatus === 'running' ? 'Running...' : 'Run'}
                                 </Button>
@@ -614,8 +657,8 @@ export const ScriptsManager = () => {
                                                     scriptLanguage === 'python' ? 'python' : 'plaintext'
                                         }
                                         theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
-                                        value={activeScriptContent || ''}
-                                        onChange={(value) => dispatch(updateActiveScriptContent(value || ''))}
+                                        value={scriptContent || ''}
+                                        onChange={(value) => setScriptContent(value || '')}
                                         onMount={handleEditorDidMount}
                                         options={{
                                             minimap: { enabled: false },
@@ -677,7 +720,7 @@ export const ScriptsManager = () => {
                             ref={consoleRef}
                             className="flex-1 overflow-y-auto bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-300 p-3 font-mono text-xs whitespace-pre-wrap"
                         >
-                            {currentBuildOutput || <span className="text-slate-600 italic">Ready...</span>}
+                            {buildOutput || <span className="text-slate-600 italic">Ready...</span>}
                         </div>
                     </div>
                     {activeScriptId && (
@@ -844,10 +887,10 @@ export const ScriptsManager = () => {
                                 <div>
                                     <VersionHistoryPanel
                                         scriptId={activeScriptId}
-                                        currentContent={activeScriptContent}
+                                        currentContent={scriptContent}
                                         language={scriptLanguage}
                                         onRestore={(content) => {
-                                            dispatch(updateActiveScriptContent(content));
+                                            setScriptContent(content);
                                         }}
                                     />
                                 </div>

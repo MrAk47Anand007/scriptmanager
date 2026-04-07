@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { ensureScriptsDirExists, getScriptFilePath } from '@/lib/scriptRunner'
+import { ensureScriptsDirExists, getScriptFilePath, getScriptResolvedFilePath } from '@/lib/scriptRunner'
 import { syncScriptToGist } from '@/lib/gistService'
 import fs from 'fs'
+import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 
 import { cache } from '@/lib/cache'
@@ -42,6 +43,7 @@ export async function GET() {
     timeout_ms: s.timeoutMs,
     require_webhook_signature: s.requireWebhookSignature,
     webhook_secret_set: !!s.webhookSecret,
+    source_path: s.sourcePath,
   }))
 
   await cache.set('all_scripts', result, 60 * 5) // Cache for 5 mins
@@ -54,7 +56,7 @@ export async function POST(req: Request) {
   // Invalidate cache on create/update
   await cache.del('all_scripts')
 
-  const { id, name, description, content, sync_to_gist, language, interpreter, parameters, timeout_ms } = data
+  const { id, name, description, content, sync_to_gist, language, interpreter, parameters, timeout_ms, collection_id } = data
 
   // Serialize parameters to JSON string for storage
   let parametersJson = '[]'
@@ -72,8 +74,7 @@ export async function POST(req: Request) {
 
   if (script) {
     // Update existing script
-    const filename = script.filename
-    const filePath = await getScriptFilePath(filename)
+    const filePath = await getScriptResolvedFilePath(script)
 
     if (content !== undefined) {
       fs.writeFileSync(filePath, content, 'utf8')
@@ -111,20 +112,33 @@ export async function POST(req: Request) {
         syncToGist: sync_to_gist ?? script.syncToGist,
         parameters: parametersJson,
         timeoutMs: timeout_ms !== undefined ? (timeout_ms || null) : script.timeoutMs,
+        collectionId: collection_id !== undefined ? (collection_id || null) : script.collectionId,
         updatedAt: new Date()
       },
       include: { collection: true }
     })
   } else {
     // Create new script
-    const filename = sanitizeScriptFilename(name, '.py')
-
-    const filePath = await getScriptFilePath(filename)
-
     // Check if name already taken
     const existing = await prisma.script.findUnique({ where: { name } })
     if (existing) {
       return NextResponse.json({ error: 'A script with this name already exists' }, { status: 409 })
+    }
+
+    const collection = collection_id
+      ? await prisma.collection.findUnique({ where: { id: collection_id } })
+      : null
+
+    const filename = sanitizeScriptFilename(name, '.py')
+    let filePath = await getScriptFilePath(filename)
+    let sourcePath: string | null = null
+
+    if (collection?.folderPath) {
+      filePath = path.join(collection.folderPath, filename)
+      sourcePath = filePath
+      if (fs.existsSync(filePath)) {
+        return NextResponse.json({ error: 'A file with this name already exists in the linked folder' }, { status: 409 })
+      }
     }
 
     // Check global settings for default Gist sync
@@ -145,7 +159,9 @@ export async function POST(req: Request) {
         interpreter: language === 'custom' ? (interpreter ?? null) : null,
         syncToGist: sync_to_gist ?? defaultSyncToGist,
         parameters: parametersJson,
-        webhookToken: uuidv4().replace(/-/g, '')
+        webhookToken: uuidv4().replace(/-/g, ''),
+        collectionId: collection?.id ?? null,
+        sourcePath,
       },
       include: { collection: true }
     })
@@ -181,5 +197,6 @@ export async function POST(req: Request) {
     gist_url: script.gistUrl,
     sync_to_gist: script.syncToGist,
     timeout_ms: script.timeoutMs,
+    source_path: script.sourcePath,
   })
 }

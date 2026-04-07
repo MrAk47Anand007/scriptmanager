@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { ensureScriptsDirExists, getScriptFilePath } from '@/lib/scriptRunner'
+import { ensureScriptsDirExists, getScriptFilePath, getScriptResolvedFilePath } from '@/lib/scriptRunner'
 import fs from 'fs'
+import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import { sanitizeScriptFilename } from '@/lib/executionSafety'
 
@@ -14,7 +15,7 @@ export async function POST(
 
   const original = await prisma.script.findUnique({
     where: { id },
-    include: { tags: { include: { tag: true } } }
+    include: { tags: { include: { tag: true } }, collection: true }
   })
 
   if (!original) {
@@ -24,7 +25,7 @@ export async function POST(
   await ensureScriptsDirExists()
 
   // Read original file content
-  const originalPath = await getScriptFilePath(original.filename)
+  const originalPath = await getScriptResolvedFilePath(original)
   let content = '# Duplicated script\n'
   try {
     if (fs.existsSync(originalPath)) {
@@ -46,7 +47,16 @@ export async function POST(
   const ext = original.filename.includes('.') ? `.${original.filename.split('.').pop()}` : '.py'
   const newFilename = sanitizeScriptFilename(newName, ext)
 
-  const newPath = await getScriptFilePath(newFilename)
+  let newPath = await getScriptFilePath(newFilename)
+  let sourcePath: string | null = null
+  if (original.collection?.folderPath) {
+    newPath = path.join(original.collection.folderPath, newFilename)
+    sourcePath = newPath
+  }
+
+  if (fs.existsSync(newPath)) {
+    return NextResponse.json({ error: 'A file with the duplicate name already exists' }, { status: 409 })
+  }
   fs.writeFileSync(newPath, content, 'utf8')
 
   const copy = await prisma.script.create({
@@ -58,6 +68,7 @@ export async function POST(
       interpreter: original.interpreter,
       parameters: original.parameters,
       collectionId: original.collectionId,
+      sourcePath,
       timeoutMs: original.timeoutMs,
       // New webhook token — don't share the original's token
       webhookToken: uuidv4().replace(/-/g, ''),
@@ -90,6 +101,7 @@ export async function POST(
     gist_id: null,
     gist_url: null,
     sync_to_gist: false,
+    source_path: copy.sourcePath,
     tags: original.tags.map(st => ({ id: st.tag.id, name: st.tag.name, color: st.tag.color })),
     timeout_ms: copy.timeoutMs,
   })

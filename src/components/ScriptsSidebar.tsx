@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, type ChangeEvent } from 'react';
 import { useAppDispatch, useAppSelector, useAppStore } from '@/store/hooks';
 import type { RootState } from '@/store/store';
 import {
     setActiveScript, createScript, createCollection, deleteCollection, moveScript, moveCollection,
-    saveAsTemplate, duplicateScript, deleteScript,
+    saveAsTemplate, duplicateScript, deleteScript, openScriptsFolder, importScriptsFolder,
+    removeTemporaryCollection, convertTemporaryCollection,
 } from '@/features/scripts/scriptsSlice';
 import type { Script, Collection, ScriptTemplate } from '@/features/scripts/scriptsSlice';
 import {
@@ -16,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
     FileCode, Plus, Folder, MoreVertical, Trash2, ChevronRight, ChevronDown,
-    GripVertical, Search, LayoutTemplate, Copy, Loader2, Layers,
+    GripVertical, Search, LayoutTemplate, Copy, Loader2, Layers, FolderOpen,
 } from 'lucide-react';
 import { QuickSwitcher } from './QuickSwitcher';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
@@ -53,6 +54,11 @@ import {
 import { DndContext, DragEndEvent, DragOverlay, useDraggable, useDroppable, DragStartEvent, useSensors, useSensor, PointerSensor } from '@dnd-kit/core';
 import { createPortal } from 'react-dom';
 import axios from 'axios';
+
+type BrowserFolderFile = {
+    relativePath: string
+    content: string
+}
 
 const GistSyncStatus = () => {
     const { settings } = useAppSelector((state) => state.settings);
@@ -145,7 +151,8 @@ const DroppableCollection = ({
     toggle,
     children,
     onDelete,
-    onCreateScript
+    onCreateScript,
+    onConvertToCollection,
 }: {
     collection: Collection,
     isExpanded: boolean,
@@ -153,6 +160,7 @@ const DroppableCollection = ({
     children: React.ReactNode,
     onDelete: () => void,
     onCreateScript: () => void
+    onConvertToCollection?: () => void
 }) => {
     const { setNodeRef: setDroppableNodeRef, isOver } = useDroppable({
         id: `drop-col-${collection.id}`,
@@ -182,7 +190,12 @@ const DroppableCollection = ({
                             <ChevronRight className="h-3 w-3 text-slate-400 flex-shrink-0" />
                         )}
                         <Folder className={cn("h-4 w-4 flex-shrink-0", isOver ? "text-blue-500" : "text-slate-500")} />
-                        <span className="truncate flex-1 text-slate-700 dark:text-slate-300">{collection.name}</span>
+                        <span className="truncate flex-1 min-w-0 text-slate-700 dark:text-slate-300" title={collection.name}>{collection.name}</span>
+                        {collection.folder_path && (
+                            <span className="shrink-0 text-[9px] uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+                                {collection.is_temporary ? 'temp' : 'linked'}
+                            </span>
+                        )}
                         <Button
                             variant="ghost"
                             size="icon"
@@ -202,8 +215,13 @@ const DroppableCollection = ({
                                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onCreateScript(); }}>
                                     <Plus className="mr-2 h-4 w-4" /> New Script
                                 </DropdownMenuItem>
+                                {collection.is_temporary && onConvertToCollection && (
+                                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onConvertToCollection(); }}>
+                                        <FolderOpen className="mr-2 h-4 w-4" /> Save as Collection
+                                    </DropdownMenuItem>
+                                )}
                                 <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
-                                    <Trash2 className="mr-2 h-4 w-4" /> Delete
+                                    <Trash2 className="mr-2 h-4 w-4" /> {collection.is_temporary ? 'Remove Workspace' : 'Delete'}
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
@@ -219,8 +237,13 @@ const DroppableCollection = ({
                 <ContextMenuItem onClick={onCreateScript}>
                     <Plus className="mr-2 h-4 w-4" /> New Script here
                 </ContextMenuItem>
+                {collection.is_temporary && onConvertToCollection && (
+                    <ContextMenuItem onClick={onConvertToCollection}>
+                        <FolderOpen className="mr-2 h-4 w-4" /> Save as Collection
+                    </ContextMenuItem>
+                )}
                 <ContextMenuItem className="text-red-600 focus:text-red-600" onClick={onDelete}>
-                    <Trash2 className="mr-2 h-4 w-4" /> Delete Collection
+                    <Trash2 className="mr-2 h-4 w-4" /> {collection.is_temporary ? 'Remove Workspace' : 'Delete Collection'}
                 </ContextMenuItem>
             </ContextMenuContent>
         </ContextMenu>
@@ -327,9 +350,21 @@ export const ScriptsSidebar = () => {
     const [isCreatingScript, setIsCreatingScript] = useState(false);
     const [parentCollectionId, setParentCollectionId] = useState<string | null>(null);
     const [syncToGistOverride, setSyncToGistOverride] = useState(false);
+    const [isOpenFolderDialogOpen, setIsOpenFolderDialogOpen] = useState(false);
+    const [folderPath, setFolderPath] = useState('');
+    const [folderMode, setFolderMode] = useState<'temporary' | 'collection'>('temporary');
+    const [folderCollectionName, setFolderCollectionName] = useState('');
+    const [isOpeningFolder, setIsOpeningFolder] = useState(false);
+    const [openFolderError, setOpenFolderError] = useState('');
+    const [browserFolderFiles, setBrowserFolderFiles] = useState<BrowserFolderFile[]>([]);
+    const filePickerRef = useRef<HTMLInputElement | null>(null);
+    const [collectionToConvert, setCollectionToConvert] = useState<Collection | null>(null);
+    const [convertCollectionName, setConvertCollectionName] = useState('');
+    const [isConvertingCollection, setIsConvertingCollection] = useState(false);
 
     // Search + filter state
     const [searchQuery, setSearchQuery] = useState('');
+    const deferredSearchQuery = useDeferredValue(searchQuery);
     const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
     const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
 
@@ -399,6 +434,17 @@ export const ScriptsSidebar = () => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [handleKeyDown]);
 
+    useEffect(() => {
+        const openFolderFromDesktopMenu = () => {
+            openFolderDialog();
+        };
+
+        window.addEventListener('scriptmanager:desktop-open-folder', openFolderFromDesktopMenu as EventListener);
+        return () => {
+            window.removeEventListener('scriptmanager:desktop-open-folder', openFolderFromDesktopMenu as EventListener);
+        };
+    }, []);
+
     // Initial data fetching is centralized in page.tsx
 
     // Initialize sync override based on global setting when opening dialog
@@ -441,6 +487,97 @@ export const ScriptsSidebar = () => {
         setIsCreateScriptOpen(true);
     };
 
+    const openFolderDialog = () => {
+        setFolderMode('temporary');
+        setFolderPath('');
+        setFolderCollectionName('');
+        setOpenFolderError('');
+        setBrowserFolderFiles([]);
+        setIsOpenFolderDialogOpen(true);
+    };
+
+    const selectFolderPath = async () => {
+        setOpenFolderError('');
+
+        if (window.scriptManagerDesktop?.selectFolder) {
+            const selected = await window.scriptManagerDesktop.selectFolder();
+            if (selected) {
+                setFolderPath(selected);
+                if (!folderCollectionName.trim()) {
+                    const parts = selected.split(/[\\/]/).filter(Boolean);
+                    setFolderCollectionName(parts[parts.length - 1] ?? '');
+                }
+            }
+            return;
+        }
+
+        filePickerRef.current?.click();
+    };
+
+    const handleFolderInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+        const selectedFiles = Array.from(event.target.files ?? []) as Array<File & { webkitRelativePath?: string }>;
+        if (selectedFiles.length === 0) return;
+
+        setOpenFolderError('');
+
+        const folderRoot = selectedFiles[0].webkitRelativePath?.split('/')[0] || 'Imported Folder';
+        const loadedFiles = await Promise.all(
+            selectedFiles
+                .filter((file) => file.webkitRelativePath)
+                .map(async (file) => ({
+                    relativePath: file.webkitRelativePath!,
+                    content: await file.text(),
+                }))
+        );
+
+        setBrowserFolderFiles(loadedFiles);
+        setFolderPath(folderRoot);
+        if (!folderCollectionName.trim()) {
+            setFolderCollectionName(folderRoot);
+        }
+
+        event.target.value = '';
+    };
+
+    const handleOpenFolderSubmit = async () => {
+        if (!folderPath.trim() || isOpeningFolder) return;
+
+        setIsOpeningFolder(true);
+        setOpenFolderError('');
+        try {
+            const result = window.scriptManagerDesktop?.selectFolder
+                ? await dispatch(openScriptsFolder({
+                    folderPath: folderPath.trim(),
+                    mode: folderMode,
+                    collectionName: folderMode === 'collection' ? folderCollectionName.trim() || undefined : undefined,
+                }))
+                : await dispatch(importScriptsFolder({
+                    mode: folderMode,
+                    folderName: folderPath.trim(),
+                    collectionName: folderMode === 'collection' ? folderCollectionName.trim() || undefined : undefined,
+                    files: browserFolderFiles,
+                }));
+
+            if (openScriptsFolder.fulfilled.match(result) || importScriptsFolder.fulfilled.match(result)) {
+                const firstScriptId = result.payload.scripts[0]?.id;
+                if (result.payload.collection?.id) {
+                    setExpandedCollections((prev) => ({ ...prev, [result.payload.collection.id]: true }));
+                }
+                if (firstScriptId) {
+                    dispatch(setActiveScript(firstScriptId));
+                }
+                setIsOpenFolderDialogOpen(false);
+            } else {
+                const message = typeof result.payload === 'string'
+                    ? result.payload
+                    : (result.error?.message || 'Failed to open folder');
+                setOpenFolderError(message);
+            }
+        } finally {
+            setIsOpeningFolder(false);
+        }
+    };
+
     const handleCreateScriptSubmit = async () => {
         if (!newScriptName.trim() || isCreatingScript) return;
 
@@ -466,12 +603,12 @@ export const ScriptsSidebar = () => {
                 description: newScriptDescription.trim() || undefined,
                 syncToGist: syncToGistOverride,
                 content,
-                language
+                language,
+                collectionId: parentCollectionId,
             }));
 
             if (createScript.fulfilled.match(result)) {
                 if (parentCollectionId) {
-                    await dispatch(moveScript({ scriptId: result.payload.id, collectionId: parentCollectionId }));
                     setExpandedCollections(prev => ({ ...prev, [parentCollectionId]: true }));
                 }
                 setIsCreateScriptOpen(false);
@@ -498,6 +635,35 @@ export const ScriptsSidebar = () => {
     const handleDeleteCollection = async (id: string) => {
         if (confirm("Delete this collection? Scripts inside will be moved to Unsorted.")) {
             await dispatch(deleteCollection(id));
+        }
+    };
+
+    const handleRemoveTemporaryCollection = async (collection: Collection) => {
+        if (!confirm(`Remove temporary workspace "${collection.name}" from ScriptManager?`)) {
+            return;
+        }
+        await dispatch(removeTemporaryCollection(collection.id));
+    };
+
+    const openConvertCollectionDialog = (collection: Collection) => {
+        setCollectionToConvert(collection);
+        setConvertCollectionName(collection.name.replace(/\s+\(Temporary\)$/i, ''));
+    };
+
+    const handleConvertTemporaryCollection = async () => {
+        if (!collectionToConvert || !convertCollectionName.trim() || isConvertingCollection) return;
+        setIsConvertingCollection(true);
+        try {
+            const result = await dispatch(convertTemporaryCollection({
+                id: collectionToConvert.id,
+                name: convertCollectionName.trim(),
+            }));
+            if (convertTemporaryCollection.fulfilled.match(result)) {
+                setCollectionToConvert(null);
+                setConvertCollectionName('');
+            }
+        } finally {
+            setIsConvertingCollection(false);
         }
     };
 
@@ -609,23 +775,23 @@ export const ScriptsSidebar = () => {
         if (selectedTagId) {
             result = result.filter(s => s.tags?.some(t => t.id === selectedTagId));
         }
-        if (!searchQuery.trim()) return result;
-        const q = searchQuery.toLowerCase();
+        if (!deferredSearchQuery.trim()) return result;
+        const q = deferredSearchQuery.toLowerCase();
         return result.filter(s =>
             s.name.toLowerCase().includes(q) ||
             (s.description ?? '').toLowerCase().includes(q)
         );
-    }, [scripts, searchQuery, selectedTagId]);
+    }, [deferredSearchQuery, scripts, selectedTagId]);
 
     // Auto-expand collections that contain matching scripts when searching or filtering
     useEffect(() => {
-        if (!searchQuery.trim() && !selectedTagId) return;
+        if (!deferredSearchQuery.trim() && !selectedTagId) return;
         const toExpand: Record<string, boolean> = {};
         filteredScripts.forEach(s => {
             if (s.collection_id) toExpand[s.collection_id] = true;
         });
         setExpandedCollections(prev => ({ ...prev, ...toExpand }));
-    }, [filteredScripts, searchQuery, selectedTagId]);
+    }, [deferredSearchQuery, filteredScripts, selectedTagId]);
 
     const grouped = useMemo(() => {
         const result: Record<string, typeof scripts> = {};
@@ -645,6 +811,16 @@ export const ScriptsSidebar = () => {
 
         return { result, unsorted };
     }, [filteredScripts, collections]);
+
+    const temporaryCollections = useMemo(
+        () => collections.filter((collection) => collection.is_temporary),
+        [collections]
+    );
+
+    const savedCollections = useMemo(
+        () => collections.filter((collection) => !collection.is_temporary),
+        [collections]
+    );
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -669,6 +845,9 @@ export const ScriptsSidebar = () => {
                         <div className="flex items-center justify-between mb-2">
                             <h2 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Scripts</h2>
                             <div className="flex gap-1">
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={openFolderDialog} title="Open local folder">
+                                    <FolderOpen className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
+                                </Button>
                                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setQuickSwitcherOpen(true)}>
                                     <Search className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                                 </Button>
@@ -789,8 +968,39 @@ export const ScriptsSidebar = () => {
                         {/* === Ops Mode: 3-level Project → Collection → Script hierarchy === */}
                         {isModeActive && !searchQuery.trim() && (
                             <>
+                                {temporaryCollections.length > 0 && (
+                                    <>
+                                        <div className="px-2 py-2 text-xs font-semibold text-amber-500 uppercase">Temporary</div>
+                                        {temporaryCollections.map(collection => (
+                                            <DroppableCollection
+                                                key={collection.id}
+                                                collection={collection}
+                                                isExpanded={!!expandedCollections[collection.id]}
+                                                toggle={() => toggleCollection(collection.id)}
+                                                onDelete={() => handleRemoveTemporaryCollection(collection)}
+                                                onCreateScript={() => handleCreateScript(collection.id)}
+                                                onConvertToCollection={() => openConvertCollectionDialog(collection)}
+                                            >
+                                                {grouped.result[collection.id]?.length === 0 && (
+                                                    <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
+                                                )}
+                                                {(grouped.result[collection.id] ?? []).map(script => (
+                                                    <DraggableScript
+                                                        key={script.id}
+                                                        script={script}
+                                                        isActive={activeScriptId === script.id}
+                                                        onClick={() => dispatch(setActiveScript(script.id))}
+                                                        onSaveAsTemplate={() => openSaveAsTemplate(script)}
+                                                        onDuplicate={() => dispatch(duplicateScript(script.id))}
+                                                        onDelete={() => handleDeleteScriptRequest(script)}
+                                                    />
+                                                ))}
+                                            </DroppableCollection>
+                                        ))}
+                                    </>
+                                )}
                                 {projects.map(project => {
-                                    const projectCollections = collections.filter(c => c.project_id === project.id);
+                                    const projectCollections = savedCollections.filter(c => c.project_id === project.id);
                                     const isExpanded = !!expandedProjects[project.id];
                                     const envLabels: Record<string, string> = {
                                         development: 'DEV',
@@ -844,7 +1054,7 @@ export const ScriptsSidebar = () => {
 
                                 {/* Unassigned collections in Ops Mode */}
                                 {(() => {
-                                    const unassigned = collections.filter(c => !c.project_id);
+                                    const unassigned = savedCollections.filter(c => !c.project_id);
                                     if (unassigned.length === 0 && grouped.unsorted.length === 0) return null;
                                     return (
                                         <div className="space-y-0.5 mt-2">
@@ -898,7 +1108,42 @@ export const ScriptsSidebar = () => {
                         {/* === Normal Mode (or search active): flat collection → script view === */}
                         {(!isModeActive || searchQuery.trim()) && (
                             <>
-                                {(searchQuery.trim() ? collections : collections.filter(c => !c.project_id)).map(collection => (
+                                {temporaryCollections.length > 0 && (
+                                    <div className="px-2 py-2 text-xs font-semibold text-amber-500 uppercase">Temporary</div>
+                                )}
+                                {temporaryCollections.map(collection => (
+                                    <DroppableCollection
+                                        key={collection.id}
+                                        collection={collection}
+                                        isExpanded={!!expandedCollections[collection.id]}
+                                        toggle={() => toggleCollection(collection.id)}
+                                        onDelete={() => handleRemoveTemporaryCollection(collection)}
+                                        onCreateScript={() => handleCreateScript(collection.id)}
+                                        onConvertToCollection={() => openConvertCollectionDialog(collection)}
+                                    >
+                                        {grouped.result[collection.id].length === 0 && !searchQuery.trim() && (
+                                            <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
+                                        )}
+                                        {grouped.result[collection.id].map(script => (
+                                            <DraggableScript
+                                                key={script.id}
+                                                script={script}
+                                                isActive={activeScriptId === script.id}
+                                                onClick={() => dispatch(setActiveScript(script.id))}
+                                                onSaveAsTemplate={() => openSaveAsTemplate(script)}
+                                                onDuplicate={() => dispatch(duplicateScript(script.id))}
+                                                onDelete={() => handleDeleteScriptRequest(script)}
+                                            />
+                                        ))}
+                                    </DroppableCollection>
+                                ))}
+
+                                {savedCollections.filter(c => searchQuery.trim() || !c.project_id).length > 0 && (
+                                    <div className="px-2 py-2 text-xs font-semibold text-slate-400 uppercase">
+                                        {temporaryCollections.length > 0 ? 'Collections' : ''}
+                                    </div>
+                                )}
+                                {(searchQuery.trim() ? savedCollections : savedCollections.filter(c => !c.project_id)).map(collection => (
                                     <DroppableCollection
                                         key={collection.id}
                                         collection={collection}
@@ -906,6 +1151,7 @@ export const ScriptsSidebar = () => {
                                         toggle={() => toggleCollection(collection.id)}
                                         onDelete={() => handleDeleteCollection(collection.id)}
                                         onCreateScript={() => handleCreateScript(collection.id)}
+                                        onConvertToCollection={collection.is_temporary ? () => openConvertCollectionDialog(collection) : undefined}
                                     >
                                         {grouped.result[collection.id].length === 0 && !searchQuery.trim() && (
                                             <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
@@ -974,7 +1220,9 @@ export const ScriptsSidebar = () => {
                         <DialogHeader>
                             <DialogTitle>Create New Script</DialogTitle>
                             <DialogDescription>
-                                Enter details for your new script. It will be saved to your local scripts folder.
+                                {parentCollectionId && collections.find((collection) => collection.id === parentCollectionId)?.folder_path
+                                    ? 'Enter details for your new script. It will be created inside the linked folder for this collection.'
+                                    : 'Enter details for your new script. It will be saved to your local scripts folder.'}
                             </DialogDescription>
                         </DialogHeader>
                         <div className="flex flex-col gap-4 py-4">
@@ -1037,6 +1285,141 @@ export const ScriptsSidebar = () => {
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
+
+                <Dialog open={isOpenFolderDialogOpen} onOpenChange={(open) => !isOpeningFolder && setIsOpenFolderDialogOpen(open)}>
+                    <DialogContent className="sm:max-w-lg">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                                <FolderOpen className="h-4 w-4 text-blue-500" />
+                                Open Local Folder
+                            </DialogTitle>
+                            <DialogDescription>
+                                {window.scriptManagerDesktop?.selectFolder
+                                    ? 'Link a local folder into ScriptManager. You can open it as a temporary workspace or save it as a reusable collection.'
+                                    : 'Import a local folder into ScriptManager using the browser picker. You can open it as a temporary workspace or save it as a collection copy.'}
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="flex flex-col gap-4 py-2">
+                            <div className="flex flex-col gap-2">
+                                <Label htmlFor="folder-path">Folder Path</Label>
+                                <div className="flex gap-2">
+                                    <Input
+                                        id="folder-path"
+                                        value={folderPath}
+                                        onChange={(e) => setFolderPath(e.target.value)}
+                                        placeholder="Select a local folder"
+                                        disabled={isOpeningFolder || !window.scriptManagerDesktop?.selectFolder}
+                                    />
+                                    <Button type="button" variant="outline" onClick={selectFolderPath} disabled={isOpeningFolder}>
+                                        Browse
+                                    </Button>
+                                </div>
+                                {!window.scriptManagerDesktop?.selectFolder && (
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                                        The browser will open a real folder picker and import supported script files from the selected folder.
+                                    </p>
+                                )}
+                            </div>
+
+                            <div className="flex flex-col gap-2">
+                                <Label>Open Mode</Label>
+                                <Select value={folderMode} onValueChange={(value: 'temporary' | 'collection') => setFolderMode(value)}>
+                                    <SelectTrigger>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="temporary">Temporary workspace</SelectItem>
+                                        <SelectItem value="collection">Save as collection</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <p className="text-xs text-slate-500 dark:text-slate-400">
+                                    {folderMode === 'temporary'
+                                        ? 'Good for a quick browse or one-off editing session.'
+                                        : 'Keeps this folder linked in the database as a collection for later use.'}
+                                </p>
+                            </div>
+
+                            {folderMode === 'collection' && (
+                                <div className="flex flex-col gap-2">
+                                    <Label htmlFor="folder-collection-name">Collection Name</Label>
+                                    <Input
+                                        id="folder-collection-name"
+                                        value={folderCollectionName}
+                                        onChange={(e) => setFolderCollectionName(e.target.value)}
+                                        placeholder="Collection name"
+                                        disabled={isOpeningFolder}
+                                    />
+                                </div>
+                            )}
+
+                            {openFolderError && (
+                                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+                                    {openFolderError}
+                                </div>
+                            )}
+                        </div>
+                        <DialogFooter>
+                            <Button variant="secondary" onClick={() => setIsOpenFolderDialogOpen(false)} disabled={isOpeningFolder}>
+                                Cancel
+                            </Button>
+                            <Button onClick={handleOpenFolderSubmit} disabled={!folderPath.trim() || isOpeningFolder}>
+                                {isOpeningFolder ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Opening...
+                                    </>
+                                ) : (
+                                    'Open Folder'
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+                <Dialog open={!!collectionToConvert} onOpenChange={(open) => !open && setCollectionToConvert(null)}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Save Temporary Workspace</DialogTitle>
+                            <DialogDescription>
+                                Convert this temporary folder workspace into a saved collection.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="py-3">
+                            <Label htmlFor="convert-collection-name" className="text-sm">Collection Name</Label>
+                            <Input
+                                id="convert-collection-name"
+                                className="mt-2"
+                                value={convertCollectionName}
+                                onChange={(e) => setConvertCollectionName(e.target.value)}
+                                disabled={isConvertingCollection}
+                                autoFocus
+                            />
+                        </div>
+                        <DialogFooter>
+                            <Button variant="secondary" onClick={() => setCollectionToConvert(null)} disabled={isConvertingCollection}>
+                                Cancel
+                            </Button>
+                            <Button onClick={handleConvertTemporaryCollection} disabled={!convertCollectionName.trim() || isConvertingCollection}>
+                                {isConvertingCollection ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Saving...
+                                    </>
+                                ) : (
+                                    'Save as Collection'
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+                <input
+                    ref={filePickerRef}
+                    type="file"
+                    className="hidden"
+                    multiple
+                    // @ts-expect-error Chromium directory picker attribute
+                    webkitdirectory=""
+                    onChange={handleFolderInputChange}
+                />
 
                 {/* Save as Template dialog */}
                 <Dialog open={isSaveAsTemplateOpen} onOpenChange={setIsSaveAsTemplateOpen}>

@@ -1,11 +1,10 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { memo, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import {
   setActiveRequest,
   newRequest,
-  updateDraft,
   deleteApiRequest,
   deleteApiCollection,
   createApiCollection,
@@ -126,7 +125,7 @@ interface RequestItemProps {
   indent?: boolean
 }
 
-function RequestItem({ request, active, collections, indent }: RequestItemProps) {
+const RequestItem = memo(function RequestItem({ request, active, collections, indent }: RequestItemProps) {
   const dispatch = useAppDispatch()
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -208,7 +207,7 @@ function RequestItem({ request, active, collections, indent }: RequestItemProps)
       </DropdownMenu>
     </div>
   )
-}
+})
 
 interface CollectionItemProps {
   collection: ApiCollection
@@ -221,7 +220,7 @@ interface CollectionItemProps {
   onExportCollection: (collection: ApiCollection) => void
 }
 
-function CollectionItem({
+const CollectionItem = memo(function CollectionItem({
   collection,
   requests,
   allCollections,
@@ -359,7 +358,7 @@ function CollectionItem({
       </ContextMenuContent>
     </ContextMenu>
   )
-}
+})
 
 interface EnvironmentItemProps {
   environment: ApiEnvironment
@@ -367,7 +366,7 @@ interface EnvironmentItemProps {
   onEdit: (environment: ApiEnvironment) => void
 }
 
-function EnvironmentItem({ environment, active, onEdit }: EnvironmentItemProps) {
+const EnvironmentItem = memo(function EnvironmentItem({ environment, active, onEdit }: EnvironmentItemProps) {
   const dispatch = useAppDispatch()
   const variableCount = parseVariableRows(environment.variables).filter((row) => row.enabled && row.key).length
 
@@ -410,7 +409,7 @@ function EnvironmentItem({ environment, active, onEdit }: EnvironmentItemProps) 
       </DropdownMenu>
     </div>
   )
-}
+})
 
 export function ApiSidebar() {
   const dispatch = useAppDispatch()
@@ -629,8 +628,7 @@ export function ApiSidebar() {
   }
 
   const handleAddRequestToCollection = (collection: ApiCollection) => {
-    dispatch(newRequest())
-    dispatch(updateDraft({
+    dispatch(newRequest({
       name: `${collection.name} Request`,
       collectionId: collection.id,
     }))

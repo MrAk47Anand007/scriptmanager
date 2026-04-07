@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getScriptFilePath } from '@/lib/scriptRunner'
+import { getScriptResolvedFilePath } from '@/lib/scriptRunner'
 import fs from 'fs'
 
 export async function GET(
@@ -14,7 +14,7 @@ export async function GET(
     return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   }
 
-  const filePath = await getScriptFilePath(script.filename)
+  const filePath = await getScriptResolvedFilePath(script)
   let content = ''
   if (fs.existsSync(filePath)) {
     content = fs.readFileSync(filePath, 'utf8')
@@ -28,6 +28,7 @@ export async function GET(
     language: script.language,
     interpreter: script.interpreter,
     parameters: (() => { try { return JSON.parse(script.parameters ?? '[]') } catch { return [] } })(),
+    source_path: script.sourcePath,
     created_at: script.createdAt.toISOString(),
     updated_at: script.updatedAt.toISOString(),
   })
@@ -61,8 +62,8 @@ export async function DELETE(
     }
 
     // Delete file from filesystem
-    const filePath = await getScriptFilePath(script.filename)
-    if (fs.existsSync(filePath)) {
+    const filePath = await getScriptResolvedFilePath(script)
+    if (!script.sourcePath && fs.existsSync(filePath)) {
       fs.unlinkSync(filePath)
     }
 

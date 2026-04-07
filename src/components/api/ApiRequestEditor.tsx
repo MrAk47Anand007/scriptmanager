@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useDeferredValue, useMemo, useRef } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { updateDraft, saveApiRequest, saveApiEnvironment, saveApiGlobals, sendApiRequest, setActiveEnvironment } from '@/features/api/apiSlice'
+import { saveApiRequest, saveApiEnvironment, saveApiGlobals, sendApiRequest, setActiveEnvironment } from '@/features/api/apiSlice'
 import type { ApiRequestDraft, KeyValueRow } from '@/features/api/apiSlice'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,7 +16,7 @@ import { Loader2, Save, Play, Copy, Lock, FlaskConical, AlertTriangle, Upload, C
 import { cn } from '@/lib/utils'
 import dynamic from 'next/dynamic'
 import { useTheme } from 'next-themes'
-import { parseVariableRows, type ApiResponseMappingRow } from '@/lib/apiRequestMaterialization'
+import { materializeApiRequest, parseVariableRows, type ApiResponseMappingRow } from '@/lib/apiRequestMaterialization'
 import { analyzeCurlCommand } from '@/lib/curlImport'
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react').then(m => m.Editor), { ssr: false })
@@ -71,6 +71,14 @@ function parseBinaryBody(body: string): { fileName: string; mimeType: string; da
     }
   } catch {
     return { fileName: '', mimeType: '', data: '' }
+  }
+}
+
+function parseKeyValueBody(body: string, fallback: KeyValueRow[]): KeyValueRow[] {
+  try {
+    return JSON.parse(body) as KeyValueRow[]
+  } catch {
+    return fallback
   }
 }
 
@@ -174,7 +182,7 @@ function PillToggle<T extends string>({ options, value, onChange, className }: P
 
 export function ApiRequestEditor() {
   const dispatch = useAppDispatch()
-  const { activeRequest, isSending, variablePreview, environments, activeEnvironmentId, globalVariables } = useAppSelector(s => s.api)
+  const { activeRequest, isSending, environments, activeEnvironmentId, globalVariables, collections } = useAppSelector(s => s.api)
   const { resolvedTheme } = useTheme()
   const [editingName, setEditingName] = useState(false)
   const [activeTab, setActiveTab] = useState<'params' | 'headers' | 'body' | 'auth' | 'variables' | 'pre-request' | 'post-request'>('params')
@@ -183,20 +191,21 @@ export function ApiRequestEditor() {
   const [curlDialogOpen, setCurlDialogOpen] = useState(false)
   const [curlInput, setCurlInput] = useState('')
   const [curlImportError, setCurlImportError] = useState<string | null>(null)
+  const [draft, setDraft] = useState<ApiRequestDraft | null>(activeRequest)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
-    if (activeRequest) setUrlInput(activeRequest.url)
-  }, [activeRequest?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+    setDraft(activeRequest)
+    setUrlInput(activeRequest?.url ?? '')
+  }, [activeRequest])
 
   useEffect(() => {
     setActiveTab('params')
   }, [activeRequest?.id])
 
-  const draft = activeRequest
   const update = useCallback((partial: Partial<ApiRequestDraft>) => {
-    dispatch(updateDraft(partial))
-  }, [dispatch])
+    setDraft((current) => current ? { ...current, ...partial } : current)
+  }, [])
 
   const curlAnalysis = useMemo(() => {
     if (!curlInput.trim()) return null
@@ -211,6 +220,32 @@ export function ApiRequestEditor() {
   }, [curlInput])
 
   if (!draft) return null
+
+  const deferredDraft = useDeferredValue(draft)
+  const variablePreview = useMemo(() => {
+    const environment = activeEnvironmentId
+      ? environments.find((item) => item.id === activeEnvironmentId)
+      : null
+    const collection = deferredDraft.collectionId
+      ? collections.find((item) => item.id === deferredDraft.collectionId)
+      : null
+
+    return materializeApiRequest(deferredDraft, {
+      global: globalVariables,
+      environment: parseVariableRows(environment?.variables).map((row) => ({
+        id: row.id ?? crypto.randomUUID(),
+        key: row.key ?? '',
+        value: row.value ?? '',
+        enabled: row.enabled ?? true,
+      })),
+      collection: parseVariableRows(collection?.variables).map((row) => ({
+        id: row.id ?? crypto.randomUUID(),
+        key: row.key ?? '',
+        value: row.value ?? '',
+        enabled: row.enabled ?? true,
+      })),
+    })
+  }, [collections, deferredDraft, environments, activeEnvironmentId, globalVariables])
 
   const handleUrlChange = (value: string) => {
     setUrlInput(value)
@@ -289,6 +324,8 @@ export function ApiRequestEditor() {
   const graphqlBody = parseGraphqlBody(draft.body)
   const binaryBody = parseBinaryBody(draft.body)
   const responseMappings = ensureResponseMappings(draft.responseMappings ?? [])
+  const formBodyRows = useMemo(() => parseKeyValueBody(draft.body, []), [draft.body])
+  const multipartBodyRows = useMemo(() => parseKeyValueBody(draft.body, [blankRow()]), [draft.body])
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-slate-950">
@@ -576,23 +613,23 @@ export function ApiRequestEditor() {
                     />
                   )}
                   {draft.bodyType === 'form' && (
-                    <div className="p-3 overflow-y-auto h-full">
-                      <KeyValueTable
-                        rows={(() => { try { return JSON.parse(draft.body) as KeyValueRow[] } catch { return [] } })()}
-                        onChange={(rows) => update({ body: JSON.stringify(rows) })}
-                        keyPlaceholder="field"
-                        valuePlaceholder="value"
-                      />
-                    </div>
-                  )}
+                      <div className="p-3 overflow-y-auto h-full">
+                        <KeyValueTable
+                          rows={formBodyRows}
+                          onChange={(rows) => update({ body: JSON.stringify(rows) })}
+                          keyPlaceholder="field"
+                          valuePlaceholder="value"
+                        />
+                      </div>
+                    )}
                   {draft.bodyType === 'multipart' && (
-                    <div className="p-3 overflow-y-auto h-full">
-                      <KeyValueTable
-                        rows={(() => { try { return JSON.parse(draft.body) as KeyValueRow[] } catch { return [blankRow()] } })()}
-                        onChange={(rows) => update({ body: JSON.stringify(rows) })}
-                        keyPlaceholder="field"
-                        valuePlaceholder="value"
-                      />
+                      <div className="p-3 overflow-y-auto h-full">
+                        <KeyValueTable
+                          rows={multipartBodyRows}
+                          onChange={(rows) => update({ body: JSON.stringify(rows) })}
+                          keyPlaceholder="field"
+                          valuePlaceholder="value"
+                        />
                     </div>
                   )}
                   {draft.bodyType === 'graphql' && (

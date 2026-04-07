@@ -11,6 +11,7 @@ model Script {
   id              String      @id @default(uuid())
   name            String      @unique
   filename        String
+  sourcePath      String?     @map("source_path")
   description     String      @default("")
   language        String      @default("python")
   interpreter     String?
@@ -107,6 +108,8 @@ model Collection {
   id          String    @id @default(uuid())
   name        String
   description String    @default("")
+  folderPath  String?   @map("folder_path")
+  isTemporary Boolean   @default(false) @map("is_temporary")
   createdAt   DateTime  @default(now()) @map("created_at")
   projectId   String?   @map("project_id")
 

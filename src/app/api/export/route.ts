@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getScriptFilePath } from '@/lib/scriptRunner'
+import { getScriptResolvedFilePath } from '@/lib/scriptRunner'
 import fs from 'fs'
 
 // GET /api/export — export all scripts as a JSON bundle
@@ -14,7 +14,7 @@ export async function GET() {
     scripts.map(async (script) => {
       let content = ''
       try {
-        const filePath = await getScriptFilePath(script.filename)
+        const filePath = await getScriptResolvedFilePath(script)
         content = fs.readFileSync(filePath, 'utf8')
       } catch {
         // File missing

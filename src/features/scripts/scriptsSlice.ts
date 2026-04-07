@@ -12,6 +12,7 @@ export interface Script {
     id: string
     name: string
     filename: string
+    source_path?: string | null
     description?: string
     content?: string
     language?: string
@@ -67,6 +68,8 @@ export interface Collection {
     description?: string;
     script_count?: number;
     project_id?: string | null;
+    folder_path?: string | null;
+    is_temporary?: boolean;
     created_at: string;
 }
 
@@ -158,6 +161,7 @@ export const createScript = createAsyncThunk('scripts/createScript', async (payl
     language?: string
     interpreter?: string | null
     parameters?: ScriptParameter[]
+    collectionId?: string | null
 }) => {
     const name = typeof payload === 'string' ? payload : payload.name
     const description = typeof payload === 'string' ? undefined : payload.description
@@ -166,6 +170,7 @@ export const createScript = createAsyncThunk('scripts/createScript', async (payl
     const language = typeof payload === 'string' ? undefined : payload.language
     const interpreter = typeof payload === 'string' ? undefined : payload.interpreter
     const parameters = typeof payload === 'string' ? undefined : payload.parameters
+    const collectionId = typeof payload === 'string' ? undefined : payload.collectionId
     const response = await axios.post('/api/scripts', {
         name,
         description,
@@ -174,9 +179,55 @@ export const createScript = createAsyncThunk('scripts/createScript', async (payl
         language,
         interpreter,
         parameters,
+        collection_id: collectionId,
     })
     return response.data
 })
+
+export const openScriptsFolder = createAsyncThunk(
+    'scripts/openScriptsFolder',
+    async (payload: { folderPath: string; mode: 'temporary' | 'collection'; collectionName?: string }, { dispatch }) => {
+        const response = await axios.post('/api/scripts/open-folder', {
+            folderPath: payload.folderPath,
+            mode: payload.mode,
+            collectionName: payload.collectionName,
+        })
+
+        await Promise.all([
+            dispatch(fetchCollections()),
+            dispatch(fetchScripts()),
+        ])
+
+        return response.data as {
+            collection: Collection
+            scripts: Array<{ id: string; name: string }>
+            imported_count: number
+        }
+    }
+)
+
+export const importScriptsFolder = createAsyncThunk(
+    'scripts/importScriptsFolder',
+    async (payload: {
+        mode: 'temporary' | 'collection'
+        collectionName?: string
+        folderName: string
+        files: Array<{ relativePath: string; content: string }>
+    }, { dispatch }) => {
+        const response = await axios.post('/api/scripts/import-folder', payload)
+
+        await Promise.all([
+            dispatch(fetchCollections()),
+            dispatch(fetchScripts()),
+        ])
+
+        return response.data as {
+            collection: Collection
+            scripts: Array<{ id: string; name: string }>
+            imported_count: number
+        }
+    }
+)
 
 export const fetchTemplates = createAsyncThunk('scripts/fetchTemplates', async () => {
     const response = await axios.get('/api/templates')
@@ -302,6 +353,28 @@ export const deleteCollection = createAsyncThunk('scripts/deleteCollection', asy
     await axios.delete(`/api/collections/${id}`)
     return id
 })
+
+export const removeTemporaryCollection = createAsyncThunk(
+    'scripts/removeTemporaryCollection',
+    async (id: string) => {
+        const response = await axios.delete(`/api/collections/${id}?hardDelete=true`)
+        return {
+            id,
+            deletedScriptIds: (response.data.deleted_script_ids ?? []) as string[],
+        }
+    }
+)
+
+export const convertTemporaryCollection = createAsyncThunk(
+    'scripts/convertTemporaryCollection',
+    async ({ id, name }: { id: string; name: string }) => {
+        const response = await axios.put(`/api/collections/${id}`, {
+            name,
+            is_temporary: false,
+        })
+        return response.data as Collection
+    }
+)
 
 export const moveScript = createAsyncThunk('scripts/moveScript', async ({ scriptId, collectionId }: { scriptId: string, collectionId: string | null }) => {
     const response = await axios.put(`/api/scripts/${scriptId}/move`, { collection_id: collectionId })
@@ -499,6 +572,20 @@ const scriptsSlice = createSlice({
                         script.collection_id = null
                     }
                 })
+            })
+            .addCase(removeTemporaryCollection.fulfilled, (state, action) => {
+                state.collections = state.collections.filter(c => c.id !== action.payload.id)
+                state.items = state.items.filter(script => !action.payload.deletedScriptIds.includes(script.id))
+                if (state.activeScriptId && action.payload.deletedScriptIds.includes(state.activeScriptId)) {
+                    state.activeScriptId = null
+                    state.activeScriptContent = ''
+                }
+            })
+            .addCase(convertTemporaryCollection.fulfilled, (state, action) => {
+                const idx = state.collections.findIndex(collection => collection.id === action.payload.id)
+                if (idx !== -1) {
+                    state.collections[idx] = action.payload
+                }
             })
             // Delete Script
             .addCase(deleteScript.fulfilled, (state, action) => {

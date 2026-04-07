@@ -1,58 +1,170 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import dynamic from 'next/dynamic'
+import { useState, useEffect, useMemo, startTransition } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchScripts, fetchCollections, fetchTemplates, fetchAllTags, setAutoSaveEnabled } from '@/features/scripts/scriptsSlice'
 import { fetchSettings } from '@/features/settings/settingsSlice'
 import { setOpsMode, fetchProjects, fetchServerProfiles } from '@/features/ops/opsSlice'
 import { fetchApiCollections, fetchApiRequests } from '@/features/api/apiSlice'
-import { ScriptsManager } from '@/components/ScriptsManager'
-import { SettingsManager } from '@/components/SettingsManager'
-import { ApiManager } from '@/components/api/ApiManager'
 import { Settings, Code2, Globe } from 'lucide-react'
 import { ModeToggle } from '@/components/ModeToggle'
 import { OpsModeToggle } from '@/components/OpsModeToggle'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 
+const ScriptsManager = dynamic(
+  () => import('@/components/ScriptsManager').then((mod) => mod.ScriptsManager),
+  {
+    loading: () => <SectionSkeleton label="Loading scripts workspace" />,
+  }
+)
+
+const ApiManager = dynamic(
+  () => import('@/components/api/ApiManager').then((mod) => mod.ApiManager),
+  {
+    loading: () => <SectionSkeleton label="Loading API workspace" />,
+  }
+)
+
+const SettingsManager = dynamic(
+  () => import('@/components/SettingsManager').then((mod) => mod.SettingsManager),
+  {
+    loading: () => <SectionSkeleton label="Loading settings" />,
+  }
+)
+
+function SectionSkeleton({ label }: { label: string }) {
+  return (
+    <div className="flex h-full items-center justify-center bg-white dark:bg-slate-950">
+      <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+        <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-blue-500" />
+        {label}
+      </div>
+    </div>
+  )
+}
+
+function scheduleIdleWork(callback: () => void, delay = 180) {
+  if (typeof window === 'undefined') {
+    callback()
+    return () => undefined
+  }
+
+  const idleWindow = window as Window & typeof globalThis
+
+  if (typeof idleWindow.requestIdleCallback === 'function') {
+    const id = idleWindow.requestIdleCallback(() => callback(), { timeout: 1200 })
+    return () => idleWindow.cancelIdleCallback(id)
+  }
+
+  const timeoutId = globalThis.setTimeout(callback, delay)
+  return () => globalThis.clearTimeout(timeoutId)
+}
+
 export default function Home() {
   const dispatch = useAppDispatch()
   const { autoSaveEnabled } = useAppSelector((state) => state.scripts)
+  const isOpsModeActive = useAppSelector((state) => state.ops.isModeActive)
   const [activeTab, setActiveTab] = useState<'scripts' | 'settings' | 'api'>('scripts')
+  const [mountedTabs, setMountedTabs] = useState<Record<'scripts' | 'settings' | 'api', boolean>>({
+    scripts: true,
+    settings: false,
+    api: false,
+  })
 
-  // Centralized initial data fetching — done once on mount
   useEffect(() => {
-    dispatch(fetchScripts())
-    dispatch(fetchCollections())
-    dispatch(fetchSettings())
-    dispatch(fetchTemplates())
-    dispatch(fetchAllTags())
+    let isCancelled = false
 
-    // Load auto-save preference
+    void dispatch(fetchScripts())
+    void dispatch(fetchCollections())
+    void dispatch(fetchSettings())
+
     const stored = localStorage.getItem('scriptManager_autoSave')
     if (stored) {
       dispatch(setAutoSaveEnabled(stored === 'true'))
     }
 
-    // Load ops mode preference
     const storedOpsMode = localStorage.getItem('scriptManager_opsMode')
     if (storedOpsMode) {
       dispatch(setOpsMode(storedOpsMode === 'true'))
     }
 
-    // Load ops mode data
-    dispatch(fetchProjects())
-    dispatch(fetchServerProfiles())
+    const cancelBackgroundScripts = scheduleIdleWork(() => {
+      if (isCancelled) {
+        return
+      }
 
-    // Load API mode data
-    dispatch(fetchApiCollections())
-    dispatch(fetchApiRequests())
+      startTransition(() => {
+        void dispatch(fetchTemplates())
+        void dispatch(fetchAllTags())
+      })
+    })
+
+    return () => {
+      isCancelled = true
+      cancelBackgroundScripts()
+    }
   }, [dispatch])
+
+  useEffect(() => {
+    const nextActiveTab = activeTab
+    setMountedTabs((current) => current[nextActiveTab] ? current : { ...current, [nextActiveTab]: true })
+  }, [activeTab])
+
+  useEffect(() => {
+    if (!mountedTabs.api) {
+      return
+    }
+
+    const cancelApiBoot = scheduleIdleWork(() => {
+      startTransition(() => {
+        void dispatch(fetchApiCollections())
+        void dispatch(fetchApiRequests())
+      })
+    }, activeTab === 'api' ? 0 : 220)
+
+    return cancelApiBoot
+  }, [activeTab, dispatch, mountedTabs.api])
+
+  useEffect(() => {
+    if (!isOpsModeActive) {
+      return
+    }
+
+    const cancelOpsBoot = scheduleIdleWork(() => {
+      startTransition(() => {
+        void dispatch(fetchProjects())
+        void dispatch(fetchServerProfiles())
+      })
+    }, activeTab === 'scripts' ? 80 : 180)
+
+    return cancelOpsBoot
+  }, [activeTab, dispatch, isOpsModeActive])
 
   const toggleAutoSave = (enabled: boolean) => {
     dispatch(setAutoSaveEnabled(enabled))
     localStorage.setItem('scriptManager_autoSave', String(enabled))
   }
+
+  const scriptsPanelClassName = useMemo(
+    () => activeTab === 'scripts'
+      ? 'absolute inset-0 opacity-100 z-10'
+      : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
+    [activeTab]
+  )
+  const apiPanelClassName = useMemo(
+    () => activeTab === 'api'
+      ? 'absolute inset-0 opacity-100 z-10'
+      : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
+    [activeTab]
+  )
+  const settingsPanelClassName = useMemo(
+    () => activeTab === 'settings'
+      ? 'absolute inset-0 overflow-y-auto bg-white dark:bg-slate-950 opacity-100 z-10'
+      : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
+    [activeTab]
+  )
 
   return (
     <div className="flex flex-col h-screen">
@@ -108,17 +220,22 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main content — CSS display toggle preserves component state across tab switches */}
       <main className="flex-1 overflow-hidden relative">
-        <div className={activeTab === 'scripts' ? 'absolute inset-0 opacity-100 z-10' : 'absolute inset-0 opacity-0 pointer-events-none -z-10'}>
-          <ScriptsManager />
-        </div>
-        <div className={activeTab === 'api' ? 'absolute inset-0 opacity-100 z-10' : 'absolute inset-0 opacity-0 pointer-events-none -z-10'}>
-          <ApiManager />
-        </div>
-        <div className={activeTab === 'settings' ? 'absolute inset-0 overflow-y-auto bg-white dark:bg-slate-950 opacity-100 z-10' : 'absolute inset-0 opacity-0 pointer-events-none -z-10'}>
-          <SettingsManager />
-        </div>
+        {mountedTabs.scripts && (
+          <div className={scriptsPanelClassName}>
+            <ScriptsManager />
+          </div>
+        )}
+        {mountedTabs.api && (
+          <div className={apiPanelClassName}>
+            <ApiManager />
+          </div>
+        )}
+        {mountedTabs.settings && (
+          <div className={settingsPanelClassName}>
+            <SettingsManager />
+          </div>
+        )}
       </main>
     </div>
   )

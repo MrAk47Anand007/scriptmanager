@@ -7,7 +7,6 @@ import {
   parseResponseMappingRows,
   stringifyResponseMappingRows,
   stringifyVariableRows,
-  type ApiMaterializedRequest,
   type ApiVariableRow,
   type ApiResponseMappingRow,
   type MaterializableApiRequestDraft,
@@ -126,7 +125,6 @@ interface ApiState {
   requests: ApiRequest[]
   activeRequestId: string | null
   activeRequest: ApiRequestDraft | null
-  variablePreview: ApiMaterializedRequest | null
   response: ApiResponse | null
   history: ApiHistoryEntry[]
   collectionRuns: ApiCollectionRun[]
@@ -213,31 +211,6 @@ function draftToApiPayload(draft: ApiRequestDraft) {
     auth_config: JSON.stringify(draft.authConfig),
     collection_id: draft.collectionId ?? null,
   }
-}
-
-function findCollectionVariables(state: ApiState, collectionId: string | null | undefined): KeyValueRow[] {
-  if (!collectionId) return []
-  const collection = state.collections.find((item) => item.id === collectionId)
-  return collection ? toClientRows(parseVariableRows(collection.variables)) : []
-}
-
-function findEnvironmentVariables(state: ApiState): KeyValueRow[] {
-  if (!state.activeEnvironmentId) return []
-  const environment = state.environments.find((item) => item.id === state.activeEnvironmentId)
-  return environment ? toClientRows(parseVariableRows(environment.variables)) : []
-}
-
-function recalculatePreview(state: ApiState) {
-  if (!state.activeRequest) {
-    state.variablePreview = null
-    return
-  }
-
-  state.variablePreview = materializeApiRequest(state.activeRequest, {
-    global: state.globalVariables,
-    environment: findEnvironmentVariables(state),
-    collection: findCollectionVariables(state, state.activeRequest.collectionId),
-  })
 }
 
 export const fetchApiCollections = createAsyncThunk('api/fetchCollections', async () => {
@@ -348,10 +321,16 @@ export const sendApiRequest = createAsyncThunk<
   'api/sendRequest',
   async (draft, { getState, rejectWithValue }) => {
     const state = getState().api
+    const environmentVariables = state.activeEnvironmentId
+      ? toClientRows(parseVariableRows(state.environments.find((item) => item.id === state.activeEnvironmentId)?.variables))
+      : []
+    const collectionVariables = draft.collectionId
+      ? toClientRows(parseVariableRows(state.collections.find((item) => item.id === draft.collectionId)?.variables))
+      : []
     const preview = materializeApiRequest(draft, {
       global: state.globalVariables,
-      environment: findEnvironmentVariables(state),
-      collection: findCollectionVariables(state, draft.collectionId),
+      environment: environmentVariables,
+      collection: collectionVariables,
     })
 
     if (preview.unresolvedVariables.length > 0) {
@@ -450,7 +429,6 @@ const initialState: ApiState = {
   requests: [],
   activeRequestId: null,
   activeRequest: null,
-  variablePreview: null,
   response: null,
   history: [],
   collectionRuns: [],
@@ -471,18 +449,11 @@ const apiSlice = createSlice({
       state.activeRequestId = request.id
       state.activeRequest = requestToDraft(request)
       state.response = null
-      recalculatePreview(state)
     },
-    updateDraft(state, action: PayloadAction<Partial<ApiRequestDraft>>) {
-      if (!state.activeRequest) return
-      state.activeRequest = { ...state.activeRequest, ...action.payload }
-      recalculatePreview(state)
-    },
-    newRequest(state) {
+    newRequest(state, action: PayloadAction<Partial<ApiRequestDraft> | undefined>) {
       state.activeRequestId = null
-      state.activeRequest = blankDraft()
+      state.activeRequest = { ...blankDraft(), ...(action.payload ?? {}) }
       state.response = null
-      recalculatePreview(state)
     },
     clearResponse(state) {
       state.response = null
@@ -492,7 +463,6 @@ const apiSlice = createSlice({
     },
     setActiveEnvironment(state, action: PayloadAction<string | null>) {
       state.activeEnvironmentId = action.payload
-      recalculatePreview(state)
     },
     loadHistoryEntry(state, action: PayloadAction<ApiHistoryEntry>) {
       const entry = action.payload
@@ -530,7 +500,6 @@ const apiSlice = createSlice({
       }
       state.response = null
       state.activeCollectionRun = null
-      recalculatePreview(state)
     },
   },
   extraReducers: (builder) => {
@@ -541,7 +510,6 @@ const apiSlice = createSlice({
       .addCase(fetchApiCollections.fulfilled, (state, action) => {
         state.isLoading = false
         state.collections = action.payload
-        recalculatePreview(state)
       })
       .addCase(fetchApiCollections.rejected, (state, action) => {
         state.isLoading = false
@@ -567,7 +535,6 @@ const apiSlice = createSlice({
         if (state.activeEnvironmentId && !state.environments.some((item) => item.id === state.activeEnvironmentId)) {
           state.activeEnvironmentId = null
         }
-        recalculatePreview(state)
       })
 
     builder
@@ -582,31 +549,26 @@ const apiSlice = createSlice({
         if (!state.activeEnvironmentId) {
           state.activeEnvironmentId = action.payload.id
         }
-        recalculatePreview(state)
       })
       .addCase(deleteApiEnvironment.fulfilled, (state, action) => {
         state.environments = state.environments.filter((item) => item.id !== action.payload)
         if (state.activeEnvironmentId === action.payload) {
           state.activeEnvironmentId = null
         }
-        recalculatePreview(state)
       })
 
     builder
       .addCase(fetchApiGlobals.fulfilled, (state, action) => {
         state.globalVariables = ensureRows(action.payload)
-        recalculatePreview(state)
       })
       .addCase(saveApiGlobals.fulfilled, (state, action) => {
         state.globalVariables = ensureRows(action.payload)
-        recalculatePreview(state)
       })
 
     builder
       .addCase(createApiCollection.fulfilled, (state, action) => {
         state.collections.push(action.payload)
         state.collections.sort((a, b) => a.name.localeCompare(b.name))
-        recalculatePreview(state)
       })
       .addCase(updateApiCollection.fulfilled, (state, action) => {
         const index = state.collections.findIndex((item) => item.id === action.payload.id)
@@ -617,7 +579,6 @@ const apiSlice = createSlice({
           }
           state.collections.sort((a, b) => a.name.localeCompare(b.name))
         }
-        recalculatePreview(state)
       })
       .addCase(deleteApiCollection.fulfilled, (state, action) => {
         state.collections = state.collections.filter((item) => item.id !== action.payload)
@@ -627,7 +588,6 @@ const apiSlice = createSlice({
         if (state.activeRequest?.collectionId === action.payload && state.activeRequest) {
           state.activeRequest.collectionId = null
         }
-        recalculatePreview(state)
       })
 
     builder
@@ -641,7 +601,6 @@ const apiSlice = createSlice({
         }
         state.activeRequestId = saved.id
         state.activeRequest = requestToDraft(saved)
-        recalculatePreview(state)
       })
       .addCase(deleteApiRequest.fulfilled, (state, action) => {
         const id = action.payload
@@ -650,7 +609,6 @@ const apiSlice = createSlice({
           state.activeRequestId = null
           state.activeRequest = null
           state.response = null
-          state.variablePreview = null
         }
       })
 
@@ -675,7 +633,6 @@ const apiSlice = createSlice({
             state.requests[index] = action.payload.refreshedRequest
           }
         }
-        recalculatePreview(state)
       })
       .addCase(sendApiRequest.rejected, (state, action) => {
         state.isSending = false
@@ -709,7 +666,6 @@ const apiSlice = createSlice({
 
 export const {
   setActiveRequest,
-  updateDraft,
   newRequest,
   clearResponse,
   setActiveCollectionRun,

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getScriptFilePath } from '@/lib/scriptRunner'
+import { getScriptResolvedFilePath } from '@/lib/scriptRunner'
 import { buildLocalTerminalCommand } from '@/lib/executionSafety'
 
 export async function POST(
@@ -26,7 +26,7 @@ export async function POST(
     // Allow empty body
   }
 
-  const filePath = await getScriptFilePath(script.filename)
+  const filePath = await getScriptResolvedFilePath(script)
   const command = buildLocalTerminalCommand({
     filePath,
     language: script.language,

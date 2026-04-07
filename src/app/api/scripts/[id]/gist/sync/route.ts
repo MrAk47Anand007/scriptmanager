@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { syncScriptToGist } from '@/lib/gistService'
-import { getScriptFilePath } from '@/lib/scriptRunner'
+import { getScriptResolvedFilePath } from '@/lib/scriptRunner'
 import fs from 'fs'
 
 export async function POST(
@@ -19,7 +19,7 @@ export async function POST(
     return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   }
 
-  const filePath = await getScriptFilePath(script.filename)
+  const filePath = await getScriptResolvedFilePath(script)
   if (!fs.existsSync(filePath)) {
     return NextResponse.json({ error: 'Script file not found on disk' }, { status: 404 })
   }

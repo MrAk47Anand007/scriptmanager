@@ -12,7 +12,7 @@ import { Globe, Plus } from 'lucide-react'
 
 export function ApiManager() {
   const dispatch = useAppDispatch()
-  const { activeRequest } = useAppSelector(s => s.api)
+  const { activeRequestId, activeRequest } = useAppSelector(s => s.api)
 
   useEffect(() => {
     dispatch(fetchApiCollections())
@@ -39,7 +39,7 @@ export function ApiManager() {
 
         {/* ── Main content ─────────────────────────────────────────────────── */}
         <ResizablePanel defaultSize={75} minSize={40}>
-          {activeRequest ? (
+          {activeRequestId || activeRequest ? (
             <ResizablePanelGroup orientation="vertical" className="h-full">
 
               {/* Request editor */}
