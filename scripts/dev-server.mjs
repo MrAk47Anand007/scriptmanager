@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process'
 
 const projectRoot = process.cwd()
 const nextDir = path.join(projectRoot, '.next')
+const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 
 async function removeNextDir() {
   try {
@@ -37,12 +38,29 @@ async function removeNextDir() {
 }
 
 async function main() {
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(projectRoot, 'scripts', 'ensure-prisma-client.mjs')], {
+      cwd: projectRoot,
+      stdio: 'inherit',
+      env: process.env,
+    })
+
+    child.on('exit', (code) => {
+      if (code === 0) {
+        resolve()
+      } else {
+        reject(new Error(`Failed to validate Prisma Client (exit ${code})`))
+      }
+    })
+    child.on('error', reject)
+  })
+
   await removeNextDir()
 
   const child = process.platform === 'win32'
     ? spawn(
       'cmd.exe',
-      ['/d', '/s', '/c', 'npx ts-node -r tsconfig-paths/register --project tsconfig.server.json server.ts'],
+      ['/d', '/s', '/c', `${npxCommand} ts-node -r tsconfig-paths/register --project tsconfig.server.json server.ts`],
       {
         cwd: projectRoot,
         stdio: 'inherit',

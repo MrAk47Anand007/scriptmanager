@@ -110,6 +110,10 @@ model Collection {
   description String    @default("")
   folderPath  String?   @map("folder_path")
   isTemporary Boolean   @default(false) @map("is_temporary")
+  runtimePreset String  @default("general") @map("runtime_preset")
+  pythonToolchainEnabled Boolean @default(false) @map("python_toolchain_enabled")
+  pythonVenvPath String? @map("python_venv_path")
+  pythonInterpreterPath String? @map("python_interpreter_path")
   createdAt   DateTime  @default(now()) @map("created_at")
   projectId   String?   @map("project_id")
 

@@ -4,6 +4,7 @@ import path from 'path'
 import http from 'http'
 import crypto from 'crypto'
 import fs from 'fs'
+import { attachDesktopRuntime, initDesktopRuntimeIpc, warmWindowDesktopRuntime } from './desktopRuntime'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
 // In production (packaged), Electron spawns the standalone server itself.
@@ -30,6 +31,26 @@ type WindowState = {
 const DEFAULT_WINDOW_STATE: WindowState = {
   width: 1400,
   height: 900,
+}
+
+function ensureDesktopProcessEnv() {
+  if (!process.env.DATABASE_URL) {
+    process.env.DATABASE_URL = app.isPackaged
+      ? `file:${path.join(app.getPath('userData'), 'scriptmanager.db')}`
+      : 'file:./data/scriptmanager.db'
+  }
+
+  if (!process.env.SCRIPTS_DIR) {
+    process.env.SCRIPTS_DIR = app.isPackaged
+      ? path.join(app.getPath('userData'), 'user_scripts')
+      : path.join(process.cwd(), 'user_scripts')
+  }
+
+  if (!process.env.BUILDS_DIR) {
+    process.env.BUILDS_DIR = app.isPackaged
+      ? path.join(app.getPath('userData'), 'builds')
+      : path.join(app.getPath('temp'), 'ScriptManager', 'builds')
+  }
 }
 
 function getWindowStatePath() {
@@ -75,8 +96,8 @@ function saveWindowState(window: BrowserWindow) {
 
 function createSplashWindow() {
   splashWindow = new BrowserWindow({
-    width: 440,
-    height: 280,
+    width: 560,
+    height: 340,
     frame: false,
     resizable: false,
     movable: false,
@@ -104,10 +125,12 @@ function createSplashWindow() {
             min-height: 100vh;
             display: grid;
             place-items: center;
+            overflow: hidden;
             background:
-              radial-gradient(circle at top, rgba(59, 130, 246, 0.22), transparent 40%),
-              linear-gradient(180deg, #10172a 0%, #090d18 100%);
-            color: #e2e8f0;
+              radial-gradient(circle at 18% 12%, rgba(56, 189, 248, 0.22), transparent 36%),
+              radial-gradient(circle at 82% 20%, rgba(37, 99, 235, 0.18), transparent 32%),
+              linear-gradient(180deg, #09101c 0%, #060912 100%);
+            color: #e8eef9;
             font-family: "Segoe UI", system-ui, sans-serif;
           }
           .shell {
@@ -115,69 +138,132 @@ function createSplashWindow() {
             height: 100%;
             display: grid;
             place-items: center;
+            padding: 22px;
+            box-sizing: border-box;
           }
-          .card {
-            width: 300px;
-            padding: 28px 26px;
-            border-radius: 18px;
-            background: rgba(15, 23, 42, 0.82);
-            border: 1px solid rgba(148, 163, 184, 0.18);
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+          .panel {
+            width: min(100%, 496px);
+            min-height: 252px;
+            border-radius: 24px;
+            padding: 28px;
+            box-sizing: border-box;
+            position: relative;
+            overflow: hidden;
+            background:
+              linear-gradient(180deg, rgba(28, 40, 72, 0.92) 0%, rgba(11, 18, 33, 0.96) 100%);
+            border: 1px solid rgba(116, 141, 189, 0.28);
+            box-shadow:
+              0 24px 70px rgba(0, 0, 0, 0.38),
+              inset 0 1px 0 rgba(255, 255, 255, 0.04);
+          }
+          .panel::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+              radial-gradient(circle at top, rgba(96, 165, 250, 0.18), transparent 38%),
+              linear-gradient(135deg, rgba(59, 130, 246, 0.08), transparent 54%);
+            pointer-events: none;
+          }
+          .inner {
+            position: relative;
+            z-index: 1;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 18px;
           }
           .brand {
             display: flex;
             align-items: center;
-            gap: 10px;
-            font-size: 22px;
+            gap: 12px;
+            font-size: 24px;
             font-weight: 700;
-            margin-bottom: 10px;
+            letter-spacing: -0.04em;
           }
           .mark {
-            width: 30px;
-            height: 30px;
-            border-radius: 10px;
+            width: 40px;
+            height: 40px;
+            border-radius: 13px;
             display: grid;
             place-items: center;
-            background: linear-gradient(135deg, #2563eb, #0ea5e9);
+            background: linear-gradient(135deg, #3b82f6, #0ea5e9);
             color: white;
             font-weight: 800;
+            box-shadow: 0 12px 30px rgba(37, 99, 235, 0.34);
+          }
+          .copy {
+            max-width: 360px;
+          }
+          .eyebrow {
+            color: #7dd3fc;
+            font-size: 11px;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-bottom: 8px;
           }
           .subtle {
-            color: #94a3b8;
-            font-size: 14px;
-            line-height: 1.5;
-            margin-bottom: 18px;
+            color: #acc0e0;
+            font-size: 15px;
+            line-height: 1.55;
+          }
+          .meter {
+            display: grid;
+            gap: 9px;
+          }
+          .meter-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            color: #90a4c6;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
           }
           .bar {
-            height: 6px;
+            height: 7px;
             border-radius: 999px;
             overflow: hidden;
-            background: rgba(51, 65, 85, 0.85);
+            background: rgba(43, 57, 86, 0.92);
           }
           .bar::after {
             content: "";
             display: block;
-            width: 42%;
+            width: 34%;
             height: 100%;
             border-radius: inherit;
-            background: linear-gradient(90deg, #3b82f6, #38bdf8);
-            animation: pulse 1.15s ease-in-out infinite alternate;
+            background: linear-gradient(90deg, #3b82f6, #38bdf8 55%, #67e8f9);
+            box-shadow: 0 0 24px rgba(56, 189, 248, 0.45);
+            animation: pulse 1.1s ease-in-out infinite alternate;
           }
           @keyframes pulse {
             from { transform: translateX(0); }
-            to { transform: translateX(140%); }
+            to { transform: translateX(185%); }
           }
         </style>
       </head>
       <body>
         <div class="shell">
-          <div class="card">
-            <div class="brand">
-              <div class="mark">&lt;/&gt;</div>
-              <div>ScriptManager</div>
+          <div class="panel">
+            <div class="inner">
+              <div class="copy">
+                <div class="eyebrow">Desktop Workspace</div>
+                <div class="brand">
+                  <div class="mark">&lt;/&gt;</div>
+                  <div>ScriptManager</div>
+                </div>
+                <div class="subtle">Starting the local workspace and preparing your tools for a faster desktop run.</div>
+              </div>
+              <div class="meter">
+                <div class="meter-row">
+                  <span>Booting Runtime</span>
+                  <span>Please wait</span>
+                </div>
+                <div class="bar"></div>
+              </div>
             </div>
-            <div class="subtle">Starting the local workspace and preparing your tools.</div>
-            <div class="bar"></div>
           </div>
         </div>
       </body>
@@ -318,6 +404,7 @@ function waitForServer(url: string, retries = 60): Promise<void> {
 }
 
 async function createWindow() {
+  ensureDesktopProcessEnv()
   const windowState = readWindowState()
 
   if (!splashWindow) {
@@ -352,6 +439,14 @@ async function createWindow() {
     show: false,
     backgroundColor: '#0b1020',
     autoHideMenuBar: process.platform !== 'darwin',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    titleBarOverlay: process.platform === 'darwin'
+      ? false
+      : {
+          color: '#090f19',
+          symbolColor: '#d8e2f1',
+          height: 44,
+        },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -386,12 +481,18 @@ async function createWindow() {
   mainWindow.on('maximize', () => saveWindowState(mainWindow!))
   mainWindow.on('unmaximize', () => saveWindowState(mainWindow!))
   mainWindow.loadURL(`http://localhost:${PORT}`)
+  attachDesktopRuntime(mainWindow)
   mainWindow.on('closed', () => {
     mainWindow = null
+  })
+  mainWindow.webContents.once('did-finish-load', () => {
+    warmWindowDesktopRuntime(mainWindow!)
   })
 }
 
 app.whenReady().then(() => {
+  ensureDesktopProcessEnv()
+  initDesktopRuntimeIpc()
   createApplicationMenu()
   return createWindow()
 })

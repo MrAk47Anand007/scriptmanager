@@ -9,7 +9,16 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const { name, project_id, folder_path, is_temporary } = await req.json()
+  const {
+    name,
+    project_id,
+    folder_path,
+    is_temporary,
+    runtime_preset,
+    python_toolchain_enabled,
+    python_venv_path,
+    python_interpreter_path,
+  } = await req.json()
 
   const collection = await prisma.collection.findUnique({ where: { id } })
   if (!collection) {
@@ -23,6 +32,10 @@ export async function PUT(
       projectId: project_id ?? null,
       folderPath: folder_path !== undefined ? (folder_path || null) : collection.folderPath,
       isTemporary: is_temporary !== undefined ? !!is_temporary : collection.isTemporary,
+      runtimePreset: runtime_preset ?? collection.runtimePreset,
+      pythonToolchainEnabled: python_toolchain_enabled !== undefined ? !!python_toolchain_enabled : collection.pythonToolchainEnabled,
+      pythonVenvPath: python_venv_path !== undefined ? (python_venv_path || null) : collection.pythonVenvPath,
+      pythonInterpreterPath: python_interpreter_path !== undefined ? (python_interpreter_path || null) : collection.pythonInterpreterPath,
     },
   })
 
@@ -33,6 +46,10 @@ export async function PUT(
     project_id: updated.projectId,
     folder_path: updated.folderPath,
     is_temporary: updated.isTemporary,
+    runtime_preset: updated.runtimePreset,
+    python_toolchain_enabled: updated.pythonToolchainEnabled,
+    python_venv_path: updated.pythonVenvPath,
+    python_interpreter_path: updated.pythonInterpreterPath,
     created_at: updated.createdAt.toISOString(),
   })
 }

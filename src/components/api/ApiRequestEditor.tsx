@@ -186,7 +186,7 @@ function PillToggle<T extends string>({ options, value, onChange, className }: P
 
 export function ApiRequestEditor() {
   const dispatch = useAppDispatch()
-  const { activeRequest, isSending, environments, activeEnvironmentId, globalVariables, collections } = useAppSelector(s => s.api)
+  const { activeRequest, isSending, error, environments, activeEnvironmentId, globalVariables, collections } = useAppSelector(s => s.api)
   const { resolvedTheme } = useTheme()
   const [editingName, setEditingName] = useState(false)
   const [activeTab, setActiveTab] = useState<'params' | 'headers' | 'body' | 'auth' | 'variables' | 'pre-request' | 'post-request'>('params')
@@ -195,6 +195,8 @@ export function ApiRequestEditor() {
   const [curlDialogOpen, setCurlDialogOpen] = useState(false)
   const [curlInput, setCurlInput] = useState('')
   const [curlImportError, setCurlImportError] = useState<string | null>(null)
+  const [isSavingRequest, setIsSavingRequest] = useState(false)
+  const [isImportingCurl, setIsImportingCurl] = useState(false)
   const [draft, setDraft] = useState<ApiRequestDraft | null>(activeRequest)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 

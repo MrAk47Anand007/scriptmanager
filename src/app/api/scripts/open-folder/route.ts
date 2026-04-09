@@ -21,7 +21,15 @@ async function buildUniqueScriptName(baseName: string, currentSourcePath: string
 }
 
 export async function POST(req: Request) {
-  let body: { folderPath?: string; mode?: 'temporary' | 'collection'; collectionName?: string }
+  let body: {
+    folderPath?: string
+    mode?: 'temporary' | 'collection'
+    collectionName?: string
+    runtime_preset?: 'general' | 'python' | 'node' | 'shell' | 'powershell'
+    python_toolchain_enabled?: boolean
+    python_venv_path?: string | null
+    python_interpreter_path?: string | null
+  }
 
   try {
     body = await req.json()
@@ -70,6 +78,10 @@ export async function POST(req: Request) {
         name: (body.collectionName?.trim() || getFolderDisplayName(resolvedFolderPath)) + (mode === 'temporary' ? ' (Temporary)' : ''),
         folderPath: resolvedFolderPath,
         isTemporary: mode === 'temporary',
+        runtimePreset: body.runtime_preset ?? 'general',
+        pythonToolchainEnabled: !!body.python_toolchain_enabled,
+        pythonVenvPath: body.python_venv_path ?? null,
+        pythonInterpreterPath: body.python_interpreter_path ?? null,
       },
     })
   } else {
@@ -78,6 +90,10 @@ export async function POST(req: Request) {
       data: {
         name: body.collectionName?.trim() || collection.name,
         isTemporary: mode === 'temporary',
+        runtimePreset: body.runtime_preset ?? collection.runtimePreset,
+        pythonToolchainEnabled: body.python_toolchain_enabled !== undefined ? !!body.python_toolchain_enabled : collection.pythonToolchainEnabled,
+        pythonVenvPath: body.python_venv_path !== undefined ? (body.python_venv_path || null) : collection.pythonVenvPath,
+        pythonInterpreterPath: body.python_interpreter_path !== undefined ? (body.python_interpreter_path || null) : collection.pythonInterpreterPath,
       },
     })
   }
@@ -149,6 +165,10 @@ export async function POST(req: Request) {
       name: collection.name,
       folder_path: collection.folderPath,
       is_temporary: collection.isTemporary,
+      runtime_preset: collection.runtimePreset,
+      python_toolchain_enabled: collection.pythonToolchainEnabled,
+      python_venv_path: collection.pythonVenvPath,
+      python_interpreter_path: collection.pythonInterpreterPath,
     },
     scripts: linkedScripts,
     imported_count: linkedScripts.length,

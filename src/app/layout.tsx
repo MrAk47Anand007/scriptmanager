@@ -1,10 +1,20 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Manrope, Newsreader } from 'next/font/google'
 import './globals.css'
 import StoreProvider from '@/store/StoreProvider'
 import { ThemeProvider } from "@/components/ThemeProvider"
 
-const inter = Inter({ subsets: ['latin'] })
+const uiSans = Manrope({
+  subsets: ['latin'],
+  variable: '--font-ui-sans',
+  display: 'swap',
+})
+
+const headlineSerif = Newsreader({
+  subsets: ['latin'],
+  variable: '--font-headline',
+  display: 'swap',
+})
 
 export const metadata: Metadata = {
   title: 'ScriptManager',
@@ -18,7 +28,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body className={`${uiSans.variable} ${headlineSerif.variable}`}>
         <StoreProvider>
           <ThemeProvider
             attribute="class"

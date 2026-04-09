@@ -16,16 +16,13 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: buildId } = await params
-  const build = await prisma.build.findUnique({ where: { id: buildId } })
-  if (!build) {
-    return new Response('Build not found', { status: 404 })
-  }
 
   const stream = new ReadableStream({
     start(controller) {
       let emitter = getBuildEmitter(buildId)
       let attachRetry: ReturnType<typeof setInterval> | null = null
       let finished = false
+      const startedAt = Date.now()
 
       const onLine = (line: string) => {
         controller.enqueue(encodeSseData(line))
@@ -66,12 +63,18 @@ export async function GET(
 
           if (emitter || finished) return
 
+          if (Date.now() - startedAt > 10_000) {
+            controller.enqueue(encodeSseData('[ERROR] Build stream timed out before execution started'))
+            onDone()
+            return
+          }
+
           const latestBuild = await prisma.build.findUnique({
             where: { id: buildId },
             select: { status: true },
           }).catch(() => null)
 
-          if (!latestBuild || !['pending', 'running'].includes(latestBuild.status)) {
+          if (latestBuild && !['pending', 'running'].includes(latestBuild.status)) {
             onDone()
           }
         }, 100)

@@ -5,10 +5,23 @@ import { useState, useEffect, useMemo, startTransition } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchScripts, fetchCollections, fetchTemplates, fetchAllTags, setAutoSaveEnabled } from '@/features/scripts/scriptsSlice'
 import { fetchSettings } from '@/features/settings/settingsSlice'
+import { hasDesktopScriptsRuntime, listDesktopCollections, listDesktopScripts } from '@/lib/scriptsRuntimeClient'
 
 /** Single round-trip to hydrate scripts + collections + settings on startup */
 async function loadBootstrap(dispatch: ReturnType<typeof import('@/store/hooks').useAppDispatch>) {
   try {
+    if (typeof window !== 'undefined' && hasDesktopScriptsRuntime()) {
+      const [scripts, collections] = await Promise.all([
+        listDesktopScripts(),
+        listDesktopCollections(),
+      ])
+
+      dispatch(fetchScripts.fulfilled(scripts, 'desktop-bootstrap', undefined))
+      dispatch(fetchCollections.fulfilled(collections, 'desktop-bootstrap', undefined))
+      await dispatch(fetchSettings())
+      return
+    }
+
     const res = await fetch('/api/bootstrap')
     if (!res.ok) throw new Error('bootstrap failed')
     const data = await res.json()
@@ -18,9 +31,11 @@ async function loadBootstrap(dispatch: ReturnType<typeof import('@/store/hooks')
     dispatch(fetchSettings.fulfilled(data.settings, 'bootstrap', undefined))
   } catch {
     // Fall back to individual fetches if bootstrap endpoint is unavailable
-    void dispatch(fetchScripts())
-    void dispatch(fetchCollections())
-    void dispatch(fetchSettings())
+    await Promise.all([
+      dispatch(fetchScripts()),
+      dispatch(fetchCollections()),
+      dispatch(fetchSettings()),
+    ])
   }
 }
 import { setOpsMode, fetchProjects, fetchServerProfiles } from '@/features/ops/opsSlice'
@@ -84,7 +99,9 @@ export default function Home() {
   const dispatch = useAppDispatch()
   const autoSaveEnabled = useAppSelector((state) => state.scripts.autoSaveEnabled)
   const isOpsModeActive = useAppSelector((state) => state.ops.isModeActive)
+  const [isDesktopShell, setIsDesktopShell] = useState(false)
   const [activeTab, setActiveTab] = useState<'scripts' | 'settings' | 'api'>('scripts')
+  const [isBootstrapping, setIsBootstrapping] = useState(true)
   const [mountedTabs, setMountedTabs] = useState<Record<'scripts' | 'settings' | 'api', boolean>>({
     scripts: true,
     settings: false,
@@ -92,10 +109,33 @@ export default function Home() {
   })
 
   useEffect(() => {
+    const desktop = typeof window !== 'undefined' && Boolean(window.__ELECTRON__)
+    setIsDesktopShell(desktop)
+    if (typeof document !== 'undefined') {
+      if (desktop) {
+        document.body.dataset.electron = 'true'
+      } else {
+        delete document.body.dataset.electron
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     let isCancelled = false
 
-    // Single round-trip replaces 3 separate fetches
-    void loadBootstrap(dispatch)
+    const bootstrapStartedAt = Date.now()
+
+    void (async () => {
+      await loadBootstrap(dispatch)
+      const elapsed = Date.now() - bootstrapStartedAt
+      const remainingDelay = Math.max(0, 250 - elapsed)
+      if (remainingDelay > 0) {
+        await new Promise((resolve) => globalThis.setTimeout(resolve, remainingDelay))
+      }
+      if (!isCancelled) {
+        setIsBootstrapping(false)
+      }
+    })()
 
     const stored = localStorage.getItem('scriptManager_autoSave')
     if (stored) {
@@ -186,17 +226,17 @@ export default function Home() {
   return (
     <div className="flex flex-col h-screen">
       {/* Top nav */}
-      <header className="border-b bg-white dark:bg-slate-950 dark:border-slate-800 px-4 h-10 flex items-center gap-4 shrink-0">
-        <div className="flex items-center gap-2 mr-4">
+      <header className={`desktop-titlebar border-b bg-white dark:bg-slate-950/95 dark:border-slate-800 px-4 ${isDesktopShell ? 'h-11 pr-40' : 'h-10'} flex items-center gap-4 shrink-0`}>
+        <div className="desktop-no-drag flex items-center gap-2 mr-4 min-w-0">
           <Code2 className="h-5 w-5 text-blue-600 dark:text-blue-500" />
-          <span className="font-semibold text-sm text-slate-800 dark:text-slate-200">ScriptManager</span>
+          <span className="font-semibold text-sm text-slate-800 dark:text-slate-200 truncate">ScriptManager</span>
         </div>
-        <nav className="flex gap-1">
+        <nav className="desktop-no-drag flex gap-1">
           <button
             onClick={() => setActiveTab('scripts')}
             className={`px-3 py-1.5 text-xs rounded-md transition-colors ${activeTab === 'scripts'
-              ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900'
+              ? 'bg-slate-100 dark:bg-slate-800/90 text-slate-900 dark:text-slate-100 font-medium shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900/80'
               }`}
           >
             Scripts
@@ -222,7 +262,7 @@ export default function Home() {
             Settings
           </button>
         </nav>
-        <div className="ml-auto flex items-center gap-4">
+        <div className={`desktop-no-drag ml-auto flex items-center ${isDesktopShell ? 'gap-3' : 'gap-4'} min-w-0`}>
           <div className="flex items-center gap-2" title="Auto-save changes">
             <Label htmlFor="auto-save-toggle" className="text-xs text-slate-600 dark:text-slate-400 cursor-pointer">AutoSave</Label>
             <Switch
@@ -236,11 +276,16 @@ export default function Home() {
           <ModeToggle />
         </div>
       </header>
+      {isBootstrapping && (
+        <div className="h-0.5 overflow-hidden bg-slate-200 dark:bg-slate-800 shrink-0">
+          <div className="h-full w-full animate-pulse bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500" />
+        </div>
+      )}
 
       <main className="flex-1 overflow-hidden relative">
         {mountedTabs.scripts && (
           <div className={scriptsPanelClassName}>
-            <ScriptsManager />
+            {isBootstrapping ? <SectionSkeleton label="Preparing scripts workspace" /> : <ScriptsManager />}
           </div>
         )}
         {mountedTabs.api && (

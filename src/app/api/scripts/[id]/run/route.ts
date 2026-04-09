@@ -8,17 +8,31 @@ export async function POST(
 ) {
   const { id } = await params
 
-  const script = await prisma.script.findUnique({ where: { id } })
+  const script = await prisma.script.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      filename: true,
+      sourcePath: true,
+      language: true,
+      interpreter: true,
+      timeoutMs: true,
+    },
+  })
   if (!script) {
     return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   }
 
   // Parse body for optional paramValues — body may be absent for scripts with no params
   let paramValues: Record<string, string> | undefined
+  let requestedBuildId: string | undefined
   try {
     const body = await req.json()
     if (body?.paramValues && typeof body.paramValues === 'object') {
       paramValues = body.paramValues
+    }
+    if (typeof body?.buildId === 'string' && body.buildId.trim()) {
+      requestedBuildId = body.buildId.trim()
     }
   } catch {
     // No body or invalid JSON — run without params
@@ -26,6 +40,7 @@ export async function POST(
 
   const build = await prisma.build.create({
     data: {
+      ...(requestedBuildId ? { id: requestedBuildId } : {}),
       scriptId: script.id,
       status: 'pending',
       triggeredBy: 'manual'

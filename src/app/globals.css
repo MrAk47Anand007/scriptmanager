@@ -29,6 +29,8 @@
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
+    --font-ui: var(--font-ui-sans), "Segoe UI", sans-serif;
+    --font-headline: var(--font-headline), "Iowan Old Style", "Palatino Linotype", serif;
   }
 
   .dark {
@@ -63,7 +65,100 @@
   * {
     @apply border-border;
   }
+  html {
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-ui);
+    font-weight: 500;
+    letter-spacing: -0.012em;
+    line-height: 1.45;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-headline);
+    letter-spacing: -0.035em;
+    line-height: 0.98;
+    font-weight: 600;
+  }
+  h1 {
+    font-size: clamp(2rem, 1.55rem + 1.6vw, 3.2rem);
+  }
+  h2 {
+    font-size: clamp(1.45rem, 1.2rem + 0.9vw, 2.15rem);
+  }
+  h3 {
+    font-size: clamp(1.2rem, 1.05rem + 0.5vw, 1.55rem);
+  }
+  h4,
+  h5,
+  h6 {
+    font-size: 1.05rem;
+    line-height: 1.1;
+  }
+  input,
+  button,
+  select,
+  textarea {
+    font: inherit;
+  }
+  code,
+  pre,
+  kbd,
+  samp {
+    font-family: "Cascadia Code", "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    letter-spacing: 0;
+  }
+
+  body[data-electron='true'] {
+    background:
+      linear-gradient(180deg, rgba(11, 16, 32, 0.98) 0%, rgba(7, 10, 20, 1) 100%);
+  }
+}
+
+@layer components {
+  .ui-headline {
+    font-family: var(--font-headline);
+    letter-spacing: -0.035em;
+    line-height: 0.98;
+    font-weight: 600;
+  }
+
+  .ui-section-title {
+    font-family: var(--font-headline);
+    font-size: clamp(1.15rem, 1.02rem + 0.35vw, 1.45rem);
+    letter-spacing: -0.03em;
+    line-height: 1.02;
+    font-weight: 600;
+  }
+
+  .desktop-titlebar {
+    -webkit-app-region: drag;
+    position: relative;
+    backdrop-filter: blur(18px);
+  }
+
+  .desktop-titlebar::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 1px;
+    background: linear-gradient(90deg, rgba(59, 130, 246, 0.16), rgba(56, 189, 248, 0.55), rgba(59, 130, 246, 0.08));
+    pointer-events: none;
+  }
+
+  .desktop-no-drag,
+  .desktop-no-drag * {
+    -webkit-app-region: no-drag;
   }
 }

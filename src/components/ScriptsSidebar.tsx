@@ -6,7 +6,7 @@ import type { RootState } from '@/store/store';
 import {
     setActiveScript, createScript, createCollection, deleteCollection, moveScript, moveCollection,
     saveAsTemplate, duplicateScript, deleteScript, openScriptsFolder, importScriptsFolder,
-    removeTemporaryCollection, convertTemporaryCollection,
+    removeTemporaryCollection, convertTemporaryCollection, fetchCollections,
 } from '@/features/scripts/scriptsSlice';
 import type { Script, Collection, ScriptTemplate } from '@/features/scripts/scriptsSlice';
 import {
@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
     FileCode, Plus, Folder, MoreVertical, Trash2, ChevronRight, ChevronDown,
-    GripVertical, Search, LayoutTemplate, Copy, Loader2, Layers, FolderOpen,
+    GripVertical, Search, LayoutTemplate, Copy, Loader2, Layers, FolderOpen, AlertTriangle,
 } from 'lucide-react';
 import { QuickSwitcher } from './QuickSwitcher';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
@@ -54,11 +54,41 @@ import {
 import { DndContext, DragEndEvent, DragOverlay, useDraggable, useDroppable, DragStartEvent, useSensors, useSensor, PointerSensor } from '@dnd-kit/core';
 import { createPortal } from 'react-dom';
 import axios from 'axios';
+import {
+    hasDesktopScriptsRuntime,
+    inspectDesktopCollectionWorkspace,
+    inspectDesktopFolder,
+    manageDesktopCollectionPythonEnv,
+} from '@/lib/scriptsRuntimeClient';
 
 type BrowserFolderFile = {
     relativePath: string
     content: string
 }
+
+type FolderInspection = {
+    hasVenv: boolean
+    venvPath: string | null
+    interpreterPath: string | null
+    manifests: string[]
+}
+
+type CollectionWorkspaceStatus = {
+    collection: Collection
+    workspacePath: string | null
+    hasVenv: boolean
+    venvPath: string | null
+    interpreterPath: string | null
+    manifests: string[]
+}
+
+const RUNTIME_OPTIONS: Array<{ value: NonNullable<Collection['runtime_preset']>; label: string }> = [
+    { value: 'general', label: 'General' },
+    { value: 'python', label: 'Python' },
+    { value: 'node', label: 'JavaScript / Node' },
+    { value: 'shell', label: 'Shell' },
+    { value: 'powershell', label: 'PowerShell' },
+]
 
 const GistSyncStatus = () => {
     const { settings } = useAppSelector((state) => state.settings);
@@ -145,23 +175,76 @@ const DraggableScript = memo(({
 // Only re-render when script data or active state changes (ignore inline callback reference changes)
 }, (prev, next) => prev.script === next.script && prev.isActive === next.isActive);
 
+const CollectionScriptRows = memo(({
+    scripts,
+    activeScriptId,
+    onActivateScript,
+    onSaveAsTemplate,
+    onDuplicateScript,
+    onDeleteScript,
+}: {
+    scripts: Script[]
+    activeScriptId: string | null
+    onActivateScript: (scriptId: string) => void
+    onSaveAsTemplate: (script: Script) => void
+    onDuplicateScript: (scriptId: string) => void
+    onDeleteScript: (script: Script) => void
+}) => {
+    if (scripts.length === 0) {
+        return <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>;
+    }
+
+    return (
+        <>
+            {scripts.map((script) => (
+                <DraggableScript
+                    key={script.id}
+                    script={script}
+                    isActive={activeScriptId === script.id}
+                    onClick={() => onActivateScript(script.id)}
+                    onSaveAsTemplate={() => onSaveAsTemplate(script)}
+                    onDuplicate={() => onDuplicateScript(script.id)}
+                    onDelete={() => onDeleteScript(script)}
+                />
+            ))}
+        </>
+    );
+}, (prev, next) =>
+    prev.scripts === next.scripts &&
+    prev.activeScriptId === next.activeScriptId
+);
+
 // Droppable Collection Component — memoized; only re-renders when collection data or expand state changes
 const DroppableCollection = memo(({
     collection,
     isExpanded,
     toggle,
-    children,
+    scripts,
+    activeScriptId,
+    isDeleting,
     onDelete,
     onCreateScript,
+    onActivateScript,
+    onSaveAsTemplate,
+    onDuplicateScript,
+    onDeleteScript,
     onConvertToCollection,
+    onManagePythonEnv,
 }: {
     collection: Collection,
     isExpanded: boolean,
     toggle: () => void,
-    children: React.ReactNode,
+    scripts: Script[],
+    activeScriptId: string | null,
+    isDeleting?: boolean,
     onDelete: () => void,
     onCreateScript: () => void
+    onActivateScript: (scriptId: string) => void
+    onSaveAsTemplate: (script: Script) => void
+    onDuplicateScript: (scriptId: string) => void
+    onDeleteScript: (script: Script) => void
     onConvertToCollection?: () => void
+    onManagePythonEnv?: () => void
 }) => {
     const { setNodeRef: setDroppableNodeRef, isOver } = useDroppable({
         id: `drop-col-${collection.id}`,
@@ -197,18 +280,22 @@ const DroppableCollection = memo(({
                                 {collection.is_temporary ? 'temp' : 'linked'}
                             </span>
                         )}
+                        {isDeleting && (
+                            <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-blue-500" />
+                        )}
                         <Button
                             variant="ghost"
                             size="icon"
                             className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400"
                             onClick={(e) => { e.stopPropagation(); onCreateScript(); }}
                             title="New Script"
+                            disabled={isDeleting}
                         >
                             <Plus className="h-3.5 w-3.5" />
                         </Button>
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                                <Button variant="ghost" size="icon" className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()} disabled={isDeleting}>
                                     <MoreVertical className="h-3 w-3" />
                                 </Button>
                             </DropdownMenuTrigger>
@@ -221,6 +308,11 @@ const DroppableCollection = memo(({
                                         <FolderOpen className="mr-2 h-4 w-4" /> Save as Collection
                                     </DropdownMenuItem>
                                 )}
+                                {onManagePythonEnv && (
+                                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onManagePythonEnv(); }}>
+                                        <Folder className="mr-2 h-4 w-4" /> Python Environment...
+                                    </DropdownMenuItem>
+                                )}
                                 <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
                                     <Trash2 className="mr-2 h-4 w-4" /> {collection.is_temporary ? 'Remove Workspace' : 'Delete'}
                                 </DropdownMenuItem>
@@ -229,7 +321,14 @@ const DroppableCollection = memo(({
                     </div>
                     {isExpanded && (
                         <div className="pl-4 space-y-0.5">
-                            {children}
+                            <CollectionScriptRows
+                                scripts={scripts}
+                                activeScriptId={activeScriptId}
+                                onActivateScript={onActivateScript}
+                                onSaveAsTemplate={onSaveAsTemplate}
+                                onDuplicateScript={onDuplicateScript}
+                                onDeleteScript={onDeleteScript}
+                            />
                         </div>
                     )}
                 </div>
@@ -243,6 +342,11 @@ const DroppableCollection = memo(({
                         <FolderOpen className="mr-2 h-4 w-4" /> Save as Collection
                     </ContextMenuItem>
                 )}
+                {onManagePythonEnv && (
+                    <ContextMenuItem onClick={onManagePythonEnv}>
+                        <Folder className="mr-2 h-4 w-4" /> Python Environment...
+                    </ContextMenuItem>
+                )}
                 <ContextMenuItem className="text-red-600 focus:text-red-600" onClick={onDelete}>
                     <Trash2 className="mr-2 h-4 w-4" /> {collection.is_temporary ? 'Remove Workspace' : 'Delete Collection'}
                 </ContextMenuItem>
@@ -253,7 +357,9 @@ const DroppableCollection = memo(({
 }, (prev, next) =>
     prev.collection === next.collection &&
     prev.isExpanded === next.isExpanded &&
-    prev.children === next.children
+    prev.scripts === next.scripts &&
+    prev.activeScriptId === next.activeScriptId &&
+    prev.isDeleting === next.isDeleting
 );
 
 // Droppable Project Component
@@ -330,7 +436,7 @@ const DroppableProject = ({
     );
 };
 
-export const ScriptsSidebar = () => {
+const ScriptsSidebarComponent = () => {
     const dispatch = useAppDispatch();
     const store = useAppStore();
     const {
@@ -344,7 +450,11 @@ export const ScriptsSidebar = () => {
     } = useAppSelector((state) => state.scripts);
     const [expandedCollections, setExpandedCollections] = useState<Record<string, boolean>>({});
     const [isCreatingCollection, setIsCreatingCollection] = useState(false);
+    const [isSubmittingCollection, setIsSubmittingCollection] = useState(false);
+    const [pendingCollectionDeleteId, setPendingCollectionDeleteId] = useState<string | null>(null);
     const [newCollectionName, setNewCollectionName] = useState('');
+    const [newCollectionRuntimePreset, setNewCollectionRuntimePreset] = useState<NonNullable<Collection['runtime_preset']>>('general');
+    const [newCollectionPythonTools, setNewCollectionPythonTools] = useState(false);
     const [parentProjectId, setParentProjectId] = useState<string | null>(null);
     const [activeDragScript, setActiveDragScript] = useState<Script | null>(null);
     const [activeDragCollection, setActiveDragCollection] = useState<Collection | null>(null);
@@ -360,6 +470,10 @@ export const ScriptsSidebar = () => {
     const [folderPath, setFolderPath] = useState('');
     const [folderMode, setFolderMode] = useState<'temporary' | 'collection'>('temporary');
     const [folderCollectionName, setFolderCollectionName] = useState('');
+    const [folderRuntimePreset, setFolderRuntimePreset] = useState<NonNullable<Collection['runtime_preset']>>('general');
+    const [folderPythonTools, setFolderPythonTools] = useState(false);
+    const [folderCreateVenvIfMissing, setFolderCreateVenvIfMissing] = useState(false);
+    const [folderInspection, setFolderInspection] = useState<FolderInspection | null>(null);
     const [isOpeningFolder, setIsOpeningFolder] = useState(false);
     const [openFolderError, setOpenFolderError] = useState('');
     const [browserFolderFiles, setBrowserFolderFiles] = useState<BrowserFolderFile[]>([]);
@@ -367,6 +481,11 @@ export const ScriptsSidebar = () => {
     const [collectionToConvert, setCollectionToConvert] = useState<Collection | null>(null);
     const [convertCollectionName, setConvertCollectionName] = useState('');
     const [isConvertingCollection, setIsConvertingCollection] = useState(false);
+    const [hasDesktopFolderPicker, setHasDesktopFolderPicker] = useState(false);
+    const [pythonEnvCollection, setPythonEnvCollection] = useState<Collection | null>(null);
+    const [pythonEnvStatus, setPythonEnvStatus] = useState<CollectionWorkspaceStatus | null>(null);
+    const [isPythonEnvLoading, setIsPythonEnvLoading] = useState(false);
+    const [pythonEnvError, setPythonEnvError] = useState('');
 
     // Search + filter state
     const [searchQuery, setSearchQuery] = useState('');
@@ -391,6 +510,8 @@ export const ScriptsSidebar = () => {
     const [scriptToDelete, setScriptToDelete] = useState<Script | null>(null);
     const [deleteFromGist, setDeleteFromGist] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [collectionToDelete, setCollectionToDelete] = useState<Collection | null>(null);
+    const [isDeletingCollectionDialog, setIsDeletingCollectionDialog] = useState(false);
 
     const { settings } = useAppSelector((state) => state.settings);
     const isModeActive = useAppSelector((state) => state.ops.isModeActive);
@@ -441,6 +562,8 @@ export const ScriptsSidebar = () => {
     }, [handleKeyDown]);
 
     useEffect(() => {
+        setHasDesktopFolderPicker(Boolean(window.scriptManagerDesktop?.selectFolder));
+
         const openFolderFromDesktopMenu = () => {
             openFolderDialog();
         };
@@ -450,6 +573,21 @@ export const ScriptsSidebar = () => {
             window.removeEventListener('scriptmanager:desktop-open-folder', openFolderFromDesktopMenu as EventListener);
         };
     }, []);
+
+    useEffect(() => {
+        if (newCollectionRuntimePreset === 'python') {
+            setNewCollectionPythonTools(true);
+        }
+    }, [newCollectionRuntimePreset]);
+
+    useEffect(() => {
+        if (folderRuntimePreset === 'python') {
+            setFolderPythonTools(true);
+            if (!folderInspection?.hasVenv) {
+                setFolderCreateVenvIfMissing(true);
+            }
+        }
+    }, [folderInspection?.hasVenv, folderRuntimePreset]);
 
     // Initial data fetching is centralized in page.tsx
 
@@ -467,11 +605,19 @@ export const ScriptsSidebar = () => {
         setExpandedCollections(prev => ({ ...prev, [id]: !prev[id] }));
     };
 
-    const handleDeleteScriptRequest = (script: Script) => {
+    const handleActivateScript = useCallback((scriptId: string) => {
+        dispatch(setActiveScript(scriptId));
+    }, [dispatch]);
+
+    const handleDuplicateScript = useCallback((scriptId: string) => {
+        dispatch(duplicateScript(scriptId));
+    }, [dispatch]);
+
+    const handleDeleteScriptRequest = useCallback((script: Script) => {
         setScriptToDelete(script);
         setDeleteFromGist(script.sync_to_gist || !!script.gist_id);
         setIsDeleteDialogOpen(true);
-    };
+    }, []);
 
     const confirmDeleteScript = async () => {
         if (!scriptToDelete) return;
@@ -493,14 +639,135 @@ export const ScriptsSidebar = () => {
         setIsCreateScriptOpen(true);
     };
 
+    const openCreateCollectionDialog = (projectId?: string | null) => {
+        setParentProjectId(projectId ?? null);
+        setNewCollectionName('');
+        setNewCollectionRuntimePreset('general');
+        setNewCollectionPythonTools(false);
+        setIsCreatingCollection(true);
+    };
+
+    const resetCollectionCreationState = () => {
+        setNewCollectionName('');
+        setNewCollectionRuntimePreset('general');
+        setNewCollectionPythonTools(false);
+        setParentProjectId(null);
+        setIsCreatingCollection(false);
+    };
+
+    const detectFolderWorkspaceState = useCallback(async (selectedPath: string) => {
+        if (!hasDesktopScriptsRuntime()) {
+            return null;
+        }
+
+        const inspection = await inspectDesktopFolder(selectedPath);
+        setFolderInspection(inspection);
+        if (inspection.hasVenv) {
+            setFolderPythonTools(true);
+            setFolderCreateVenvIfMissing(false);
+        }
+        return inspection;
+    }, []);
+
     const openFolderDialog = () => {
         setFolderMode('temporary');
         setFolderPath('');
         setFolderCollectionName('');
+        setFolderRuntimePreset('general');
+        setFolderPythonTools(false);
+        setFolderCreateVenvIfMissing(false);
+        setFolderInspection(null);
         setOpenFolderError('');
         setBrowserFolderFiles([]);
         setIsOpenFolderDialogOpen(true);
     };
+
+    const inferScriptDraft = useCallback((rawName: string, collectionId?: string | null) => {
+        const collection = collectionId ? collections.find((entry) => entry.id === collectionId) : null;
+        const runtimePreset = collection?.runtime_preset ?? 'general';
+        let finalName = rawName.trim();
+        let language = 'python';
+        let content = 'print("Hello World")';
+
+        const lowerName = finalName.toLowerCase();
+        const hasExtension = /\.[a-z0-9]+$/i.test(finalName);
+
+        if (lowerName.endsWith('.py')) {
+            language = 'python';
+            content = 'print("Hello World")';
+        } else if (lowerName.endsWith('.js') || lowerName.endsWith('.ts')) {
+            language = 'node';
+            content = 'console.log("Hello World");';
+        } else if (lowerName.endsWith('.ps1')) {
+            language = 'powershell';
+            content = 'Write-Host "Hello World"';
+        } else if (lowerName.endsWith('.sh')) {
+            language = 'shell';
+            content = '#!/bin/bash\necho "Hello World"';
+        } else if (!hasExtension) {
+            if (runtimePreset === 'node') {
+                finalName += '.js';
+                language = 'node';
+                content = 'console.log("Hello World");';
+            } else if (runtimePreset === 'shell') {
+                finalName += '.sh';
+                language = 'shell';
+                content = '#!/bin/bash\necho "Hello World"';
+            } else if (runtimePreset === 'powershell') {
+                finalName += '.ps1';
+                language = 'powershell';
+                content = 'Write-Host "Hello World"';
+            } else {
+                finalName += '.py';
+                language = 'python';
+                content = 'print("Hello World")';
+            }
+        }
+
+        return { finalName, language, content };
+    }, [collections]);
+
+    const openPythonEnvironmentDialog = useCallback(async (collection: Collection) => {
+        setPythonEnvCollection(collection);
+        setPythonEnvStatus(null);
+        setPythonEnvError('');
+        setIsPythonEnvLoading(true);
+
+        try {
+            const status = await inspectDesktopCollectionWorkspace(collection.id);
+            setPythonEnvStatus(status);
+        } catch (error) {
+            setPythonEnvError(error instanceof Error ? error.message : 'Failed to inspect collection workspace');
+        } finally {
+            setIsPythonEnvLoading(false);
+        }
+    }, []);
+
+    const handleCreateOrRepairPythonEnv = useCallback(async (recreate = false) => {
+        if (!pythonEnvCollection) {
+            return;
+        }
+
+        setPythonEnvError('');
+        setIsPythonEnvLoading(true);
+        try {
+            const status = await manageDesktopCollectionPythonEnv(pythonEnvCollection.id, recreate);
+            setPythonEnvStatus(status);
+            await dispatch(fetchCollections());
+        } catch (error) {
+            setPythonEnvError(error instanceof Error ? error.message : 'Failed to manage Python environment');
+        } finally {
+            setIsPythonEnvLoading(false);
+        }
+    }, [dispatch, pythonEnvCollection]);
+
+    const handleRevealWorkspace = useCallback(async () => {
+        const workspacePath = pythonEnvStatus?.workspacePath;
+        if (!workspacePath || !window.scriptManagerDesktop?.revealPath) {
+            return;
+        }
+        await window.scriptManagerDesktop.revealPath(workspacePath);
+    }, [pythonEnvStatus?.workspacePath]);
 
     const selectFolderPath = async () => {
         setOpenFolderError('');
@@ -509,6 +776,7 @@ export const ScriptsSidebar = () => {
             const selected = await window.scriptManagerDesktop.selectFolder();
             if (selected) {
                 setFolderPath(selected);
+                await detectFolderWorkspaceState(selected);
                 if (!folderCollectionName.trim()) {
                     const parts = selected.split(/[\\/]/).filter(Boolean);
                     setFolderCollectionName(parts[parts.length - 1] ?? '');
@@ -538,6 +806,7 @@ export const ScriptsSidebar = () => {
 
         setBrowserFolderFiles(loadedFiles);
         setFolderPath(folderRoot);
+        setFolderInspection(null);
         if (!folderCollectionName.trim()) {
             setFolderCollectionName(folderRoot);
         }
@@ -551,11 +820,14 @@ export const ScriptsSidebar = () => {
         setIsOpeningFolder(true);
         setOpenFolderError('');
         try {
-            const result = window.scriptManagerDesktop?.selectFolder
+            const result = hasDesktopFolderPicker
                 ? await dispatch(openScriptsFolder({
                     folderPath: folderPath.trim(),
                     mode: folderMode,
                     collectionName: folderMode === 'collection' ? folderCollectionName.trim() || undefined : undefined,
+                    runtimePreset: folderRuntimePreset,
+                    pythonToolchainEnabled: folderInspection?.hasVenv ? true : folderPythonTools,
+                    createVenvIfMissing: folderInspection?.hasVenv ? false : folderCreateVenvIfMissing,
                 }))
                 : await dispatch(importScriptsFolder({
                     mode: folderMode,
@@ -589,23 +861,10 @@ export const ScriptsSidebar = () => {
 
         setIsCreatingScript(true);
         try {
-            let content = '';
-            let language = 'python';
-
-            const lowerName = newScriptName.toLowerCase();
-            if (lowerName.endsWith('.py')) {
-                language = 'python';
-                content = 'print("Hello World")';
-            } else if (lowerName.endsWith('.js') || lowerName.endsWith('.ts')) {
-                language = 'node';
-                content = 'console.log("Hello World");';
-            } else if (lowerName.endsWith('.sh')) {
-                language = 'shell';
-                content = '#!/bin/bash\necho "Hello World"';
-            }
+            const { finalName, content, language } = inferScriptDraft(newScriptName, parentCollectionId);
 
             const result = await dispatch(createScript({
-                name: newScriptName,
+                name: finalName,
                 description: newScriptDescription.trim() || undefined,
                 syncToGist: syncToGistOverride,
                 content,
@@ -631,24 +890,47 @@ export const ScriptsSidebar = () => {
     };
 
     const handleCreateCollection = async () => {
-        if (!newCollectionName.trim()) return;
-        await dispatch(createCollection({ name: newCollectionName.trim(), projectId: parentProjectId }));
-        setNewCollectionName('');
-        setIsCreatingCollection(false);
-        setParentProjectId(null);
+        if (!newCollectionName.trim() || isSubmittingCollection) return;
+        setIsSubmittingCollection(true);
+        try {
+            await dispatch(createCollection({
+                name: newCollectionName.trim(),
+                projectId: parentProjectId,
+                runtimePreset: newCollectionRuntimePreset,
+                pythonToolchainEnabled: newCollectionRuntimePreset === 'python' ? true : newCollectionPythonTools,
+            })).unwrap();
+            resetCollectionCreationState();
+        } finally {
+            setIsSubmittingCollection(false);
+        }
     };
 
-    const handleDeleteCollection = async (id: string) => {
-        if (confirm("Delete this collection? Scripts inside will be moved to Unsorted.")) {
-            await dispatch(deleteCollection(id));
-        }
+    const handleDeleteCollection = async (collection: Collection) => {
+        setCollectionToDelete(collection);
     };
 
     const handleRemoveTemporaryCollection = async (collection: Collection) => {
-        if (!confirm(`Remove temporary workspace "${collection.name}" from ScriptManager?`)) {
+        setCollectionToDelete(collection);
+    };
+
+    const confirmDeleteCollection = async () => {
+        if (!collectionToDelete || isDeletingCollectionDialog) {
             return;
         }
-        await dispatch(removeTemporaryCollection(collection.id));
+
+        setIsDeletingCollectionDialog(true);
+        setPendingCollectionDeleteId(collectionToDelete.id);
+        try {
+            if (collectionToDelete.is_temporary) {
+                await dispatch(removeTemporaryCollection(collectionToDelete.id)).unwrap();
+            } else {
+                await dispatch(deleteCollection(collectionToDelete.id)).unwrap();
+            }
+            setCollectionToDelete(null);
+        } finally {
+            setPendingCollectionDeleteId((current) => current === collectionToDelete.id ? null : current);
+            setIsDeletingCollectionDialog(false);
+        }
     };
 
     const openConvertCollectionDialog = (collection: Collection) => {
@@ -712,7 +994,7 @@ export const ScriptsSidebar = () => {
 
     // --- Template handlers ---
 
-    const openSaveAsTemplate = (script: Script) => {
+    const openSaveAsTemplate = useCallback((script: Script) => {
         setSaveAsSourceScript(script);
         setSaveAsTemplateName(script.name);
         setSaveAsDescription('');
@@ -720,7 +1002,7 @@ export const ScriptsSidebar = () => {
         setSaveAsError('');
         setSaveAsLoading(false);
         setIsSaveAsTemplateOpen(true);
-    };
+    }, []);
 
     const handleSaveAsTemplate = async () => {
         if (!saveAsSourceScript || !saveAsTemplateName.trim()) return;
@@ -828,6 +1110,9 @@ export const ScriptsSidebar = () => {
         [collections]
     );
 
+    const isDeleteTemporaryWorkspace = Boolean(collectionToDelete?.is_temporary);
+    const hasCollectionFolder = Boolean(collectionToDelete?.folder_path && !collectionToDelete?.is_temporary);
+
     const sensors = useSensors(
         useSensor(PointerSensor, {
             activationConstraint: {
@@ -871,7 +1156,7 @@ export const ScriptsSidebar = () => {
                                             <LayoutTemplate className="mr-2 h-4 w-4" /> New from Template
                                         </DropdownMenuItem>
                                         <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => { setParentProjectId(null); setIsCreatingCollection(true); }}>
+                                        <DropdownMenuItem onClick={() => openCreateCollectionDialog(null)}>
                                             <Folder className="mr-2 h-4 w-4" /> New Collection
                                         </DropdownMenuItem>
                                         {isModeActive && (
@@ -925,10 +1210,48 @@ export const ScriptsSidebar = () => {
                                 onChange={(e) => setNewCollectionName(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleCreateCollection()}
                                 className="h-7 text-xs mb-2 bg-white dark:bg-slate-950 dark:border-slate-700"
+                                disabled={isSubmittingCollection}
                             />
+                            {hasDesktopFolderPicker && (
+                                <>
+                                    <Select
+                                        value={newCollectionRuntimePreset}
+                                        onValueChange={(value: NonNullable<Collection['runtime_preset']>) => setNewCollectionRuntimePreset(value)}
+                                        disabled={isSubmittingCollection}
+                                    >
+                                        <SelectTrigger className="h-7 text-xs mb-2 bg-white dark:bg-slate-950 dark:border-slate-700">
+                                            <SelectValue placeholder="Primary runtime" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {RUNTIME_OPTIONS.map((option) => (
+                                                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <div className="mb-2 flex items-start space-x-2 rounded-md border border-blue-200/70 bg-white/70 px-2 py-2 dark:border-slate-700 dark:bg-slate-950/70">
+                                        <Checkbox
+                                            id="collection-python-tools"
+                                            checked={newCollectionPythonTools}
+                                            onCheckedChange={(checked) => setNewCollectionPythonTools(Boolean(checked))}
+                                            disabled={newCollectionRuntimePreset === 'python' || isSubmittingCollection}
+                                        />
+                                        <div className="space-y-1">
+                                            <Label htmlFor="collection-python-tools" className="text-xs font-medium">
+                                                Enable Python tools
+                                            </Label>
+                                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                                Create and use a collection-level <code>.venv</code> for Python scripts inside this workspace.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
                             <div className="flex gap-2">
-                                <Button size="sm" className="h-6 text-xs flex-1" onClick={handleCreateCollection}>Create</Button>
-                                <Button size="sm" variant="ghost" className="h-6 text-xs flex-1" onClick={() => setIsCreatingCollection(false)}>Cancel</Button>
+                                <Button size="sm" className="h-6 text-xs flex-1" onClick={handleCreateCollection} disabled={isSubmittingCollection || !newCollectionName.trim()}>
+                                    {isSubmittingCollection ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
+                                    {isSubmittingCollection ? 'Creating...' : 'Create'}
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-6 text-xs flex-1" onClick={resetCollectionCreationState} disabled={isSubmittingCollection}>Cancel</Button>
                             </div>
                         </div>
                     )}
@@ -982,26 +1305,19 @@ export const ScriptsSidebar = () => {
                                                 key={collection.id}
                                                 collection={collection}
                                                 isExpanded={!!expandedCollections[collection.id]}
+                                                isDeleting={pendingCollectionDeleteId === collection.id}
                                                 toggle={() => toggleCollection(collection.id)}
+                                                scripts={grouped.result[collection.id] ?? []}
+                                                activeScriptId={activeScriptId}
                                                 onDelete={() => handleRemoveTemporaryCollection(collection)}
                                                 onCreateScript={() => handleCreateScript(collection.id)}
+                                                onActivateScript={handleActivateScript}
+                                                onSaveAsTemplate={openSaveAsTemplate}
+                                                onDuplicateScript={handleDuplicateScript}
+                                                onDeleteScript={handleDeleteScriptRequest}
                                                 onConvertToCollection={() => openConvertCollectionDialog(collection)}
-                                            >
-                                                {grouped.result[collection.id]?.length === 0 && (
-                                                    <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
-                                                )}
-                                                {(grouped.result[collection.id] ?? []).map(script => (
-                                                    <DraggableScript
-                                                        key={script.id}
-                                                        script={script}
-                                                        isActive={activeScriptId === script.id}
-                                                        onClick={() => dispatch(setActiveScript(script.id))}
-                                                        onSaveAsTemplate={() => openSaveAsTemplate(script)}
-                                                        onDuplicate={() => dispatch(duplicateScript(script.id))}
-                                                        onDelete={() => handleDeleteScriptRequest(script)}
-                                                    />
-                                                ))}
-                                            </DroppableCollection>
+                                                onManagePythonEnv={hasDesktopFolderPicker && collection.folder_path ? () => openPythonEnvironmentDialog(collection) : undefined}
+                                            />
                                         ))}
                                     </>
                                 )}
@@ -1021,7 +1337,7 @@ export const ScriptsSidebar = () => {
                                             isExpanded={isExpanded}
                                             toggleProject={() => toggleProject(project.id)}
                                             handleCreateScript={() => handleCreateScript()}
-                                            handleCreateCollection={() => { setParentProjectId(project.id); setIsCreatingCollection(true); }}
+                                            handleCreateCollection={() => openCreateCollectionDialog(project.id)}
                                             handleDeleteProject={() => handleDeleteProject(project.id)}
                                         >
                                             <div className="space-y-0.5">
@@ -1030,25 +1346,18 @@ export const ScriptsSidebar = () => {
                                                         key={collection.id}
                                                         collection={collection}
                                                         isExpanded={!!expandedCollections[collection.id]}
+                                                        isDeleting={pendingCollectionDeleteId === collection.id}
                                                         toggle={() => toggleCollection(collection.id)}
-                                                        onDelete={() => handleDeleteCollection(collection.id)}
+                                                        scripts={grouped.result[collection.id] ?? []}
+                                                        activeScriptId={activeScriptId}
+                                                        onDelete={() => handleDeleteCollection(collection)}
                                                         onCreateScript={() => handleCreateScript(collection.id)}
-                                                    >
-                                                        {grouped.result[collection.id]?.length === 0 && (
-                                                            <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
-                                                        )}
-                                                        {(grouped.result[collection.id] ?? []).map(script => (
-                                                            <DraggableScript
-                                                                key={script.id}
-                                                                script={script}
-                                                                isActive={activeScriptId === script.id}
-                                                                onClick={() => dispatch(setActiveScript(script.id))}
-                                                                onSaveAsTemplate={() => openSaveAsTemplate(script)}
-                                                                onDuplicate={() => dispatch(duplicateScript(script.id))}
-                                                                onDelete={() => handleDeleteScriptRequest(script)}
-                                                            />
-                                                        ))}
-                                                    </DroppableCollection>
+                                                        onActivateScript={handleActivateScript}
+                                                        onSaveAsTemplate={openSaveAsTemplate}
+                                                        onDuplicateScript={handleDuplicateScript}
+                                                        onDeleteScript={handleDeleteScriptRequest}
+                                                        onManagePythonEnv={hasDesktopFolderPicker && collection.folder_path ? () => openPythonEnvironmentDialog(collection) : undefined}
+                                                    />
                                                 ))}
                                                 {projectCollections.length === 0 && (
                                                     <div className="px-4 py-1 text-xs text-slate-400 italic">No collections</div>
@@ -1074,34 +1383,27 @@ export const ScriptsSidebar = () => {
                                                     key={collection.id}
                                                     collection={collection}
                                                     isExpanded={!!expandedCollections[collection.id]}
+                                                    isDeleting={pendingCollectionDeleteId === collection.id}
                                                     toggle={() => toggleCollection(collection.id)}
-                                                    onDelete={() => handleDeleteCollection(collection.id)}
+                                                    scripts={grouped.result[collection.id] ?? []}
+                                                    activeScriptId={activeScriptId}
+                                                    onDelete={() => handleDeleteCollection(collection)}
                                                     onCreateScript={() => handleCreateScript(collection.id)}
-                                                >
-                                                    {grouped.result[collection.id]?.length === 0 && (
-                                                        <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
-                                                    )}
-                                                    {(grouped.result[collection.id] ?? []).map(script => (
-                                                        <DraggableScript
-                                                            key={script.id}
-                                                            script={script}
-                                                            isActive={activeScriptId === script.id}
-                                                            onClick={() => dispatch(setActiveScript(script.id))}
-                                                            onSaveAsTemplate={() => openSaveAsTemplate(script)}
-                                                            onDuplicate={() => dispatch(duplicateScript(script.id))}
-                                                            onDelete={() => handleDeleteScriptRequest(script)}
-                                                        />
-                                                    ))}
-                                                </DroppableCollection>
+                                                    onActivateScript={handleActivateScript}
+                                                    onSaveAsTemplate={openSaveAsTemplate}
+                                                    onDuplicateScript={handleDuplicateScript}
+                                                    onDeleteScript={handleDeleteScriptRequest}
+                                                    onManagePythonEnv={hasDesktopFolderPicker && collection.folder_path ? () => openPythonEnvironmentDialog(collection) : undefined}
+                                                />
                                             ))}
                                             {grouped.unsorted.map(script => (
                                                 <DraggableScript
                                                     key={script.id}
                                                     script={script}
                                                     isActive={activeScriptId === script.id}
-                                                    onClick={() => dispatch(setActiveScript(script.id))}
+                                                    onClick={() => handleActivateScript(script.id)}
                                                     onSaveAsTemplate={() => openSaveAsTemplate(script)}
-                                                    onDuplicate={() => dispatch(duplicateScript(script.id))}
+                                                    onDuplicate={() => handleDuplicateScript(script.id)}
                                                     onDelete={() => handleDeleteScriptRequest(script)}
                                                 />
                                             ))}
@@ -1122,26 +1424,19 @@ export const ScriptsSidebar = () => {
                                         key={collection.id}
                                         collection={collection}
                                         isExpanded={!!expandedCollections[collection.id]}
+                                        isDeleting={pendingCollectionDeleteId === collection.id}
                                         toggle={() => toggleCollection(collection.id)}
+                                        scripts={grouped.result[collection.id] ?? []}
+                                        activeScriptId={activeScriptId}
                                         onDelete={() => handleRemoveTemporaryCollection(collection)}
                                         onCreateScript={() => handleCreateScript(collection.id)}
+                                        onActivateScript={handleActivateScript}
+                                        onSaveAsTemplate={openSaveAsTemplate}
+                                        onDuplicateScript={handleDuplicateScript}
+                                        onDeleteScript={handleDeleteScriptRequest}
                                         onConvertToCollection={() => openConvertCollectionDialog(collection)}
-                                    >
-                                        {grouped.result[collection.id].length === 0 && !searchQuery.trim() && (
-                                            <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
-                                        )}
-                                        {grouped.result[collection.id].map(script => (
-                                            <DraggableScript
-                                                key={script.id}
-                                                script={script}
-                                                isActive={activeScriptId === script.id}
-                                                onClick={() => dispatch(setActiveScript(script.id))}
-                                                onSaveAsTemplate={() => openSaveAsTemplate(script)}
-                                                onDuplicate={() => dispatch(duplicateScript(script.id))}
-                                                onDelete={() => handleDeleteScriptRequest(script)}
-                                            />
-                                        ))}
-                                    </DroppableCollection>
+                                        onManagePythonEnv={hasDesktopFolderPicker && collection.folder_path ? () => openPythonEnvironmentDialog(collection) : undefined}
+                                    />
                                 ))}
 
                                 {savedCollections.filter(c => searchQuery.trim() || !c.project_id).length > 0 && (
@@ -1154,26 +1449,19 @@ export const ScriptsSidebar = () => {
                                         key={collection.id}
                                         collection={collection}
                                         isExpanded={!!expandedCollections[collection.id]}
+                                        isDeleting={pendingCollectionDeleteId === collection.id}
                                         toggle={() => toggleCollection(collection.id)}
-                                        onDelete={() => handleDeleteCollection(collection.id)}
+                                        scripts={grouped.result[collection.id] ?? []}
+                                        activeScriptId={activeScriptId}
+                                        onDelete={() => handleDeleteCollection(collection)}
                                         onCreateScript={() => handleCreateScript(collection.id)}
+                                        onActivateScript={handleActivateScript}
+                                        onSaveAsTemplate={openSaveAsTemplate}
+                                        onDuplicateScript={handleDuplicateScript}
+                                        onDeleteScript={handleDeleteScriptRequest}
                                         onConvertToCollection={collection.is_temporary ? () => openConvertCollectionDialog(collection) : undefined}
-                                    >
-                                        {grouped.result[collection.id].length === 0 && !searchQuery.trim() && (
-                                            <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>
-                                        )}
-                                        {grouped.result[collection.id].map(script => (
-                                            <DraggableScript
-                                                key={script.id}
-                                                script={script}
-                                                isActive={activeScriptId === script.id}
-                                                onClick={() => dispatch(setActiveScript(script.id))}
-                                                onSaveAsTemplate={() => openSaveAsTemplate(script)}
-                                                onDuplicate={() => dispatch(duplicateScript(script.id))}
-                                                onDelete={() => handleDeleteScriptRequest(script)}
-                                            />
-                                        ))}
-                                    </DroppableCollection>
+                                        onManagePythonEnv={hasDesktopFolderPicker && collection.folder_path ? () => openPythonEnvironmentDialog(collection) : undefined}
+                                    />
                                 ))}
 
                                 {grouped.unsorted.length > 0 && (!isModeActive || searchQuery.trim()) && (
@@ -1184,9 +1472,9 @@ export const ScriptsSidebar = () => {
                                         key={script.id}
                                         script={script}
                                         isActive={activeScriptId === script.id}
-                                        onClick={() => dispatch(setActiveScript(script.id))}
+                                        onClick={() => handleActivateScript(script.id)}
                                         onSaveAsTemplate={() => openSaveAsTemplate(script)}
-                                        onDuplicate={() => dispatch(duplicateScript(script.id))}
+                                        onDuplicate={() => handleDuplicateScript(script.id)}
                                         onDelete={() => handleDeleteScriptRequest(script)}
                                     />
                                 ))}
@@ -1300,7 +1588,7 @@ export const ScriptsSidebar = () => {
                                 Open Local Folder
                             </DialogTitle>
                             <DialogDescription>
-                                {window.scriptManagerDesktop?.selectFolder
+                                {hasDesktopFolderPicker
                                     ? 'Link a local folder into ScriptManager. You can open it as a temporary workspace or save it as a reusable collection.'
                                     : 'Import a local folder into ScriptManager using the browser picker. You can open it as a temporary workspace or save it as a collection copy.'}
                             </DialogDescription>
@@ -1314,13 +1602,13 @@ export const ScriptsSidebar = () => {
                                         value={folderPath}
                                         onChange={(e) => setFolderPath(e.target.value)}
                                         placeholder="Select a local folder"
-                                        disabled={isOpeningFolder || !window.scriptManagerDesktop?.selectFolder}
+                                        disabled={isOpeningFolder || !hasDesktopFolderPicker}
                                     />
                                     <Button type="button" variant="outline" onClick={selectFolderPath} disabled={isOpeningFolder}>
                                         Browse
                                     </Button>
                                 </div>
-                                {!window.scriptManagerDesktop?.selectFolder && (
+                                {!hasDesktopFolderPicker && (
                                     <p className="text-xs text-slate-500 dark:text-slate-400">
                                         The browser will open a real folder picker and import supported script files from the selected folder.
                                     </p>
@@ -1358,6 +1646,87 @@ export const ScriptsSidebar = () => {
                                 </div>
                             )}
 
+                            {hasDesktopFolderPicker && (
+                                <>
+                                    <div className="flex flex-col gap-2">
+                                        <Label>Primary Runtime</Label>
+                                        <Select value={folderRuntimePreset} onValueChange={(value: NonNullable<Collection['runtime_preset']>) => setFolderRuntimePreset(value)}>
+                                            <SelectTrigger>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {RUNTIME_OPTIONS.map((option) => (
+                                                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+
+                                    <div className="rounded-md border border-slate-200 px-3 py-3 dark:border-slate-700">
+                                        <div className="flex items-start space-x-2">
+                                            <Checkbox
+                                                id="folder-python-tools"
+                                                checked={folderInspection?.hasVenv ? true : folderPythonTools}
+                                                onCheckedChange={(checked) => {
+                                                    if (folderInspection?.hasVenv) return;
+                                                    setFolderPythonTools(Boolean(checked));
+                                                }}
+                                                disabled={Boolean(folderInspection?.hasVenv) || folderRuntimePreset === 'python'}
+                                            />
+                                            <div className="space-y-1">
+                                                <Label htmlFor="folder-python-tools" className="text-sm font-medium">
+                                                    Enable Python tools
+                                                </Label>
+                                                <p className="text-xs text-slate-500 dark:text-slate-400">
+                                                    Use a collection-level <code>.venv</code> inside this workspace for Python scripts.
+                                                </p>
+                                                {folderInspection?.hasVenv && (
+                                                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                                                        Existing <code>.venv</code> detected. ScriptManager will adopt it automatically.
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {!folderInspection?.hasVenv && folderPythonTools && (
+                                            <div className="mt-3 flex items-start space-x-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+                                                <Checkbox
+                                                    id="folder-create-venv"
+                                                    checked={folderCreateVenvIfMissing}
+                                                    onCheckedChange={(checked) => setFolderCreateVenvIfMissing(Boolean(checked))}
+                                                />
+                                                <div className="space-y-1">
+                                                    <Label htmlFor="folder-create-venv" className="text-sm font-medium">
+                                                        Create <code>.venv</code> if missing
+                                                    </Label>
+                                                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                                                        ScriptManager will create a Python virtual environment inside the selected folder after linking it.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {folderInspection && (
+                                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/60">
+                                            <div className="font-medium text-slate-700 dark:text-slate-200">
+                                                Workspace scan
+                                            </div>
+                                            <div className="mt-1 text-slate-500 dark:text-slate-400">
+                                                {folderInspection.hasVenv
+                                                    ? `Python environment ready at ${folderInspection.venvPath}`
+                                                    : 'No .venv detected in this folder yet.'}
+                                            </div>
+                                            {folderInspection.manifests.length > 0 && (
+                                                <div className="mt-1 text-slate-500 dark:text-slate-400">
+                                                    Detected manifests: {folderInspection.manifests.join(', ')}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </>
+                            )}
+
                             {openFolderError && (
                                 <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
                                     {openFolderError}
@@ -1377,6 +1746,84 @@ export const ScriptsSidebar = () => {
                                 ) : (
                                     'Open Folder'
                                 )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+                <Dialog open={!!pythonEnvCollection} onOpenChange={(open) => !open && setPythonEnvCollection(null)}>
+                    <DialogContent className="sm:max-w-lg">
+                        <DialogHeader>
+                            <DialogTitle>Python Environment</DialogTitle>
+                            <DialogDescription>
+                                {pythonEnvCollection
+                                    ? `Manage Python tooling for ${pythonEnvCollection.name}.`
+                                    : 'Manage collection Python tooling.'}
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-2 text-sm">
+                            {isPythonEnvLoading && (
+                                <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    <span>Loading workspace status...</span>
+                                </div>
+                            )}
+                            {pythonEnvError && (
+                                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+                                    {pythonEnvError}
+                                </div>
+                            )}
+                            {pythonEnvStatus && (
+                                <div className="space-y-3">
+                                    <div className="rounded-md border border-slate-200 px-3 py-2 dark:border-slate-700">
+                                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Workspace</div>
+                                        <div className="mt-1 break-all text-xs text-slate-700 dark:text-slate-200">
+                                            {pythonEnvStatus.workspacePath ?? 'No linked workspace path'}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-md border border-slate-200 px-3 py-2 dark:border-slate-700">
+                                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Python Status</div>
+                                        <div className="mt-1 text-sm text-slate-700 dark:text-slate-200">
+                                            {pythonEnvStatus.hasVenv ? 'Virtual environment detected and ready.' : 'No .venv detected yet.'}
+                                        </div>
+                                        {pythonEnvStatus.interpreterPath && (
+                                            <div className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">
+                                                Interpreter: {pythonEnvStatus.interpreterPath}
+                                            </div>
+                                        )}
+                                        {pythonEnvStatus.manifests.length > 0 && (
+                                            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                                Detected manifests: {pythonEnvStatus.manifests.join(', ')}
+                                            </div>
+                                        )}
+                                        {pythonEnvStatus.hasVenv && pythonEnvStatus.manifests.length > 0 && (
+                                            <div className="mt-2 rounded-md bg-blue-50 px-2 py-1 text-[11px] text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                                                Python environment is ready. Install dependencies from the detected manifest when you need them.
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <DialogFooter className="flex-wrap gap-2">
+                            <Button variant="outline" onClick={handleRevealWorkspace} disabled={!pythonEnvStatus?.workspacePath}>
+                                Reveal Folder
+                            </Button>
+                            <Button
+                                variant="secondary"
+                                onClick={() => handleCreateOrRepairPythonEnv(false)}
+                                disabled={isPythonEnvLoading || !pythonEnvCollection?.folder_path}
+                            >
+                                Create Venv
+                            </Button>
+                            <Button
+                                variant="secondary"
+                                onClick={() => handleCreateOrRepairPythonEnv(true)}
+                                disabled={isPythonEnvLoading || !pythonEnvCollection?.folder_path}
+                            >
+                                Recreate Venv
+                            </Button>
+                            <Button variant="ghost" onClick={() => setPythonEnvCollection(null)}>
+                                Close
                             </Button>
                         </DialogFooter>
                     </DialogContent>
@@ -1506,6 +1953,74 @@ export const ScriptsSidebar = () => {
                     </DialogContent>
                 </Dialog>
 
+                <Dialog open={!!collectionToDelete} onOpenChange={(open) => !isDeletingCollectionDialog && !open && setCollectionToDelete(null)}>
+                    <DialogContent className="overflow-hidden border-white/10 bg-[#0b1020] p-0 text-slate-100 shadow-2xl sm:max-w-lg">
+                        <div className="border-b border-white/10 px-6 py-5">
+                            <DialogHeader className="space-y-3 text-left">
+                                <div className="flex items-start gap-3">
+                                    <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-2xl bg-red-500/10 text-red-300">
+                                        <AlertTriangle className="h-5 w-5" />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <DialogTitle className="text-lg text-white">Delete Collection</DialogTitle>
+                                        <DialogDescription className="text-sm text-slate-300">
+                                            {collectionToDelete?.name}
+                                        </DialogDescription>
+                                    </div>
+                                </div>
+                            </DialogHeader>
+                        </div>
+
+                        <div className="space-y-4 px-6 py-5">
+                            <p className="text-sm leading-6 text-slate-300">
+                                {isDeleteTemporaryWorkspace
+                                    ? 'This temporary workspace will be removed from ScriptManager along with its imported script entries.'
+                                    : hasCollectionFolder
+                                        ? 'This collection will be deleted. Managed workspace files will be removed from disk, while linked external folders stay untouched.'
+                                        : 'This collection will be deleted and its scripts will move back to Unsorted.'}
+                            </p>
+
+                            <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
+                                <div className="font-medium text-slate-100">This action cannot be automatically undone.</div>
+                                {isDeletingCollectionDialog && (
+                                    <div className="mt-3 flex items-center gap-2 text-slate-400">
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span>{hasCollectionFolder ? 'Removing local workspace...' : 'Deleting collection...'}</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <DialogFooter className="border-t border-white/10 px-6 py-4 sm:justify-end">
+                            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+                                <Button
+                                    variant="outline"
+                                    className="border-white/10 bg-transparent text-slate-200 hover:bg-white/5 hover:text-white"
+                                    onClick={() => setCollectionToDelete(null)}
+                                    disabled={isDeletingCollectionDialog}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    variant="destructive"
+                                    className="min-w-36 bg-red-500 text-white hover:bg-red-400"
+                                    onClick={confirmDeleteCollection}
+                                    disabled={isDeletingCollectionDialog}
+                                >
+                                    {isDeletingCollectionDialog ? (
+                                        <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            Deleting...
+                                        </>
+                                    ) : (
+                                        isDeleteTemporaryWorkspace ? 'Remove Workspace' : 'Delete Collection'
+                                    )}
+                                </Button>
+                            </div>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
                 {/* Delete Script Confirmation Dialog */}
                 <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                     <DialogContent className="sm:max-w-md">
@@ -1564,3 +2079,7 @@ export const ScriptsSidebar = () => {
         </>
     );
 };
+
+ScriptsSidebarComponent.displayName = 'ScriptsSidebar'
+
+export const ScriptsSidebar = memo(ScriptsSidebarComponent);

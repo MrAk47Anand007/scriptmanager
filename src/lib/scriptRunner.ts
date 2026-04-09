@@ -3,12 +3,16 @@ import { EventEmitter } from 'events'
 import { prisma } from '@/lib/db'
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 import { assertSafeStoredFilename } from '@/lib/executionSafety'
 
 // Module-level map: buildId -> EventEmitter (Node.js equivalent of Python's _output_queues dict)
 const buildEmitters = new Map<string, EventEmitter>()
 
 const DEFAULT_TIMEOUT_MS = 30_000 // 30 seconds
+const SETTINGS_CACHE_TTL_MS = 30_000
+let cachedScriptsDir: { value: string; expiresAt: number } | null = null
+let cachedDefaultTimeoutMs: { value: number; expiresAt: number } | null = null
 
 interface ScriptInfo {
   id: string
@@ -20,18 +24,43 @@ interface ScriptInfo {
 }
 
 async function getScriptsDir(): Promise<string> {
+  if (cachedScriptsDir && cachedScriptsDir.expiresAt > Date.now()) {
+    return cachedScriptsDir.value
+  }
+
   const setting = await prisma.setting.findUnique({
     where: { key: 'script_storage_path' }
   })
   const dir = setting?.value ?? process.env.SCRIPTS_DIR ?? path.join(process.cwd(), 'user_scripts')
+  const resolvedDir = path.isAbsolute(dir) ? dir : path.join(process.cwd(), dir)
+  cachedScriptsDir = {
+    value: resolvedDir,
+    expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS,
+  }
+  return resolvedDir
+}
+
+function getBuildsDir(): string {
+  const defaultDir = process.cwd().includes('OneDrive')
+    ? path.join(os.tmpdir(), 'ScriptManager', 'builds')
+    : path.join(process.cwd(), 'builds')
+  const dir = process.env.BUILDS_DIR ?? defaultDir
   if (!path.isAbsolute(dir)) return path.join(process.cwd(), dir)
   return dir
 }
 
-function getBuildsDir(): string {
-  const dir = process.env.BUILDS_DIR ?? path.join(process.cwd(), 'builds')
-  if (!path.isAbsolute(dir)) return path.join(process.cwd(), dir)
-  return dir
+async function getDefaultTimeoutMs(): Promise<number> {
+  if (cachedDefaultTimeoutMs && cachedDefaultTimeoutMs.expiresAt > Date.now()) {
+    return cachedDefaultTimeoutMs.value
+  }
+
+  const globalTimeoutSetting = await prisma.setting.findUnique({ where: { key: 'execution_timeout_ms' } })
+  const value = globalTimeoutSetting?.value ? parseInt(globalTimeoutSetting.value, 10) : DEFAULT_TIMEOUT_MS
+  cachedDefaultTimeoutMs = {
+    value,
+    expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS,
+  }
+  return value
 }
 
 function resolveInterpreter(language: string, interpreter: string | null | undefined, scriptPath: string): [string, string[]] {
@@ -64,24 +93,28 @@ export async function executeScriptAsync(
   const emitter = ensureBuildEmitter(buildId)
 
   const buildsDir = getBuildsDir()
-  const scriptPath = await getScriptResolvedFilePath(script)
   const buildScriptDir = path.join(buildsDir, script.filename.replace(/[^a-zA-Z0-9_.-]/g, '_'))
   const logFile = path.join(buildScriptDir, `${buildId}.log`)
 
-  // ... (rest of the function remains mostly the same, ensuring async correctness)
-  fs.mkdirSync(buildScriptDir, { recursive: true })
-
-  const [cmd, args] = resolveInterpreter(script.language, script.interpreter, scriptPath)
-  console.log(`[ScriptRunner] Executing: ${cmd} ${args.join(' ')} (Language: ${script.language})`)
-
   try {
-    await prisma.build.update({
-      where: { id: buildId },
-      data: { status: 'running', startedAt: new Date(), logFile }
-    })
+    const [scriptPath, scriptEnvVarsFromDB, defaultTimeoutMs] = await Promise.all([
+      getScriptResolvedFilePath(script),
+      prisma.scriptEnvVar.findMany({ where: { scriptId: script.id } }),
+      script.timeoutMs ? Promise.resolve(script.timeoutMs) : getDefaultTimeoutMs(),
+      fs.promises.mkdir(buildScriptDir, { recursive: true }),
+    ])
+
+    const [cmd, args] = resolveInterpreter(script.language, script.interpreter, scriptPath)
+    console.log(`[ScriptRunner] Executing: ${cmd} ${args.join(' ')} (Language: ${script.language})`)
 
     const logStream = fs.createWriteStream(logFile, { encoding: 'utf8' })
     logStream.setMaxListeners(20); // Suppress warnings if we attach multiple listeners (though we shouldn't be)
+
+    const startedAt = new Date()
+    const buildUpdatePromise = prisma.build.update({
+      where: { id: buildId },
+      data: { status: 'running', startedAt, logFile }
+    })
 
     if (!fs.existsSync(scriptPath)) {
       const errMsg = `Error: Script file not found: ${scriptPath}\n`
@@ -108,25 +141,21 @@ export async function executeScriptAsync(
     }
 
     // Load per-script env vars from DB
-    const scriptEnvVarsFromDB = await prisma.scriptEnvVar.findMany({
-      where: { scriptId: script.id },
-    })
     const scriptEnv: Record<string, string> = {}
     for (const ev of scriptEnvVarsFromDB) {
       scriptEnv[ev.key] = ev.value
     }
 
     // Determine timeout: per-script override → global setting → hardcoded default
-    let timeoutMs = script.timeoutMs ?? null
-    if (!timeoutMs) {
-      const globalTimeoutSetting = await prisma.setting.findUnique({ where: { key: 'execution_timeout_ms' } })
-      timeoutMs = globalTimeoutSetting?.value ? parseInt(globalTimeoutSetting.value, 10) : DEFAULT_TIMEOUT_MS
-    }
+    const timeoutMs = script.timeoutMs ?? defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS
 
     const child = spawn(cmd, args, {
       // Precedence: process.env < script env vars < param values (most specific wins)
       env: { ...process.env, PYTHONUNBUFFERED: '1', ...scriptEnv, ...paramEnv },
       stdio: ['ignore', 'pipe', 'pipe']
+    })
+    buildUpdatePromise.catch((error) => {
+      console.error('[ScriptRunner] Failed to mark build as running:', error)
     })
 
     let timedOut = false
@@ -229,6 +258,11 @@ export async function getScriptFilePath(filename: string): Promise<string> {
 export async function getScriptResolvedFilePath(script: { filename: string; sourcePath?: string | null }): Promise<string> {
   if (script.sourcePath) {
     return path.resolve(script.sourcePath)
+  }
+
+  const collection = (script as { collection?: { folderPath?: string | null } | null }).collection
+  if (collection?.folderPath) {
+    return path.resolve(collection.folderPath, path.basename(script.filename))
   }
 
   return getScriptFilePath(script.filename)

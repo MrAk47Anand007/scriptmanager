@@ -1,12 +1,24 @@
 'use client'
 
 import React, { useState, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchVersions, fetchVersionContent } from '@/features/scripts/scriptsSlice'
 import type { ScriptVersionMeta } from '@/features/scripts/scriptsSlice'
 import { Button } from '@/components/ui/button'
 import { Loader2, History, ChevronDown, ChevronRight, RotateCcw, Eye } from 'lucide-react'
-import { DiffEditor } from '@monaco-editor/react'
+
+const DiffEditor = dynamic(
+    () => import('@monaco-editor/react').then((mod) => mod.DiffEditor),
+    {
+        ssr: false,
+        loading: () => (
+            <div className="h-64 flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+                <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+            </div>
+        ),
+    }
+)
 
 interface VersionHistoryPanelProps {
     scriptId: string

@@ -1,6 +1,19 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
 import axios from 'axios'
 import type { ScriptParameter } from '@/lib/types'
+import {
+    createDesktopCollection,
+    createDesktopScript,
+    deleteDesktopCollection,
+    deleteDesktopScript,
+    duplicateDesktopScript,
+    hasDesktopScriptsRuntime,
+    listDesktopCollections,
+    listDesktopScripts,
+    openDesktopScriptsFolder,
+    readDesktopScript,
+    saveDesktopScript,
+} from '@/lib/scriptsRuntimeClient'
 
 export interface Tag {
     id: string
@@ -70,6 +83,10 @@ export interface Collection {
     project_id?: string | null;
     folder_path?: string | null;
     is_temporary?: boolean;
+    runtime_preset?: 'general' | 'python' | 'node' | 'shell' | 'powershell';
+    python_toolchain_enabled?: boolean;
+    python_venv_path?: string | null;
+    python_interpreter_path?: string | null;
     created_at: string;
 }
 
@@ -143,12 +160,22 @@ const initialState: ScriptsState = {
     autoSaveEnabled: false
 }
 
+function isDesktopScriptsRuntimeAvailable(): boolean {
+    return typeof window !== 'undefined' && hasDesktopScriptsRuntime()
+}
+
 export const fetchScripts = createAsyncThunk('scripts/fetchScripts', async () => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopScripts()
+    }
     const response = await axios.get('/api/scripts')
     return response.data
 })
 
 export const fetchScriptContent = createAsyncThunk('scripts/fetchScriptContent', async (id: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return readDesktopScript(id)
+    }
     const response = await axios.get(`/api/scripts/${id}`)
     return response.data
 })
@@ -171,6 +198,20 @@ export const createScript = createAsyncThunk('scripts/createScript', async (payl
     const interpreter = typeof payload === 'string' ? undefined : payload.interpreter
     const parameters = typeof payload === 'string' ? undefined : payload.parameters
     const collectionId = typeof payload === 'string' ? undefined : payload.collectionId
+
+    if (isDesktopScriptsRuntimeAvailable() && !syncToGist) {
+        return createDesktopScript({
+            name,
+            description,
+            syncToGist,
+            content: content ?? '# New script\nprint("Hello World")',
+            language,
+            interpreter,
+            parameters,
+            collectionId,
+        })
+    }
+
     const response = await axios.post('/api/scripts', {
         name,
         description,
@@ -186,19 +227,31 @@ export const createScript = createAsyncThunk('scripts/createScript', async (payl
 
 export const openScriptsFolder = createAsyncThunk(
     'scripts/openScriptsFolder',
-    async (payload: { folderPath: string; mode: 'temporary' | 'collection'; collectionName?: string }, { dispatch }) => {
-        const response = await axios.post('/api/scripts/open-folder', {
-            folderPath: payload.folderPath,
-            mode: payload.mode,
-            collectionName: payload.collectionName,
-        })
+    async (payload: {
+        folderPath: string
+        mode: 'temporary' | 'collection'
+        collectionName?: string
+        runtimePreset?: Collection['runtime_preset']
+        pythonToolchainEnabled?: boolean
+        createVenvIfMissing?: boolean
+    }, { dispatch }) => {
+        const response = isDesktopScriptsRuntimeAvailable()
+            ? await openDesktopScriptsFolder(payload)
+            : (await axios.post('/api/scripts/open-folder', {
+                folderPath: payload.folderPath,
+                mode: payload.mode,
+                collectionName: payload.collectionName,
+                runtime_preset: payload.runtimePreset,
+                python_toolchain_enabled: payload.pythonToolchainEnabled,
+                create_venv_if_missing: payload.createVenvIfMissing,
+            })).data
 
         await Promise.all([
             dispatch(fetchCollections()),
             dispatch(fetchScripts()),
         ])
 
-        return response.data as {
+        return response as {
             collection: Collection
             scripts: Array<{ id: string; name: string }>
             imported_count: number
@@ -261,17 +314,24 @@ export const deleteTemplate = createAsyncThunk('scripts/deleteTemplate', async (
 })
 
 export const deleteScript = createAsyncThunk('scripts/deleteScript', async ({ id, deleteGist }: { id: string; deleteGist: boolean }) => {
+    if (isDesktopScriptsRuntimeAvailable() && !deleteGist) {
+        await deleteDesktopScript(id)
+        return id
+    }
     await axios.delete(`/api/scripts/${id}?deleteGist=${deleteGist}`)
     return id
 })
 
 export const saveScript = createAsyncThunk('scripts/saveScript', async (data: { id: string; name: string; content: string; sync_to_gist?: boolean; language?: string; interpreter?: string | null; parameters?: ScriptParameter[]; timeout_ms?: number | null; skipGist?: boolean }) => {
+    if (isDesktopScriptsRuntimeAvailable() && (!data.sync_to_gist || data.skipGist)) {
+        return saveDesktopScript(data)
+    }
     const response = await axios.post('/api/scripts', data)
     return response.data
 })
 
-export const runScript = createAsyncThunk('scripts/runScript', async ({ id, paramValues }: { id: string; paramValues?: Record<string, string> }) => {
-    const response = await axios.post(`/api/scripts/${id}/run`, { paramValues })
+export const runScript = createAsyncThunk('scripts/runScript', async ({ id, paramValues, buildId }: { id: string; paramValues?: Record<string, string>; buildId?: string }) => {
+    const response = await axios.post(`/api/scripts/${id}/run`, { paramValues, buildId })
     return response.data
 })
 
@@ -333,6 +393,9 @@ export const deleteGist = createAsyncThunk('scripts/deleteGist', async (scriptId
 // --- Duplication Thunk ---
 
 export const duplicateScript = createAsyncThunk('scripts/duplicateScript', async (id: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return duplicateDesktopScript(id) as Promise<Script>
+    }
     const response = await axios.post(`/api/scripts/${id}/duplicate`)
     return response.data as Script
 })
@@ -340,27 +403,59 @@ export const duplicateScript = createAsyncThunk('scripts/duplicateScript', async
 // --- Collection Thunks ---
 
 export const fetchCollections = createAsyncThunk('scripts/fetchCollections', async () => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopCollections()
+    }
     const response = await axios.get('/api/collections')
     return response.data
 })
 
-export const createCollection = createAsyncThunk('scripts/createCollection', async (payload: { name: string, projectId?: string | null }) => {
-    const response = await axios.post('/api/collections', { name: payload.name, project_id: payload.projectId })
+export const createCollection = createAsyncThunk('scripts/createCollection', async (payload: {
+    name: string
+    projectId?: string | null
+    runtimePreset?: Collection['runtime_preset']
+    pythonToolchainEnabled?: boolean
+}) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return createDesktopCollection({
+            name: payload.name,
+            projectId: payload.projectId,
+            runtimePreset: payload.runtimePreset,
+            pythonToolchainEnabled: payload.pythonToolchainEnabled,
+        })
+    }
+    const response = await axios.post('/api/collections', {
+        name: payload.name,
+        project_id: payload.projectId,
+        runtime_preset: payload.runtimePreset,
+        python_toolchain_enabled: payload.pythonToolchainEnabled,
+    })
     return response.data
 })
 
 export const deleteCollection = createAsyncThunk('scripts/deleteCollection', async (id: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return deleteDesktopCollection(id, false)
+    }
     await axios.delete(`/api/collections/${id}`)
-    return id
+    return {
+        id,
+        deletedScriptIds: [] as string[],
+        deletedFolderPath: null as string | null,
+    }
 })
 
 export const removeTemporaryCollection = createAsyncThunk(
     'scripts/removeTemporaryCollection',
     async (id: string) => {
+        if (isDesktopScriptsRuntimeAvailable()) {
+            return deleteDesktopCollection(id, true)
+        }
         const response = await axios.delete(`/api/collections/${id}?hardDelete=true`)
         return {
             id,
             deletedScriptIds: (response.data.deleted_script_ids ?? []) as string[],
+            deletedFolderPath: null as string | null,
         }
     }
 )
@@ -459,6 +554,9 @@ const scriptsSlice = createSlice({
         clearBuildOutput(state) {
             state.currentBuildOutput = ''
         },
+        setRunStatus(state, action: PayloadAction<'idle' | 'running'>) {
+            state.runStatus = action.payload
+        },
         setAutoSaveEnabled: (state, action: PayloadAction<boolean>) => {
             state.autoSaveEnabled = action.payload
         },
@@ -506,9 +604,15 @@ const scriptsSlice = createSlice({
                 state.runStatus = 'idle'
             })
             .addCase(createScript.fulfilled, (state, action) => {
+                const requestedContent =
+                    typeof action.meta.arg === 'string'
+                        ? undefined
+                        : action.meta.arg.content
+                const nextContent = requestedContent ?? '# New script\nprint("Hello World")'
                 state.items.push(action.payload)
                 state.activeScriptId = action.payload.id
-                state.activeScriptContent = '# New script\nprint("Hello World")'
+                state.activeScriptContent = nextContent
+                state.items[state.items.length - 1].content = nextContent
             })
             .addCase(saveScript.pending, (state) => {
                 state.saveStatus = 'saving'
@@ -566,12 +670,20 @@ const scriptsSlice = createSlice({
                 state.collections.push(action.payload)
             })
             .addCase(deleteCollection.fulfilled, (state, action) => {
-                state.collections = state.collections.filter(c => c.id !== action.payload)
-                state.items.forEach(script => {
-                    if (script.collection_id === action.payload) {
-                        script.collection_id = null
+                state.collections = state.collections.filter(c => c.id !== action.payload.id)
+                if (action.payload.deletedScriptIds.length > 0) {
+                    state.items = state.items.filter(script => !action.payload.deletedScriptIds.includes(script.id))
+                    if (state.activeScriptId && action.payload.deletedScriptIds.includes(state.activeScriptId)) {
+                        state.activeScriptId = null
+                        state.activeScriptContent = ''
                     }
-                })
+                } else {
+                    state.items.forEach(script => {
+                        if (script.collection_id === action.payload.id) {
+                            script.collection_id = null
+                        }
+                    })
+                }
             })
             .addCase(removeTemporaryCollection.fulfilled, (state, action) => {
                 state.collections = state.collections.filter(c => c.id !== action.payload.id)
@@ -736,6 +848,7 @@ export const {
     updateActiveScriptContent,
     appendBuildOutput,
     clearBuildOutput,
+    setRunStatus,
     setAutoSaveEnabled
 } = scriptsSlice.actions
 export default scriptsSlice.reducer

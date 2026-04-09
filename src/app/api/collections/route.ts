@@ -15,12 +15,26 @@ export async function GET() {
     project_id: c.projectId ?? null,
     folder_path: c.folderPath ?? null,
     is_temporary: c.isTemporary,
+    runtime_preset: c.runtimePreset,
+    python_toolchain_enabled: c.pythonToolchainEnabled,
+    python_venv_path: c.pythonVenvPath ?? null,
+    python_interpreter_path: c.pythonInterpreterPath ?? null,
     created_at: c.createdAt.toISOString()
   })))
 }
 
 export async function POST(req: Request) {
-  const { name, description, project_id, folder_path, is_temporary } = await req.json()
+  const {
+    name,
+    description,
+    project_id,
+    folder_path,
+    is_temporary,
+    runtime_preset,
+    python_toolchain_enabled,
+    python_venv_path,
+    python_interpreter_path,
+  } = await req.json()
 
   if (!name?.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
@@ -33,6 +47,10 @@ export async function POST(req: Request) {
       projectId: project_id ?? null,
       folderPath: folder_path ?? null,
       isTemporary: !!is_temporary,
+      runtimePreset: runtime_preset ?? 'general',
+      pythonToolchainEnabled: !!python_toolchain_enabled,
+      pythonVenvPath: python_venv_path ?? null,
+      pythonInterpreterPath: python_interpreter_path ?? null,
     }
   })
 
@@ -44,6 +62,10 @@ export async function POST(req: Request) {
     project_id: collection.projectId,
     folder_path: collection.folderPath,
     is_temporary: collection.isTemporary,
+    runtime_preset: collection.runtimePreset,
+    python_toolchain_enabled: collection.pythonToolchainEnabled,
+    python_venv_path: collection.pythonVenvPath,
+    python_interpreter_path: collection.pythonInterpreterPath,
     created_at: collection.createdAt.toISOString()
   })
 }

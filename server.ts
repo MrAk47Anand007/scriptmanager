@@ -42,6 +42,13 @@ app.prepare().then(async () => {
     console.error('[Server] Failed to load socket service:', err)
   }
 
+  try {
+    const { initBuildWebSocketServer } = await import('./src/lib/buildSocketService')
+    initBuildWebSocketServer(server)
+  } catch (err) {
+    console.error('[Server] Failed to load build socket service:', err)
+  }
+
   server.listen(port, () => {
     console.log(`\n✓ ScriptManager is running at http://${hostname}:${port}`)
     console.log(`  Scripts dir: ${process.env.SCRIPTS_DIR ?? './user_scripts'}`)

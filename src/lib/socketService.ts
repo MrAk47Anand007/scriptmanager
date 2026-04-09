@@ -6,10 +6,135 @@ import { isAuthenticatedCookieHeader } from '@/lib/session';
 
 interface TerminalSession {
     process: pty.IPty;
-    socket: WebSocket;
+    sockets: Set<WebSocket>;
+    idleTimer: ReturnType<typeof setTimeout> | null;
 }
 
-const sessions = new Map<WebSocket, TerminalSession>();
+const sessionsByKey = new Map<string, TerminalSession>();
+const socketToSessionKey = new Map<WebSocket, string>();
+const TERMINAL_IDLE_TTL_MS = 5 * 60 * 1000;
+
+function getSessionKey(cookieHeader?: string): string | null {
+    if (!cookieHeader) return null;
+    const match = cookieHeader.match(/(?:^|;\s*)sm_session=([^;]+)/);
+    return match?.[1] ?? null;
+}
+
+function createPtyProcess() {
+    const isWindows = os.platform() === 'win32';
+    const env = {
+        ...(process.env as { [key: string]: string }),
+        TERM: 'xterm-256color',
+    };
+
+    const candidates = isWindows
+        ? [
+            { shell: 'pwsh.exe', args: ['-NoLogo'] },
+            { shell: 'powershell.exe', args: ['-NoLogo'] },
+            { shell: 'cmd.exe', args: [] },
+        ]
+        : [
+            { shell: process.env.SHELL || 'bash', args: [] },
+            { shell: 'bash', args: [] },
+            { shell: 'sh', args: [] },
+        ];
+
+    let lastError: unknown = null;
+
+    for (const candidate of candidates) {
+        try {
+            return pty.spawn(candidate.shell, candidate.args, {
+                name: 'xterm-color',
+                cols: 80,
+                rows: 24,
+                cwd: process.cwd(),
+                env,
+                useConpty: isWindows,
+            });
+        } catch (err) {
+            lastError = err;
+            console.warn(`[Terminal] Failed to spawn ${candidate.shell}, trying fallback:`, err);
+        }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('Unable to start terminal shell');
+}
+
+function destroySession(sessionKey: string) {
+    const session = sessionsByKey.get(sessionKey);
+    if (!session) return;
+
+    session.idleTimer && clearTimeout(session.idleTimer);
+    session.idleTimer = null;
+    session.process.kill();
+    sessionsByKey.delete(sessionKey);
+}
+
+function scheduleSessionCleanup(sessionKey: string) {
+    const session = sessionsByKey.get(sessionKey);
+    if (!session || session.sockets.size > 0 || session.idleTimer) return;
+
+    session.idleTimer = setTimeout(() => {
+        const latest = sessionsByKey.get(sessionKey);
+        if (!latest || latest.sockets.size > 0) return;
+        console.log('[Terminal] Closing idle terminal session');
+        destroySession(sessionKey);
+    }, TERMINAL_IDLE_TTL_MS);
+}
+
+function ensureTerminalSession(sessionKey: string): TerminalSession {
+    const existing = sessionsByKey.get(sessionKey);
+    if (existing) {
+        if (existing.idleTimer) {
+            clearTimeout(existing.idleTimer);
+            existing.idleTimer = null;
+        }
+        return existing;
+    }
+
+    const ptyProcess = createPtyProcess();
+    const session: TerminalSession = {
+        process: ptyProcess,
+        sockets: new Set<WebSocket>(),
+        idleTimer: null,
+    };
+
+    ptyProcess.onData((data) => {
+        for (const socket of session.sockets) {
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(data);
+            }
+        }
+    });
+
+    ptyProcess.onExit(() => {
+        console.warn('[Terminal] PTY session exited');
+        for (const socket of session.sockets) {
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.close();
+            }
+        }
+        sessionsByKey.delete(sessionKey);
+    });
+
+    sessionsByKey.set(sessionKey, session);
+    console.log('[Terminal] Started warm terminal session');
+    return session;
+}
+
+export function warmTerminalSession(cookieHeader?: string): boolean {
+    if (!isAuthenticatedCookieHeader(cookieHeader)) {
+        return false;
+    }
+
+    const sessionKey = getSessionKey(cookieHeader);
+    if (!sessionKey) {
+        return false;
+    }
+
+    ensureTerminalSession(sessionKey);
+    return true;
+}
 
 export const initWebSocketServer = (server: Server) => {
     const wss = new WebSocketServer({ server, path: '/api/terminal' });
@@ -32,49 +157,17 @@ export const initWebSocketServer = (server: Server) => {
             return;
         }
 
-        console.log('[Terminal] Client connected');
-
-        const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
-
-        let ptyProcess: pty.IPty;
-        try {
-            ptyProcess = pty.spawn(shell, [], {
-                name: 'xterm-color',
-                cols: 80,
-                rows: 24,
-                cwd: process.cwd(),
-                env: process.env as { [key: string]: string },
-                // On Windows inside Electron there is no console window so ConPTY's
-                // AttachConsole call fails. Fall back to the WinPTY backend instead.
-                useConpty: false,
-            });
-        } catch (err) {
-            console.error('[Terminal] pty.spawn failed, retrying without ConPTY:', err);
-            try {
-                ptyProcess = pty.spawn(shell, [], {
-                    name: 'xterm-color',
-                    cols: 80,
-                    rows: 24,
-                    cwd: process.cwd(),
-                    env: process.env as { [key: string]: string },
-                    useConpty: false,
-                });
-            } catch (err2) {
-                console.error('[Terminal] pty.spawn failed entirely:', err2);
-                ws.send('\r\nFailed to start terminal: ' + String(err2) + '\r\n');
-                ws.close();
-                return;
-            }
+        const sessionKey = getSessionKey(req.headers.cookie);
+        if (!sessionKey) {
+            ws.close(1008, 'Unauthorized');
+            return;
         }
 
-        sessions.set(ws, { process: ptyProcess, socket: ws });
-
-        // Pipe pty output to websocket
-        ptyProcess.onData((data) => {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send(data);
-            }
-        });
+        console.log('[Terminal] Client connected');
+        const session = ensureTerminalSession(sessionKey);
+        session.sockets.add(ws);
+        socketToSessionKey.set(ws, sessionKey);
+        ws.send('\r\n[ScriptManager] Reusing warm terminal session\r\n');
 
         // Pipe websocket input to pty
         ws.on('message', (message) => {
@@ -84,18 +177,19 @@ export const initWebSocketServer = (server: Server) => {
                 const parts = msg.slice(8).split(',');
                 const cols = parseInt(parts[0]);
                 const rows = parseInt(parts[1]);
-                if (!isNaN(cols) && !isNaN(rows)) {
-                    ptyProcess.resize(cols, rows);
+                if (!isNaN(cols) && !isNaN(rows) && cols > 0 && rows > 0) {
+                    session.process.resize(cols, rows);
                 }
             } else {
-                ptyProcess.write(msg);
+                session.process.write(msg);
             }
         });
 
         ws.on('close', () => {
             console.log('[Terminal] Client disconnected');
-            ptyProcess.kill();
-            sessions.delete(ws);
+            session.sockets.delete(ws);
+            socketToSessionKey.delete(ws);
+            scheduleSessionCleanup(sessionKey);
         });
     });
 };
