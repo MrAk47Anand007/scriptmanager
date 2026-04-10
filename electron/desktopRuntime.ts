@@ -6,6 +6,41 @@ import crypto from 'crypto'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { getDesktopWorkspaceLayout, ensureDesktopWorkspaceLayout, sanitizeWorkspaceName } from '../src/lib/workspaceLayout'
+import {
+  clearApiHistory as clearDesktopApiHistory,
+  deleteApiCollection as deleteDesktopApiCollection,
+  deleteApiEnvironment as deleteDesktopApiEnvironment,
+  deleteApiRequest as deleteDesktopApiRequest,
+  listApiCollectionRuns as listDesktopApiCollectionRuns,
+  listApiCollections as listDesktopApiCollections,
+  listApiEnvironments as listDesktopApiEnvironments,
+  listApiHistory as listDesktopApiHistory,
+  listApiRequests as listDesktopApiRequests,
+  readApiGlobals as readDesktopApiGlobals,
+  runApiCollection as runDesktopApiCollection,
+  saveApiCollection as saveDesktopApiCollection,
+  saveApiEnvironment as saveDesktopApiEnvironment,
+  saveApiGlobals as saveDesktopApiGlobals,
+  saveApiRequest as saveDesktopApiRequest,
+  sendApiRequest as sendDesktopApiRequest,
+} from './apiRuntime'
+import {
+  approveExecution as approveDesktopRemoteExecution,
+  assignCollectionToProject as assignDesktopCollectionToProject,
+  deleteProject as deleteDesktopProject,
+  deleteServerProfile as deleteDesktopServerProfile,
+  getRemoteExecEmitter,
+  listAuditLog as listDesktopAuditLog,
+  listProjects as listDesktopProjects,
+  listServerProfiles as listDesktopServerProfiles,
+  rejectExecution as rejectDesktopRemoteExecution,
+  saveProject as saveDesktopProject,
+  saveServerProfile as saveDesktopServerProfile,
+  startRemoteExec as startDesktopRemoteExecution,
+  testConnection as testDesktopConnection,
+  transferScript as transferDesktopRemoteScript,
+} from './opsRuntime'
 
 type TerminalEvent =
   | { type: 'connected' }
@@ -413,8 +448,7 @@ function listScriptFiles(folderPath: string): string[] {
 }
 
 function sanitizeCollectionFolderName(name: string): string {
-  const sanitized = name.trim().replace(SAFE_FILENAME_CHARS, '_').replace(/_+/g, '_').replace(/^[_\.]+|[_\.]+$/g, '')
-  return sanitized || 'collection'
+  return sanitizeWorkspaceName(name, 'collection')
 }
 
 function toAbsolutePath(targetPath: string): string {
@@ -428,7 +462,7 @@ async function getWorkspaceRoot(): Promise<string> {
 
   const setting = await prisma.setting.findUnique({ where: { key: 'script_storage_path' } })
   const configured = setting?.value?.trim() || process.env.SCRIPTS_DIR || path.join(process.cwd(), 'user_scripts')
-  const resolved = toAbsolutePath(configured)
+  const resolved = getDesktopWorkspaceLayout(toAbsolutePath(configured)).scriptsRoot
   cachedWorkspaceRoot = {
     value: resolved,
     expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS,
@@ -538,10 +572,7 @@ async function isManagedCollectionWorkspace(folderPath: string | null | undefine
 
 function getScriptsDir(): string {
   const configured = process.env.SCRIPTS_DIR
-  if (configured) {
-    return path.isAbsolute(configured) ? configured : path.join(process.cwd(), configured)
-  }
-  return path.join(process.cwd(), 'user_scripts')
+  return getDesktopWorkspaceLayout(configured ? (path.isAbsolute(configured) ? configured : path.join(process.cwd(), configured)) : path.join(process.cwd(), 'user_scripts')).scriptsRoot
 }
 
 function getBuildsDir(): string {
@@ -577,6 +608,15 @@ function sendTerminalEvent(webContents: WebContents, payload: TerminalEvent) {
 function sendBuildEvent(webContents: WebContents, payload: BuildEvent) {
   if (!webContents.isDestroyed()) {
     webContents.send('scriptmanager:runtime:build', payload)
+  }
+}
+
+function sendRemoteExecEvent(
+  webContents: WebContents,
+  payload: { type: 'line'; remoteExecId: string; line: string } | { type: 'done'; remoteExecId: string; exitCode: number } | { type: 'error'; remoteExecId: string; message: string }
+) {
+  if (!webContents.isDestroyed()) {
+    webContents.send('scriptmanager:runtime:remote-exec', payload)
   }
 }
 
@@ -704,7 +744,7 @@ function resolveScriptPath(script: {
   if (script.collection?.folderPath) {
     return path.resolve(script.collection.folderPath, path.basename(script.filename))
   }
-  return path.resolve(process.env.SCRIPTS_DIR ?? path.join(process.cwd(), 'user_scripts'), path.basename(script.filename))
+  return path.resolve(getScriptsDir(), path.basename(script.filename))
 }
 
 async function getCollectionRecord(collectionId: string) {
@@ -891,8 +931,13 @@ async function getTimeoutMs(scriptTimeoutMs: number | null | undefined): Promise
 }
 
 async function ensureScriptsDirExists() {
-  fs.mkdirSync(await getWorkspaceRoot(), { recursive: true })
+  ensureDesktopWorkspaceLayout(getDesktopWorkspaceLayout(await getConfiguredWorkspaceRootValue()))
   fs.mkdirSync(getBuildsDir(), { recursive: true })
+}
+
+async function getConfiguredWorkspaceRootValue() {
+  const setting = await prisma.setting.findUnique({ where: { key: 'script_storage_path' } })
+  return toAbsolutePath(setting?.value?.trim() || process.env.SCRIPTS_DIR || path.join(process.cwd(), 'user_scripts'))
 }
 
 async function listCollections(): Promise<CollectionDto[]> {
@@ -1577,6 +1622,25 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
   return { buildId, status: 'started' as const }
 }
 
+function forwardRemoteExecutionToWindow(window: BrowserWindow, remoteExecId: string) {
+  const emitter = getRemoteExecEmitter(remoteExecId)
+  if (!emitter) {
+    return
+  }
+
+  const onLine = (line: string) => {
+    sendRemoteExecEvent(window.webContents, { type: 'line', remoteExecId, line })
+  }
+  const onDone = (exitCode: number) => {
+    sendRemoteExecEvent(window.webContents, { type: 'done', remoteExecId, exitCode })
+    emitter.removeListener('line', onLine)
+    emitter.removeListener('done', onDone)
+  }
+
+  emitter.on('line', onLine)
+  emitter.once('done', onDone)
+}
+
 function destroyWindowRuntime(windowId: number) {
   const runtime = windowRuntimes.get(windowId)
   if (!runtime) return
@@ -1661,6 +1725,130 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:open-folder', async (_event, payload: OpenFolderPayload) => {
     return openLocalFolder(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-api-collections', async () => {
+    return listDesktopApiCollections()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-api-collection', async (_event, payload: { id?: string; name: string; description?: string; variables?: string }) => {
+    return saveDesktopApiCollection(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:delete-api-collection', async (_event, id: string) => {
+    return deleteDesktopApiCollection(id)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-api-requests', async (_event, collectionId: string | null) => {
+    return listDesktopApiRequests(collectionId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-api-request', async (_event, payload: Record<string, unknown>) => {
+    return saveDesktopApiRequest(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:delete-api-request', async (_event, id: string) => {
+    return deleteDesktopApiRequest(id)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-api-environments', async () => {
+    return listDesktopApiEnvironments()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-api-environment', async (_event, payload: { id?: string; name: string; variables?: string }) => {
+    return saveDesktopApiEnvironment(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:delete-api-environment', async (_event, id: string) => {
+    return deleteDesktopApiEnvironment(id)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:read-api-globals', async () => {
+    return readDesktopApiGlobals()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-api-globals', async (_event, variables: string) => {
+    return saveDesktopApiGlobals(variables)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:send-api-request', async (_event, payload) => {
+    return sendDesktopApiRequest(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-api-history', async () => {
+    return listDesktopApiHistory()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:clear-api-history', async () => {
+    return clearDesktopApiHistory()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-api-collection-runs', async () => {
+    return listDesktopApiCollectionRuns()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:run-api-collection', async (_event, payload: { collectionId: string; environmentId: string | null }) => {
+    return runDesktopApiCollection(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-projects', async () => {
+    return listDesktopProjects()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-project', async (_event, payload: { id?: string; name: string; description?: string; environment?: string; color?: string }) => {
+    return saveDesktopProject(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:delete-project', async (_event, id: string) => {
+    return deleteDesktopProject(id)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:assign-collection-project', async (_event, payload: { collectionId: string; projectId: string | null }) => {
+    return assignDesktopCollectionToProject(payload.collectionId, payload.projectId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-server-profiles', async () => {
+    return listDesktopServerProfiles()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-server-profile', async (_event, payload) => {
+    return saveDesktopServerProfile(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:delete-server-profile', async (_event, id: string) => {
+    return deleteDesktopServerProfile(id)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:test-server-profile-connection', async (_event, profileId: string) => {
+    return testDesktopConnection(profileId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:transfer-remote-script', async (_event, payload) => {
+    return transferDesktopRemoteScript(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:start-remote-execution', async (event, payload) => {
+    const window = resolveWindow(event)
+    const result = await startDesktopRemoteExecution(payload)
+    if (!result.requires_approval) {
+      forwardRemoteExecutionToWindow(window, result.remote_exec_id)
+    }
+    return result
+  })
+
+  ipcMain.handle('scriptmanager:runtime:approve-remote-execution', async (event, payload: { id: string; approverName: string }) => {
+    const window = resolveWindow(event)
+    const id = await approveDesktopRemoteExecution(payload.id, payload.approverName)
+    forwardRemoteExecutionToWindow(window, id)
+    return id
+  })
+
+  ipcMain.handle('scriptmanager:runtime:reject-remote-execution', async (_event, id: string) => {
+    return rejectDesktopRemoteExecution(id)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-audit-log', async (_event, payload) => {
+    return listDesktopAuditLog(payload ?? undefined)
   })
 
   ipcMain.handle('scriptmanager:runtime:warm-terminal', async (event) => {

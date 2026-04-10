@@ -123,13 +123,19 @@ interface RequestItemProps {
   active: boolean
   collections: ApiCollection[]
   indent?: boolean
+  onDeleteRequest?: (request: ApiRequest) => Promise<void>
+  isDeleting?: boolean
 }
 
-const RequestItem = memo(function RequestItem({ request, active, collections, indent }: RequestItemProps) {
+const RequestItem = memo(function RequestItem({ request, active, collections, indent, onDeleteRequest, isDeleting = false }: RequestItemProps) {
   const dispatch = useAppDispatch()
   const [menuOpen, setMenuOpen] = useState(false)
 
   const handleDelete = async () => {
+    if (onDeleteRequest) {
+      await onDeleteRequest(request)
+      return
+    }
     await dispatch(deleteApiRequest(request.id))
   }
 
@@ -160,6 +166,7 @@ const RequestItem = memo(function RequestItem({ request, active, collections, in
       )}>
         {request.name}
       </span>
+      {isDeleting && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-blue-500" />}
 
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
@@ -169,6 +176,7 @@ const RequestItem = memo(function RequestItem({ request, active, collections, in
               menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
             )}
             onClick={(e) => e.stopPropagation()}
+            disabled={isDeleting}
           >
             <MoreHorizontal className="h-3 w-3" />
           </button>
@@ -218,6 +226,9 @@ interface CollectionItemProps {
   onRunCollection: (collection: ApiCollection) => void
   onAddRequest: (collection: ApiCollection) => void
   onExportCollection: (collection: ApiCollection) => void
+  onDeleteRequest: (request: ApiRequest) => Promise<void>
+  onDeleteCollection: (collection: ApiCollection) => Promise<void>
+  isDeleting?: boolean
 }
 
 const CollectionItem = memo(function CollectionItem({
@@ -229,6 +240,9 @@ const CollectionItem = memo(function CollectionItem({
   onRunCollection,
   onAddRequest,
   onExportCollection,
+  onDeleteRequest,
+  onDeleteCollection,
+  isDeleting = false,
 }: CollectionItemProps) {
   const dispatch = useAppDispatch()
   const [expanded, setExpanded] = useState(true)
@@ -256,7 +270,7 @@ const CollectionItem = memo(function CollectionItem({
   }
 
   const handleDelete = async () => {
-    await dispatch(deleteApiCollection(collection.id))
+    await onDeleteCollection(collection)
   }
 
   return (
@@ -294,6 +308,7 @@ const CollectionItem = memo(function CollectionItem({
                 {collection.name}
               </span>
             )}
+            {isDeleting && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-blue-500" />}
             {variableCount > 0 && (
               <span className="text-[10px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
                 {variableCount} vars
@@ -306,6 +321,7 @@ const CollectionItem = memo(function CollectionItem({
                 e.stopPropagation()
                 onAddRequest(collection)
               }}
+              disabled={isDeleting}
             >
               <Plus className="h-3 w-3" />
             </button>
@@ -323,6 +339,8 @@ const CollectionItem = memo(function CollectionItem({
                   active={activeRequestId === r.id}
                   collections={allCollections}
                   indent
+                  onDeleteRequest={onDeleteRequest}
+                  isDeleting={false}
                 />
               ))}
               {collectionRequests.length === 0 && (
@@ -364,9 +382,11 @@ interface EnvironmentItemProps {
   environment: ApiEnvironment
   active: boolean
   onEdit: (environment: ApiEnvironment) => void
+  onDelete: (environment: ApiEnvironment) => Promise<void>
+  isDeleting?: boolean
 }
 
-const EnvironmentItem = memo(function EnvironmentItem({ environment, active, onEdit }: EnvironmentItemProps) {
+const EnvironmentItem = memo(function EnvironmentItem({ environment, active, onEdit, onDelete, isDeleting = false }: EnvironmentItemProps) {
   const dispatch = useAppDispatch()
   const variableCount = parseVariableRows(environment.variables).filter((row) => row.enabled && row.key).length
 
@@ -382,6 +402,7 @@ const EnvironmentItem = memo(function EnvironmentItem({ environment, active, onE
     >
       <FlaskConical className="h-3.5 w-3.5 shrink-0" />
       <span className="text-xs truncate flex-1">{environment.name}</span>
+      {isDeleting && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-blue-500" />}
       {variableCount > 0 && (
         <span className="text-[10px] text-slate-400 shrink-0">{variableCount}</span>
       )}
@@ -390,6 +411,7 @@ const EnvironmentItem = memo(function EnvironmentItem({ environment, active, onE
           <button
             className="opacity-0 group-hover:opacity-100 h-5 w-5 shrink-0 flex items-center justify-center rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
             onClick={(e) => e.stopPropagation()}
+            disabled={isDeleting}
           >
             <MoreHorizontal className="h-3 w-3" />
           </button>
@@ -401,7 +423,7 @@ const EnvironmentItem = memo(function EnvironmentItem({ environment, active, onE
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="text-xs text-red-600 dark:text-red-400 focus:text-red-600"
-            onClick={() => dispatch(deleteApiEnvironment(environment.id))}
+            onClick={() => onDelete(environment)}
           >
             Delete
           </DropdownMenuItem>
@@ -439,6 +461,13 @@ export function ApiSidebar() {
   const [collectionVariableRows, setCollectionVariableRows] = useState<KeyValueRow[]>([blankRow()])
   const [runDialogOpen, setRunDialogOpen] = useState(false)
   const [isCreatingCollection, setIsCreatingCollection] = useState(false)
+  const [isSavingEnvironment, setIsSavingEnvironment] = useState(false)
+  const [isSavingGlobals, setIsSavingGlobals] = useState(false)
+  const [isSavingCollectionVariables, setIsSavingCollectionVariables] = useState(false)
+  const [isClearingHistory, setIsClearingHistory] = useState(false)
+  const [deletingCollectionId, setDeletingCollectionId] = useState<string | null>(null)
+  const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null)
+  const [deletingEnvironmentId, setDeletingEnvironmentId] = useState<string | null>(null)
   const [isImporting, setIsImporting] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const importInputRef = useRef<HTMLInputElement | null>(null)
@@ -492,28 +521,43 @@ export function ApiSidebar() {
 
   const handleSaveEnvironment = async () => {
     if (!environmentName.trim()) return
-    await dispatch(saveApiEnvironment({
-      id: editingEnvironmentId ?? undefined,
-      name: environmentName.trim(),
-      variables: environmentVariables,
-    }))
-    setEnvironmentDialogOpen(false)
+    setIsSavingEnvironment(true)
+    try {
+      await dispatch(saveApiEnvironment({
+        id: editingEnvironmentId ?? undefined,
+        name: environmentName.trim(),
+        variables: environmentVariables,
+      }))
+      setEnvironmentDialogOpen(false)
+    } finally {
+      setIsSavingEnvironment(false)
+    }
   }
 
   const handleSaveGlobals = async () => {
-    await dispatch(saveApiGlobals(globalsDraft))
-    setGlobalsDialogOpen(false)
+    setIsSavingGlobals(true)
+    try {
+      await dispatch(saveApiGlobals(globalsDraft))
+      setGlobalsDialogOpen(false)
+    } finally {
+      setIsSavingGlobals(false)
+    }
   }
 
   const handleSaveCollectionVariables = async () => {
     if (!collectionVariableTarget) return
-    await dispatch(updateApiCollection({
-      id: collectionVariableTarget.id,
-      name: collectionVariableTarget.name,
-      description: collectionVariableTarget.description,
-      variables: collectionVariableRows,
-    }))
-    setCollectionVariablesOpen(false)
+    setIsSavingCollectionVariables(true)
+    try {
+      await dispatch(updateApiCollection({
+        id: collectionVariableTarget.id,
+        name: collectionVariableTarget.name,
+        description: collectionVariableTarget.description,
+        variables: collectionVariableRows,
+      }))
+      setCollectionVariablesOpen(false)
+    } finally {
+      setIsSavingCollectionVariables(false)
+    }
   }
 
   const handleRunCollection = async (collection: ApiCollection) => {
@@ -634,6 +678,60 @@ export function ApiSidebar() {
     }))
   }
 
+  const handleDeleteCollection = async (collection: ApiCollection) => {
+    setDeletingCollectionId(collection.id)
+    try {
+      await dispatch(deleteApiCollection(collection.id))
+    } finally {
+      setDeletingCollectionId((current) => current === collection.id ? null : current)
+    }
+  }
+
+  const handleDeleteEnvironment = async (environment: ApiEnvironment) => {
+    setDeletingEnvironmentId(environment.id)
+    try {
+      await dispatch(deleteApiEnvironment(environment.id))
+    } finally {
+      setDeletingEnvironmentId((current) => current === environment.id ? null : current)
+    }
+  }
+
+  const handleDeleteRequest = async (request: ApiRequest) => {
+    setDeletingRequestId(request.id)
+    try {
+      await dispatch(deleteApiRequest(request.id))
+    } finally {
+      setDeletingRequestId((current) => current === request.id ? null : current)
+    }
+  }
+
+  const activeStatusText = useMemo(() => {
+    if (isImporting) return 'Importing Postman workspace...'
+    if (isExporting) return 'Preparing export...'
+    if (isCreatingCollection) return 'Creating collection...'
+    if (isSavingEnvironment) return 'Saving environment...'
+    if (isSavingGlobals) return 'Saving global variables...'
+    if (isSavingCollectionVariables) return 'Saving collection variables...'
+    if (isRunningCollection) return 'Running collection...'
+    if (isClearingHistory) return 'Clearing request history...'
+    if (deletingCollectionId) return 'Deleting collection...'
+    if (deletingRequestId) return 'Deleting request...'
+    if (deletingEnvironmentId) return 'Deleting environment...'
+    return null
+  }, [
+    isImporting,
+    isExporting,
+    isCreatingCollection,
+    isSavingEnvironment,
+    isSavingGlobals,
+    isSavingCollectionVariables,
+    isRunningCollection,
+    isClearingHistory,
+    deletingCollectionId,
+    deletingRequestId,
+    deletingEnvironmentId,
+  ])
+
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-slate-950">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
@@ -695,6 +793,13 @@ export function ApiSidebar() {
           }}
         />
       </div>
+
+      {activeStatusText && (
+        <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300 shrink-0">
+          <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+          <span>{activeStatusText}</span>
+        </div>
+      )}
 
       <div className="flex border-b border-slate-200 dark:border-slate-800 shrink-0">
         <button
@@ -789,6 +894,9 @@ export function ApiSidebar() {
                 onRunCollection={handleRunCollection}
                 onAddRequest={handleAddRequestToCollection}
                 onExportCollection={handleExportSingleCollection}
+                onDeleteRequest={handleDeleteRequest}
+                onDeleteCollection={handleDeleteCollection}
+                isDeleting={deletingCollectionId === col.id}
               />
             ))}
 
@@ -808,6 +916,8 @@ export function ApiSidebar() {
                     request={r}
                     active={activeRequestId === r.id}
                     collections={collections}
+                    onDeleteRequest={handleDeleteRequest}
+                    isDeleting={deletingRequestId === r.id}
                   />
                 ))}
               </>
@@ -856,6 +966,8 @@ export function ApiSidebar() {
                 environment={environment}
                 active={environment.id === activeEnvironmentId}
                 onEdit={openEnvironmentDialog}
+                onDelete={handleDeleteEnvironment}
+                isDeleting={deletingEnvironmentId === environment.id}
               />
             ))}
 
@@ -902,11 +1014,19 @@ export function ApiSidebar() {
                   Recent ({history.length})
                 </span>
                 <button
-                  onClick={() => dispatch(clearApiHistory())}
-                  className="text-[10px] text-slate-400 hover:text-red-500 flex items-center gap-0.5"
+                  onClick={async () => {
+                    setIsClearingHistory(true)
+                    try {
+                      await dispatch(clearApiHistory())
+                    } finally {
+                      setIsClearingHistory(false)
+                    }
+                  }}
+                  disabled={isClearingHistory}
+                  className="text-[10px] text-slate-400 hover:text-red-500 flex items-center gap-0.5 disabled:opacity-60"
                 >
-                  <Trash2 className="h-2.5 w-2.5" />
-                  Clear
+                  {isClearingHistory ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Trash2 className="h-2.5 w-2.5" />}
+                  {isClearingHistory ? 'Clearing' : 'Clear'}
                 </button>
               </div>
             )}
@@ -1019,6 +1139,8 @@ export function ApiSidebar() {
         rows={environmentVariables}
         onRowsChange={setEnvironmentVariables}
         onSave={handleSaveEnvironment}
+        isSaving={isSavingEnvironment}
+        savingLabel="Saving..."
       />
 
       <VariableEditorDialog
@@ -1029,6 +1151,8 @@ export function ApiSidebar() {
         rows={globalsDraft}
         onRowsChange={setGlobalsDraft}
         onSave={handleSaveGlobals}
+        isSaving={isSavingGlobals}
+        savingLabel="Saving..."
       />
 
       <VariableEditorDialog
@@ -1039,6 +1163,8 @@ export function ApiSidebar() {
         rows={collectionVariableRows}
         onRowsChange={setCollectionVariableRows}
         onSave={handleSaveCollectionVariables}
+        isSaving={isSavingCollectionVariables}
+        savingLabel="Saving..."
       />
 
       <CollectionRunDialog

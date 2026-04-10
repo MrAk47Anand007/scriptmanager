@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
+import { hasDesktopOpsRuntime, subscribeToDesktopRemoteExec } from '@/lib/opsRuntimeClient'
 import {
     testConnection, transferScript, startRemoteExec,
     appendRemoteExecOutput, clearRemoteExecOutput, setRemoteExecStatus,
@@ -61,6 +62,23 @@ export function RemoteExecutionPanel() {
     // Open SSE stream when a remote exec starts (non-approval path)
     useEffect(() => {
         if (!currentRemoteExecId || remoteExecStatus !== 'running') return
+
+        if (hasDesktopOpsRuntime()) {
+            dispatch(clearRemoteExecOutput())
+            const unsubscribe = subscribeToDesktopRemoteExec((event) => {
+                if (event.type === 'line' && event.remoteExecId === currentRemoteExecId) {
+                    dispatch(appendRemoteExecOutput(event.line))
+                }
+                if (event.type === 'done' && event.remoteExecId === currentRemoteExecId) {
+                    dispatch(setRemoteExecStatus(event.exitCode === 0 ? 'done' : 'error'))
+                }
+                if (event.type === 'error' && event.remoteExecId === currentRemoteExecId) {
+                    dispatch(appendRemoteExecOutput(`[Error] ${event.message}\n`))
+                    dispatch(setRemoteExecStatus('error'))
+                }
+            })
+            return unsubscribe
+        }
 
         if (esRef.current) {
             esRef.current.close()

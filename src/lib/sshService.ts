@@ -3,7 +3,7 @@ import { EventEmitter } from 'events'
 import fs from 'fs'
 import path from 'path'
 import { prisma } from './db'
-import { getEncryptionKey, decryptSecret, EncryptedPayload } from './crypto'
+import { revealOpsSecret } from './opsSecretStore'
 import { getScriptResolvedFilePath } from './scriptRunner'
 
 // Module-level map: remoteExecId -> EventEmitter (mirrors buildEmitters in scriptRunner.ts)
@@ -30,9 +30,7 @@ async function buildConnectConfig(profileId: string): Promise<ConnectConfig> {
     } else {
         // Password auth — decrypt stored secret
         if (profile.encryptedSecret) {
-            const key = await getEncryptionKey()
-            const payload = JSON.parse(profile.encryptedSecret) as EncryptedPayload
-            config.password = decryptSecret(payload, key)
+            config.password = await revealOpsSecret(profile.encryptedSecret) ?? undefined
         }
     }
 

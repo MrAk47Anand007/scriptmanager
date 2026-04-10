@@ -206,12 +206,12 @@ export const SettingsManager = () => {
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2"><FolderIcon className="h-5 w-5" /> Local Storage</CardTitle>
                     <CardDescription>
-                        Configure where scripts are stored on the server.
+                        Configure the local workspace root. ScriptManager will create separate <code>Scripts</code> and <code>APIs</code> folders inside it.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="space-y-2">
-                        <Label htmlFor="script_path">Script Directory Path</Label>
+                        <Label htmlFor="script_path">Workspace Root Path</Label>
                         <Input
                             id="script_path"
                             placeholder="./user_scripts"
@@ -221,7 +221,9 @@ export const SettingsManager = () => {
                         <p className="text-xs text-slate-500">
                             Absolute path or relative to the application root.
                             <br />
-                            <span className="text-amber-600 font-medium">Warning:</span> Changing this will not move existing scripts.
+                            Managed script collections will live in <code>Scripts</code> and managed API collections will live in <code>APIs</code>.
+                            <br />
+                            <span className="text-amber-600 font-medium">Warning:</span> Changing this will not move existing data automatically.
                         </p>
                     </div>
                     <div className="space-y-2 border-t pt-4">

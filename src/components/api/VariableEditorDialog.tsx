@@ -16,6 +16,9 @@ interface VariableEditorDialogProps {
   rows: KeyValueRow[]
   onRowsChange: (rows: KeyValueRow[]) => void
   onSave: () => void | Promise<void>
+  isSaving?: boolean
+  saveLabel?: string
+  savingLabel?: string
 }
 
 export function VariableEditorDialog({
@@ -28,6 +31,9 @@ export function VariableEditorDialog({
   rows,
   onRowsChange,
   onSave,
+  isSaving = false,
+  saveLabel = 'Save',
+  savingLabel = 'Saving...',
 }: VariableEditorDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -46,6 +52,7 @@ export function VariableEditorDialog({
                 onChange={(e) => onNameChange(e.target.value)}
                 placeholder="Environment name"
                 className="h-9 text-sm"
+                disabled={isSaving}
               />
             </div>
           )}
@@ -64,10 +71,12 @@ export function VariableEditorDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             Cancel
           </Button>
-          <Button onClick={onSave}>Save</Button>
+          <Button onClick={onSave} disabled={isSaving}>
+            {isSaving ? savingLabel : saveLabel}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

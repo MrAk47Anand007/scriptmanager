@@ -1112,6 +1112,31 @@ const ScriptsSidebarComponent = () => {
 
     const isDeleteTemporaryWorkspace = Boolean(collectionToDelete?.is_temporary);
     const hasCollectionFolder = Boolean(collectionToDelete?.folder_path && !collectionToDelete?.is_temporary);
+    const sidebarBusyText = useMemo(() => {
+        if (isSubmittingCollection) return 'Creating collection...';
+        if (isCreatingScript) return 'Creating script...';
+        if (isOpeningFolder) return 'Opening folder...';
+        if (isConvertingCollection) return 'Saving workspace as collection...';
+        if (isPythonEnvLoading) return 'Preparing Python environment...';
+        if (saveAsLoading) return 'Saving template...';
+        if (isDeletingCollectionDialog) return hasCollectionFolder ? 'Removing local workspace...' : 'Deleting collection...';
+        if (pendingCollectionDeleteId) return 'Removing collection...';
+        if (isDeleting) return 'Deleting script...';
+        if (isCreatingProject) return 'Creating project...';
+        return null;
+    }, [
+        hasCollectionFolder,
+        isConvertingCollection,
+        isCreatingProject,
+        isCreatingScript,
+        isDeleting,
+        isDeletingCollectionDialog,
+        isOpeningFolder,
+        isPythonEnvLoading,
+        isSubmittingCollection,
+        pendingCollectionDeleteId,
+        saveAsLoading,
+    ]);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -1179,6 +1204,13 @@ const ScriptsSidebarComponent = () => {
                                 className="h-7 pl-8 text-xs bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700"
                             />
                         </div>
+
+                        {sidebarBusyText && (
+                            <div className="mt-2 flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300">
+                                <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                                <span>{sidebarBusyText}</span>
+                            </div>
+                        )}
 
                         {/* Tag filter chips */}
                         {allTags.length > 0 && (

@@ -1,19 +1,27 @@
 'use client'
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { fetchApiCollections, fetchApiRequests, fetchApiHistory, fetchApiEnvironments, fetchApiGlobals, fetchApiCollectionRuns, newRequest } from '@/features/api/apiSlice'
+import { fetchApiCollections, fetchApiRequests, fetchApiHistory, fetchApiEnvironments, fetchApiGlobals, fetchApiCollectionRuns, newRequest, setActiveRequest, closeActiveRequestEditor } from '@/features/api/apiSlice'
 import { ApiSidebar } from './ApiSidebar'
 import { ApiRequestEditor } from './ApiRequestEditor'
 import { ApiResponseViewer } from './ApiResponseViewer'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { Button } from '@/components/ui/button'
-import { Globe, Loader2, Plus } from 'lucide-react'
+import { Globe, Loader2, Plus, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+type RequestTab = {
+  key: string
+  requestId: string | null
+  title: string
+  draft: boolean
+}
 
 export function ApiManager() {
   const dispatch = useAppDispatch()
   const { activeRequestId, activeRequest, collections, requests, history, collectionRuns, environments, isLoading, isRunningCollection, error } = useAppSelector(s => s.api)
+  const [openTabs, setOpenTabs] = useState<RequestTab[]>([])
 
   useEffect(() => {
     dispatch(fetchApiCollections())
@@ -23,6 +31,97 @@ export function ApiManager() {
     dispatch(fetchApiEnvironments())
     dispatch(fetchApiGlobals())
   }, [dispatch])
+
+  useEffect(() => {
+    if (activeRequestId) {
+      setOpenTabs((current) => {
+        const request = requests.find((item) => item.id === activeRequestId)
+        const title = request?.name ?? activeRequest?.name ?? 'Request'
+        const draftIndex = current.findIndex((tab) => tab.draft)
+        const existingIndex = current.findIndex((tab) => tab.key === activeRequestId)
+
+        if (existingIndex !== -1) {
+          const next = [...current]
+          next[existingIndex] = { ...next[existingIndex], title, requestId: activeRequestId, draft: false }
+          return next
+        }
+
+        if (draftIndex !== -1) {
+          const next = [...current]
+          next[draftIndex] = { key: activeRequestId, requestId: activeRequestId, title, draft: false }
+          return next
+        }
+
+        return [...current, { key: activeRequestId, requestId: activeRequestId, title, draft: false }]
+      })
+      return
+    }
+
+    if (activeRequest) {
+      setOpenTabs((current) => {
+        const title = activeRequest.name?.trim() || 'New Request'
+        const existingIndex = current.findIndex((tab) => tab.draft)
+        if (existingIndex !== -1) {
+          const next = [...current]
+          next[existingIndex] = { ...next[existingIndex], title }
+          return next
+        }
+        return [...current, { key: 'draft', requestId: null, title, draft: true }]
+      })
+    }
+  }, [activeRequestId, activeRequest, requests])
+
+  useEffect(() => {
+    setOpenTabs((current) =>
+      current
+        .filter((tab) => tab.draft || requests.some((request) => request.id === tab.requestId))
+        .map((tab) => {
+          if (tab.draft) {
+            return activeRequest && !activeRequestId
+              ? { ...tab, title: activeRequest.name?.trim() || 'New Request' }
+              : tab
+          }
+          const request = requests.find((item) => item.id === tab.requestId)
+          return request ? { ...tab, title: request.name } : tab
+        })
+    )
+  }, [requests, activeRequest, activeRequestId])
+
+  const handleActivateTab = (tab: RequestTab) => {
+    if (tab.requestId) {
+      dispatch(setActiveRequest(tab.requestId))
+      return
+    }
+    dispatch(newRequest(activeRequest ?? undefined))
+  }
+
+  const handleCloseTab = (tabKey: string) => {
+    setOpenTabs((current) => {
+      const index = current.findIndex((tab) => tab.key === tabKey)
+      if (index === -1) return current
+
+      const closingTab = current[index]
+      const nextTabs = current.filter((tab) => tab.key !== tabKey)
+      const isActive = closingTab.requestId
+        ? closingTab.requestId === activeRequestId
+        : !activeRequestId && Boolean(activeRequest)
+
+      if (isActive) {
+        const fallback = nextTabs[index] ?? nextTabs[index - 1] ?? null
+        if (fallback) {
+          if (fallback.requestId) {
+            dispatch(setActiveRequest(fallback.requestId))
+          } else {
+            dispatch(newRequest(activeRequest ?? undefined))
+          }
+        } else {
+          dispatch(closeActiveRequestEditor())
+        }
+      }
+
+      return nextTabs
+    })
+  }
 
   const hasWorkspaceData = collections.length > 0 || requests.length > 0 || history.length > 0 || collectionRuns.length > 0 || environments.length > 0
   const workspaceFeedback = useMemo(() => {
@@ -75,6 +174,36 @@ export function ApiManager() {
         <ResizablePanel defaultSize={75} minSize={40}>
           {activeRequestId || activeRequest ? (
             <div className="flex h-full flex-col overflow-hidden">
+              {openTabs.length > 0 && (
+                <div className="flex items-center gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/30 px-2 py-1.5 shrink-0">
+                  {openTabs.map((tab) => {
+                    const active = tab.requestId ? tab.requestId === activeRequestId : !activeRequestId && Boolean(activeRequest)
+                    return (
+                      <div
+                        key={tab.key}
+                        className={cn(
+                          'group flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs min-w-0 max-w-[220px] cursor-pointer transition-colors',
+                          active
+                            ? 'border-blue-500/40 bg-white text-slate-900 dark:border-blue-500/50 dark:bg-slate-950 dark:text-slate-100'
+                            : 'border-slate-200 bg-slate-100/80 text-slate-500 hover:text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400 dark:hover:text-slate-200'
+                        )}
+                        onClick={() => handleActivateTab(tab)}
+                      >
+                        <span className="truncate">{tab.title}</span>
+                        <button
+                          className="h-4 w-4 shrink-0 rounded text-slate-400 hover:bg-slate-200 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            handleCloseTab(tab.key)
+                          }}
+                        >
+                          <X className="h-3 w-3 mx-auto" />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
               {workspaceFeedback && (
                 <div
                   className={cn(

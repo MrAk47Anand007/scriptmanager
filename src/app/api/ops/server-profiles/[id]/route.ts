@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getEncryptionKey, encryptSecret } from '@/lib/crypto'
+import { hasStoredOpsSecret, sealOpsSecret } from '@/lib/opsSecretStore'
 
 function serializeProfile(p: {
     id: string
@@ -23,7 +23,7 @@ function serializeProfile(p: {
         port: p.port,
         username: p.username,
         auth_method: p.authMethod,
-        has_secret: !!p.encryptedSecret,
+        has_secret: hasStoredOpsSecret(p.encryptedSecret),
         key_path: p.keyPath,
         project_id: p.projectId,
         notes: p.notes,
@@ -64,9 +64,7 @@ export async function PUT(
         if (secret === null || secret === '') {
             encryptedSecretJson = null
         } else {
-            const key = await getEncryptionKey()
-            const payload = encryptSecret(secret, key)
-            encryptedSecretJson = JSON.stringify(payload)
+            encryptedSecretJson = await sealOpsSecret(secret)
         }
     }
 

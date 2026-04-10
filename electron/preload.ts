@@ -30,6 +30,39 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
       ipcRenderer.invoke('scriptmanager:runtime:run-in-terminal', payload) as Promise<{ ok: boolean }>,
     runScript: (payload: { scriptId: string; paramValues?: Record<string, string>; buildId?: string }) =>
       ipcRenderer.invoke('scriptmanager:runtime:run-script', payload) as Promise<{ buildId: string; status: 'started' | 'failed' }>,
+    listApiCollections: () => ipcRenderer.invoke('scriptmanager:runtime:list-api-collections') as Promise<unknown[]>,
+    saveApiCollection: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-api-collection', payload) as Promise<unknown>,
+    deleteApiCollection: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-api-collection', id) as Promise<string>,
+    listApiRequests: (collectionId?: string | null) => ipcRenderer.invoke('scriptmanager:runtime:list-api-requests', collectionId ?? null) as Promise<unknown[]>,
+    saveApiRequest: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-api-request', payload) as Promise<unknown>,
+    deleteApiRequest: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-api-request', id) as Promise<string>,
+    listApiEnvironments: () => ipcRenderer.invoke('scriptmanager:runtime:list-api-environments') as Promise<unknown[]>,
+    saveApiEnvironment: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-api-environment', payload) as Promise<unknown>,
+    deleteApiEnvironment: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-api-environment', id) as Promise<string>,
+    readApiGlobals: () => ipcRenderer.invoke('scriptmanager:runtime:read-api-globals') as Promise<unknown>,
+    saveApiGlobals: (variables: string) => ipcRenderer.invoke('scriptmanager:runtime:save-api-globals', variables) as Promise<unknown>,
+    sendApiRequest: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:send-api-request', payload) as Promise<unknown>,
+    listApiHistory: () => ipcRenderer.invoke('scriptmanager:runtime:list-api-history') as Promise<unknown[]>,
+    clearApiHistory: () => ipcRenderer.invoke('scriptmanager:runtime:clear-api-history') as Promise<unknown>,
+    listApiCollectionRuns: () => ipcRenderer.invoke('scriptmanager:runtime:list-api-collection-runs') as Promise<unknown[]>,
+    runApiCollection: (payload: { collectionId: string; environmentId: string | null }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:run-api-collection', payload) as Promise<unknown>,
+    listProjects: () => ipcRenderer.invoke('scriptmanager:runtime:list-projects') as Promise<unknown[]>,
+    saveProject: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-project', payload) as Promise<unknown>,
+    deleteProject: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-project', id) as Promise<string>,
+    assignCollectionToProject: (payload: { collectionId: string; projectId: string | null }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:assign-collection-project', payload) as Promise<unknown>,
+    listServerProfiles: () => ipcRenderer.invoke('scriptmanager:runtime:list-server-profiles') as Promise<unknown[]>,
+    saveServerProfile: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-server-profile', payload) as Promise<unknown>,
+    deleteServerProfile: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-server-profile', id) as Promise<string>,
+    testServerProfileConnection: (profileId: string) =>
+      ipcRenderer.invoke('scriptmanager:runtime:test-server-profile-connection', profileId) as Promise<unknown>,
+    transferRemoteScript: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:transfer-remote-script', payload) as Promise<unknown>,
+    startRemoteExecution: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:start-remote-execution', payload) as Promise<unknown>,
+    approveRemoteExecution: (payload: { id: string; approverName: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:approve-remote-execution', payload) as Promise<string>,
+    rejectRemoteExecution: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:reject-remote-execution', id) as Promise<string>,
+    listAuditLog: (payload?: unknown) => ipcRenderer.invoke('scriptmanager:runtime:list-audit-log', payload ?? null) as Promise<unknown>,
     onTerminalEvent: (listener: (event: unknown) => void) => {
       const wrapped = (_event: unknown, payload: unknown) => listener(payload)
       ipcRenderer.on('scriptmanager:runtime:terminal', wrapped)
@@ -39,6 +72,11 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
       const wrapped = (_event: unknown, payload: unknown) => listener(payload)
       ipcRenderer.on('scriptmanager:runtime:build', wrapped)
       return () => ipcRenderer.removeListener('scriptmanager:runtime:build', wrapped)
+    },
+    onRemoteExecEvent: (listener: (event: unknown) => void) => {
+      const wrapped = (_event: unknown, payload: unknown) => listener(payload)
+      ipcRenderer.on('scriptmanager:runtime:remote-exec', wrapped)
+      return () => ipcRenderer.removeListener('scriptmanager:runtime:remote-exec', wrapped)
     },
   },
 })

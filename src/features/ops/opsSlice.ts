@@ -1,5 +1,20 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
 import axios from 'axios'
+import {
+    assignCollectionToProjectRuntime,
+    deleteProjectRuntime,
+    deleteServerProfileRuntime,
+    listAuditLogRuntime,
+    listProjectsRuntime,
+    listServerProfilesRuntime,
+    rejectRemoteExecutionRuntime,
+    saveProjectRuntime,
+    saveServerProfileRuntime,
+    startRemoteExecutionRuntime,
+    testServerProfileConnectionRuntime,
+    transferRemoteScriptRuntime,
+    approveRemoteExecutionRuntime,
+} from '@/lib/opsRuntimeClient'
 
 export interface Project {
     id: string
@@ -99,44 +114,38 @@ const initialState: OpsState = {
 // --- Phase 2: Project Thunks ---
 
 export const fetchProjects = createAsyncThunk('ops/fetchProjects', async () => {
-    const res = await axios.get('/api/projects')
-    return res.data as Project[]
+    return await listProjectsRuntime() as Project[]
 })
 
 export const createProject = createAsyncThunk(
     'ops/createProject',
     async (payload: { name: string; description?: string; environment?: string; color?: string }) => {
-        const res = await axios.post('/api/projects', payload)
-        return res.data as Project
+        return await saveProjectRuntime(payload) as Project
     }
 )
 
 export const updateProject = createAsyncThunk(
     'ops/updateProject',
     async ({ id, ...fields }: { id: string; name?: string; description?: string; environment?: string; color?: string }) => {
-        const res = await axios.put(`/api/projects/${id}`, fields)
-        return res.data as Project
+        return await saveProjectRuntime({ id, ...fields }) as Project
     }
 )
 
 export const deleteProject = createAsyncThunk('ops/deleteProject', async (id: string) => {
-    await axios.delete(`/api/projects/${id}`)
-    return id
+    return await deleteProjectRuntime(id)
 })
 
 export const assignCollectionToProject = createAsyncThunk(
     'ops/assignCollectionToProject',
     async ({ collectionId, projectId }: { collectionId: string; projectId: string | null }) => {
-        await axios.put(`/api/collections/${collectionId}`, { project_id: projectId })
-        return { collectionId, projectId }
+        return await assignCollectionToProjectRuntime({ collectionId, projectId })
     }
 )
 
 // --- Phase 3: Server Profile Thunks ---
 
 export const fetchServerProfiles = createAsyncThunk('ops/fetchServerProfiles', async () => {
-    const res = await axios.get('/api/ops/server-profiles')
-    return res.data as ServerProfile[]
+    return await listServerProfilesRuntime() as ServerProfile[]
 })
 
 export const createServerProfile = createAsyncThunk(
@@ -152,8 +161,7 @@ export const createServerProfile = createAsyncThunk(
         project_id?: string | null
         notes?: string
     }) => {
-        const res = await axios.post('/api/ops/server-profiles', payload)
-        return res.data as ServerProfile
+        return await saveServerProfileRuntime(payload) as ServerProfile
     }
 )
 
@@ -171,14 +179,12 @@ export const updateServerProfile = createAsyncThunk(
         project_id?: string | null
         notes?: string
     }) => {
-        const res = await axios.put(`/api/ops/server-profiles/${id}`, fields)
-        return res.data as ServerProfile
+        return await saveServerProfileRuntime({ id, ...fields }) as ServerProfile
     }
 )
 
 export const deleteServerProfile = createAsyncThunk('ops/deleteServerProfile', async (id: string) => {
-    await axios.delete(`/api/ops/server-profiles/${id}`)
-    return id
+    return await deleteServerProfileRuntime(id)
 })
 
 // --- Phase 4: Remote Execution Thunks ---
@@ -186,25 +192,21 @@ export const deleteServerProfile = createAsyncThunk('ops/deleteServerProfile', a
 export const testConnection = createAsyncThunk(
     'ops/testConnection',
     async (profileId: string) => {
-        const res = await axios.post(`/api/ops/server-profiles/${profileId}/test-connection`)
-        return res.data as { success: boolean; latency_ms?: number; error?: string }
+        return await testServerProfileConnectionRuntime(profileId) as { success: boolean; latency_ms?: number; error?: string }
     }
 )
 
 export const transferScript = createAsyncThunk(
     'ops/transferScript',
     async (payload: { profileId: string; scriptId: string; remotePath: string; permissions?: string }) => {
-        const { profileId, ...rest } = payload
-        const res = await axios.post(`/api/ops/server-profiles/${profileId}/scp`, rest)
-        return res.data as { success: boolean; remote_path: string; error?: string }
+        return await transferRemoteScriptRuntime(payload) as { success: boolean; remote_path: string; error?: string }
     }
 )
 
 export const startRemoteExec = createAsyncThunk(
     'ops/startRemoteExec',
     async (payload: { profileId: string; scriptId: string; remotePath?: string; paramValues?: Record<string, string> }) => {
-        const res = await axios.post('/api/ops/remote-exec', payload)
-        return res.data as { remote_exec_id: string; requires_approval: boolean; environment: string }
+        return await startRemoteExecutionRuntime(payload) as { remote_exec_id: string; requires_approval: boolean; environment: string }
     }
 )
 
@@ -213,29 +215,21 @@ export const startRemoteExec = createAsyncThunk(
 export const fetchAuditLog = createAsyncThunk(
     'ops/fetchAuditLog',
     async (params?: { profileId?: string; scriptId?: string; limit?: number; offset?: number }) => {
-        const query = new URLSearchParams()
-        if (params?.profileId) query.set('profileId', params.profileId)
-        if (params?.scriptId) query.set('scriptId', params.scriptId)
-        if (params?.limit) query.set('limit', String(params.limit))
-        if (params?.offset) query.set('offset', String(params.offset))
-        const res = await axios.get(`/api/ops/audit-log?${query}`)
-        return res.data as { total: number; executions: RemoteExecutionRecord[] }
+        return await listAuditLogRuntime(params) as { total: number; executions: RemoteExecutionRecord[] }
     }
 )
 
 export const approveExecution = createAsyncThunk(
     'ops/approveExecution',
     async ({ id, approverName }: { id: string; approverName: string }) => {
-        await axios.post(`/api/ops/remote-exec/${id}/approve`, { approver_name: approverName })
-        return id
+        return await approveRemoteExecutionRuntime(id, approverName)
     }
 )
 
 export const rejectExecution = createAsyncThunk(
     'ops/rejectExecution',
     async (id: string) => {
-        await axios.post(`/api/ops/remote-exec/${id}/reject`)
-        return id
+        return await rejectRemoteExecutionRuntime(id)
     }
 )
 

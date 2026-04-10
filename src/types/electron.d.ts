@@ -13,6 +13,11 @@ declare global {
     | { type: 'done'; buildId: string; status: 'success' | 'failure' | 'timeout'; exitCode: number }
     | { type: 'error'; buildId: string; message: string }
 
+  type ScriptManagerDesktopRemoteExecEvent =
+    | { type: 'line'; remoteExecId: string; line: string }
+    | { type: 'done'; remoteExecId: string; exitCode: number }
+    | { type: 'error'; remoteExecId: string; message: string }
+
   interface Window {
     __ELECTRON__?: boolean
     scriptManagerDesktop?: {
@@ -40,8 +45,38 @@ declare global {
         closeTerminal: () => Promise<{ ok: boolean }>
         runScriptInTerminal: (payload: { scriptId: string; paramValues?: Record<string, string> }) => Promise<{ ok: boolean }>
         runScript: (payload: { scriptId: string; paramValues?: Record<string, string>; buildId?: string }) => Promise<{ buildId: string; status: 'started' | 'failed' }>
+        listApiCollections: () => Promise<unknown[]>
+        saveApiCollection: (payload: unknown) => Promise<unknown>
+        deleteApiCollection: (id: string) => Promise<string>
+        listApiRequests: (collectionId?: string | null) => Promise<unknown[]>
+        saveApiRequest: (payload: unknown) => Promise<unknown>
+        deleteApiRequest: (id: string) => Promise<string>
+        listApiEnvironments: () => Promise<unknown[]>
+        saveApiEnvironment: (payload: unknown) => Promise<unknown>
+        deleteApiEnvironment: (id: string) => Promise<string>
+        readApiGlobals: () => Promise<unknown>
+        saveApiGlobals: (variables: string) => Promise<unknown>
+        sendApiRequest: (payload: unknown) => Promise<unknown>
+        listApiHistory: () => Promise<unknown[]>
+        clearApiHistory: () => Promise<unknown>
+        listApiCollectionRuns: () => Promise<unknown[]>
+        runApiCollection: (payload: { collectionId: string; environmentId: string | null }) => Promise<unknown>
+        listProjects: () => Promise<unknown[]>
+        saveProject: (payload: unknown) => Promise<unknown>
+        deleteProject: (id: string) => Promise<string>
+        assignCollectionToProject: (payload: { collectionId: string; projectId: string | null }) => Promise<unknown>
+        listServerProfiles: () => Promise<unknown[]>
+        saveServerProfile: (payload: unknown) => Promise<unknown>
+        deleteServerProfile: (id: string) => Promise<string>
+        testServerProfileConnection: (profileId: string) => Promise<unknown>
+        transferRemoteScript: (payload: unknown) => Promise<unknown>
+        startRemoteExecution: (payload: unknown) => Promise<unknown>
+        approveRemoteExecution: (payload: { id: string; approverName: string }) => Promise<string>
+        rejectRemoteExecution: (id: string) => Promise<string>
+        listAuditLog: (payload?: unknown) => Promise<unknown>
         onTerminalEvent: (listener: (event: ScriptManagerDesktopTerminalEvent) => void) => () => void
         onBuildEvent: (listener: (event: ScriptManagerDesktopBuildEvent) => void) => () => void
+        onRemoteExecEvent: (listener: (event: ScriptManagerDesktopRemoteExecEvent) => void) => () => void
       }
     }
   }

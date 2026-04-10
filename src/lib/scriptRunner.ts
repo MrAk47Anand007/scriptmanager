@@ -5,6 +5,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import { assertSafeStoredFilename } from '@/lib/executionSafety'
+import { ensureDesktopWorkspaceLayout, getDesktopWorkspaceLayout } from '@/lib/workspaceLayout'
 
 // Module-level map: buildId -> EventEmitter (Node.js equivalent of Python's _output_queues dict)
 const buildEmitters = new Map<string, EventEmitter>()
@@ -32,7 +33,7 @@ async function getScriptsDir(): Promise<string> {
     where: { key: 'script_storage_path' }
   })
   const dir = setting?.value ?? process.env.SCRIPTS_DIR ?? path.join(process.cwd(), 'user_scripts')
-  const resolvedDir = path.isAbsolute(dir) ? dir : path.join(process.cwd(), dir)
+  const resolvedDir = getDesktopWorkspaceLayout(path.isAbsolute(dir) ? dir : path.join(process.cwd(), dir)).scriptsRoot
   cachedScriptsDir = {
     value: resolvedDir,
     expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS,
@@ -270,6 +271,6 @@ export async function getScriptResolvedFilePath(script: { filename: string; sour
 
 export async function ensureScriptsDirExists(): Promise<void> {
   const scriptsDir = await getScriptsDir()
-  fs.mkdirSync(scriptsDir, { recursive: true })
+  ensureDesktopWorkspaceLayout(getDesktopWorkspaceLayout(path.dirname(scriptsDir)))
   fs.mkdirSync(getBuildsDir(), { recursive: true })
 }

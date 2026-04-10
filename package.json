@@ -14,6 +14,8 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
+    "db:reset:clean": "node ./scripts/reset-workspace-db.mjs",
+    "db:reset:clean:files": "node ./scripts/reset-workspace-db.mjs --wipe-workspace --wipe-builds",
     "next:dev": "next dev",
     "cli": "node ./cli/sm.mjs",
     "electron:dev": "cross-env DESKTOP_AUTH_SECRET=dev-desktop-secret-local concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",

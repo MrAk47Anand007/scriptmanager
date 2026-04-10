@@ -2,6 +2,24 @@ import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
 import axios from 'axios'
 import { v4 as uuidv4 } from 'uuid'
 import {
+  clearApiHistoryRuntime,
+  deleteApiCollectionRuntime,
+  deleteApiEnvironmentRuntime,
+  deleteApiRequestRuntime,
+  listApiCollectionRunsRuntime,
+  listApiCollectionsRuntime,
+  listApiEnvironmentsRuntime,
+  listApiHistoryRuntime,
+  listApiRequestsRuntime,
+  readApiGlobalsRuntime,
+  runApiCollectionRuntime,
+  saveApiCollectionRuntime,
+  saveApiEnvironmentRuntime,
+  saveApiGlobalsRuntime,
+  saveApiRequestRuntime,
+  sendApiRequestRuntime,
+} from '@/lib/apiRuntimeClient'
+import {
   materializeApiRequest,
   parseVariableRows,
   parseResponseMappingRows,
@@ -214,83 +232,72 @@ function draftToApiPayload(draft: ApiRequestDraft) {
 }
 
 export const fetchApiCollections = createAsyncThunk('api/fetchCollections', async () => {
-  const res = await axios.get<ApiCollection[]>('/api/api-collections')
-  return res.data
+  return await listApiCollectionsRuntime() as ApiCollection[]
 })
 
 export const fetchApiRequests = createAsyncThunk('api/fetchRequests', async () => {
-  const res = await axios.get<ApiRequest[]>('/api/api-requests')
-  return res.data
+  return await listApiRequestsRuntime() as ApiRequest[]
 })
 
 export const fetchApiEnvironments = createAsyncThunk('api/fetchEnvironments', async () => {
-  const res = await axios.get<ApiEnvironment[]>('/api/api-environments')
-  return res.data
+  return await listApiEnvironmentsRuntime() as ApiEnvironment[]
 })
 
 export const saveApiEnvironment = createAsyncThunk(
   'api/saveEnvironment',
   async ({ id, name, variables }: { id?: string; name: string; variables: KeyValueRow[] }) => {
     const payload = { name, variables: stringifyVariableRows(variables) }
-    const res = id
-      ? await axios.put<ApiEnvironment>(`/api/api-environments/${id}`, payload)
-      : await axios.post<ApiEnvironment>('/api/api-environments', payload)
-    return res.data
+    return await saveApiEnvironmentRuntime({ ...(id ? { id } : {}), ...payload }) as ApiEnvironment
   }
 )
 
 export const deleteApiEnvironment = createAsyncThunk(
   'api/deleteEnvironment',
   async (id: string) => {
-    await axios.delete(`/api/api-environments/${id}`)
-    return id
+    return await deleteApiEnvironmentRuntime(id)
   }
 )
 
 export const fetchApiGlobals = createAsyncThunk('api/fetchGlobals', async () => {
-  const res = await axios.get<{ variables: string }>('/api/api-globals')
-  return toClientRows(parseVariableRows(res.data.variables))
+  const data = await readApiGlobalsRuntime() as { variables: string }
+  return toClientRows(parseVariableRows(data.variables))
 })
 
 export const saveApiGlobals = createAsyncThunk(
   'api/saveGlobals',
   async (variables: KeyValueRow[]) => {
-    const res = await axios.put<{ variables: string }>('/api/api-globals', {
-      variables: stringifyVariableRows(variables),
-    })
-    return toClientRows(parseVariableRows(res.data.variables))
+    const data = await saveApiGlobalsRuntime(stringifyVariableRows(variables)) as { variables: string }
+    return toClientRows(parseVariableRows(data.variables))
   }
 )
 
 export const createApiCollection = createAsyncThunk(
   'api/createCollection',
   async ({ name, description, variables }: { name: string; description?: string; variables?: KeyValueRow[] }) => {
-    const res = await axios.post<ApiCollection>('/api/api-collections', {
+    return await saveApiCollectionRuntime({
       name,
       description: description ?? '',
       variables: stringifyVariableRows(variables ?? []),
-    })
-    return res.data
+    }) as ApiCollection
   }
 )
 
 export const updateApiCollection = createAsyncThunk(
   'api/updateCollection',
   async ({ id, name, description, variables }: { id: string; name: string; description?: string; variables?: KeyValueRow[] }) => {
-    const res = await axios.put<ApiCollection>(`/api/api-collections/${id}`, {
+    return await saveApiCollectionRuntime({
+      id,
       name,
       description: description ?? '',
       variables: stringifyVariableRows(variables ?? []),
-    })
-    return res.data
+    }) as ApiCollection
   }
 )
 
 export const deleteApiCollection = createAsyncThunk(
   'api/deleteCollection',
   async (id: string) => {
-    await axios.delete(`/api/api-collections/${id}`)
-    return id
+    return await deleteApiCollectionRuntime(id)
   }
 )
 
@@ -298,18 +305,14 @@ export const saveApiRequest = createAsyncThunk(
   'api/saveRequest',
   async (draft: ApiRequestDraft) => {
     const payload = draftToApiPayload(draft)
-    const res = draft.id
-      ? await axios.put<ApiRequest>(`/api/api-requests/${draft.id}`, payload)
-      : await axios.post<ApiRequest>('/api/api-requests', payload)
-    return res.data
+    return await saveApiRequestRuntime({ ...(draft.id ? { id: draft.id } : {}), ...payload }) as ApiRequest
   }
 )
 
 export const deleteApiRequest = createAsyncThunk(
   'api/deleteRequest',
   async (id: string) => {
-    await axios.delete(`/api/api-requests/${id}`)
-    return id
+    return await deleteApiRequestRuntime(id)
   }
 )
 
@@ -341,7 +344,7 @@ export const sendApiRequest = createAsyncThunk<
     }
 
     try {
-      const res = await axios.post('/api/proxy-request', {
+      const responseData = await sendApiRequestRuntime({
         requestId: draft.id ?? null,
         collectionId: draft.collectionId ?? null,
         environmentId: state.activeEnvironmentId,
@@ -359,27 +362,56 @@ export const sendApiRequest = createAsyncThunk<
         authType: draft.authType,
         authConfig: draft.authConfig,
       })
-      let refreshedRequest: ApiRequest | undefined
-      let refreshedGlobals: KeyValueRow[] | undefined
-      let refreshedEnvironments: ApiEnvironment[] | undefined
-      const mappingApplied = Array.isArray(res.data?.mappingResults) && res.data.mappingResults.some((item: any) => item?.applied)
 
-      if (mappingApplied) {
-        const [globalsResponse, environmentsResponse, requestResponse] = await Promise.all([
-          axios.get<{ variables: string }>('/api/api-globals'),
-          axios.get<ApiEnvironment[]>('/api/api-environments'),
-          draft.id ? axios.get<ApiRequest>(`/api/api-requests/${draft.id}`) : Promise.resolve(null),
-        ])
-        refreshedGlobals = toClientRows(parseVariableRows(globalsResponse.data.variables))
-        refreshedEnvironments = environmentsResponse.data
-        refreshedRequest = requestResponse?.data
+      if ('ok' in (responseData as Record<string, unknown>) && (responseData as { ok?: boolean }).ok === false) {
+        const errorResponse = responseData as { error?: string; unresolved_variables?: string[] }
+        return rejectWithValue({
+          message: errorResponse.error ?? 'Request failed',
+          unresolved: errorResponse.unresolved_variables,
+        })
+      }
+
+      const desktopResult = responseData as {
+        response: ApiResponse
+        refreshedRequest?: ApiRequest
+        refreshedGlobals?: { variables: string }
+        refreshedEnvironments?: ApiEnvironment[]
+      }
+
+      const directResponse = responseData as Partial<ApiResponse>
+      const normalizedResponse = desktopResult.response ?? (
+        typeof directResponse.status === 'number' && typeof directResponse.body === 'string'
+          ? {
+            status: directResponse.status,
+            statusText: directResponse.statusText ?? '',
+            headers: directResponse.headers ?? {},
+            body: directResponse.body,
+            duration: directResponse.duration ?? 0,
+            size: directResponse.size ?? 0,
+            error: directResponse.error,
+            truncated: directResponse.truncated,
+            cookieJarHost: directResponse.cookieJarHost ?? null,
+            consoleLogs: directResponse.consoleLogs ?? [],
+            testResults: directResponse.testResults ?? [],
+            mappingResults: directResponse.mappingResults ?? [],
+            timestamp: directResponse.timestamp ?? Date.now(),
+          } satisfies ApiResponse
+          : undefined
+      )
+
+      if (!normalizedResponse) {
+        return rejectWithValue({
+          message: 'Request completed but no response payload was returned',
+        })
       }
 
       return {
-        response: { ...res.data, timestamp: Date.now() } as ApiResponse,
-        refreshedRequest,
-        refreshedGlobals,
-        refreshedEnvironments,
+        response: normalizedResponse,
+        refreshedRequest: desktopResult.refreshedRequest,
+        refreshedGlobals: desktopResult.refreshedGlobals
+          ? toClientRows(parseVariableRows(desktopResult.refreshedGlobals.variables))
+          : undefined,
+        refreshedEnvironments: desktopResult.refreshedEnvironments,
       }
     } catch (error) {
       if (axios.isAxiosError(error)) {
@@ -397,13 +429,11 @@ export const sendApiRequest = createAsyncThunk<
 )
 
 export const fetchApiHistory = createAsyncThunk('api/fetchHistory', async () => {
-  const res = await axios.get<ApiHistoryEntry[]>('/api/api-history')
-  return res.data
+  return await listApiHistoryRuntime() as ApiHistoryEntry[]
 })
 
 export const fetchApiCollectionRuns = createAsyncThunk('api/fetchCollectionRuns', async () => {
-  const res = await axios.get<ApiCollectionRun[]>('/api/api-collection-runs')
-  return res.data
+  return await listApiCollectionRunsRuntime() as ApiCollectionRun[]
 })
 
 export const runApiCollection = createAsyncThunk<
@@ -412,13 +442,12 @@ export const runApiCollection = createAsyncThunk<
 >(
   'api/runCollection',
   async ({ collectionId, environmentId }) => {
-    const res = await axios.post<ApiCollectionRun>(`/api/api-collections/${collectionId}/run`, { environmentId })
-    return res.data
+    return await runApiCollectionRuntime({ collectionId, environmentId }) as ApiCollectionRun
   }
 )
 
 export const clearApiHistory = createAsyncThunk('api/clearHistory', async () => {
-  await axios.delete('/api/api-history')
+  await clearApiHistoryRuntime()
 })
 
 const initialState: ApiState = {
@@ -456,6 +485,11 @@ const apiSlice = createSlice({
       state.response = null
     },
     clearResponse(state) {
+      state.response = null
+    },
+    closeActiveRequestEditor(state) {
+      state.activeRequestId = null
+      state.activeRequest = null
       state.response = null
     },
     setActiveCollectionRun(state, action: PayloadAction<ApiCollectionRun | null>) {
@@ -636,7 +670,18 @@ const apiSlice = createSlice({
       })
       .addCase(sendApiRequest.rejected, (state, action) => {
         state.isSending = false
-        state.error = action.payload?.message ?? action.error.message ?? 'Request failed'
+        const message = action.payload?.message ?? action.error.message ?? 'Request failed'
+        state.error = message
+        state.response = {
+          status: 0,
+          statusText: 'Request Failed',
+          headers: {},
+          body: '',
+          duration: 0,
+          size: 0,
+          error: message,
+          timestamp: Date.now(),
+        }
       })
 
     builder
@@ -668,6 +713,7 @@ export const {
   setActiveRequest,
   newRequest,
   clearResponse,
+  closeActiveRequestEditor,
   setActiveCollectionRun,
   setActiveEnvironment,
   loadHistoryEntry,
