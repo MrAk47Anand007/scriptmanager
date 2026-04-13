@@ -463,12 +463,8 @@ function toAbsolutePath(targetPath: string): string {
 }
 
 function getDefaultTerminalCwd(): string {
-  const target = cachedWorkspaceRoot?.value
-    ?? getDesktopWorkspaceLayout(toAbsolutePath(process.env.SCRIPTS_DIR || path.join(process.cwd(), 'user_scripts'))).scriptsRoot
-
   try {
-    fs.mkdirSync(target, { recursive: true })
-    return target
+    return os.homedir()
   } catch {
     return process.cwd()
   }
@@ -684,7 +680,7 @@ function createTerminalForWindow(window: BrowserWindow, sessionId: string): Term
         rows: 24,
         cwd: getDefaultTerminalCwd(),
         env: env as { [key: string]: string },
-        useConpty: false,
+        useConpty: isWindows,
       })
       const runtime = getRuntime(window.id)
       const sessionRuntime: TerminalSessionRuntime = {
