@@ -381,17 +381,31 @@ export const TerminalComponent = ({
         });
 
         if (isDesktopRuntime) {
-            warmScriptsTerminal(sessionId).catch((error) => {
-                updateSession(sessionId, (session) => ({
-                    ...session,
-                    status: 'error',
-                    lastError: error instanceof Error ? error.message : 'Terminal start failed',
-                }));
-                writeToTerminal(
-                    sessionId,
-                    `\r\n\x1b[31m[ScriptManager] ${error instanceof Error ? error.message : 'Terminal start failed'}\x1b[0m\r\n`,
-                );
-            });
+            warmScriptsTerminal(sessionId)
+                .then(() => {
+                    // The main process sends a 'connected' IPC event before resolving, but
+                    // in rare cases the event can be missed. If the session is still
+                    // 'connecting' after the IPC call resolves, force it to 'connected'.
+                    updateSession(sessionId, (session) =>
+                        session.status === 'connecting' ? { ...session, status: 'connected', lastError: null } : session,
+                    );
+                    if (!connectedBannerRef.current.has(sessionId)) {
+                        writeToTerminal(sessionId, '\r\n\x1b[32m[ScriptManager] Connected to terminal session\x1b[0m\r\n\r\n');
+                        connectedBannerRef.current.add(sessionId);
+                    }
+                    requestAnimationFrame(() => fitSession(sessionId));
+                })
+                .catch((error) => {
+                    updateSession(sessionId, (session) => ({
+                        ...session,
+                        status: 'error',
+                        lastError: error instanceof Error ? error.message : 'Terminal start failed',
+                    }));
+                    writeToTerminal(
+                        sessionId,
+                        `\r\n\x1b[31m[ScriptManager] ${error instanceof Error ? error.message : 'Terminal start failed'}\x1b[0m\r\n`,
+                    );
+                });
             return;
         }
 
