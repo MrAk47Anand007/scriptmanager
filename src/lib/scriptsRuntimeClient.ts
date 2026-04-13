@@ -4,6 +4,8 @@ export function hasDesktopScriptsRuntime(): boolean {
   return Boolean(window.scriptManagerDesktop?.runtime)
 }
 
+export const DEFAULT_TERMINAL_SESSION_ID = 'terminal-1'
+
 type DesktopCreateScriptPayload = {
   name: string
   description?: string
@@ -162,12 +164,12 @@ export async function manageDesktopCollectionPythonEnv(collectionId: string, rec
   return window.scriptManagerDesktop.runtime.manageCollectionPythonEnv({ collectionId, recreate }) as Promise<DesktopCollectionWorkspaceStatus>
 }
 
-export async function setDesktopTerminalContext(scriptId: string | null) {
+export async function setDesktopTerminalContext(scriptId: string | null, sessionId = DEFAULT_TERMINAL_SESSION_ID) {
   if (!window.scriptManagerDesktop?.runtime) {
     return
   }
 
-  await window.scriptManagerDesktop.runtime.setTerminalContext({ scriptId })
+  await window.scriptManagerDesktop.runtime.setTerminalContext({ sessionId, scriptId })
 }
 
 export async function readDesktopScript(scriptId: string): Promise<DesktopScriptRecord> {
@@ -226,21 +228,25 @@ export async function openDesktopScriptsFolder(payload: DesktopOpenFolderPayload
   }>
 }
 
-export async function warmScriptsTerminal(): Promise<void> {
+export async function warmScriptsTerminal(sessionId = DEFAULT_TERMINAL_SESSION_ID): Promise<void> {
   if (window.scriptManagerDesktop?.runtime) {
-    await window.scriptManagerDesktop.runtime.warmTerminal()
+    await window.scriptManagerDesktop.runtime.warmTerminal({ sessionId })
     return
   }
 
-  await fetch('/api/terminal/warm', { method: 'POST' })
+  await fetch('/api/terminal/warm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  })
 }
 
-export async function runScriptInDesktopTerminal(scriptId: string, paramValues?: Record<string, string>) {
+export async function runScriptInDesktopTerminal(scriptId: string, paramValues?: Record<string, string>, sessionId = DEFAULT_TERMINAL_SESSION_ID) {
   if (!window.scriptManagerDesktop?.runtime) {
     throw new Error('Desktop runtime unavailable')
   }
 
-  return window.scriptManagerDesktop.runtime.runScriptInTerminal({ scriptId, paramValues })
+  return window.scriptManagerDesktop.runtime.runScriptInTerminal({ sessionId, scriptId, paramValues })
 }
 
 export async function startDesktopLocalRun(scriptId: string, paramValues?: Record<string, string>, buildId?: string) {
@@ -259,28 +265,45 @@ export function subscribeToDesktopBuildEvents(listener: (event: ScriptManagerDes
   return window.scriptManagerDesktop?.runtime?.onBuildEvent(listener) ?? (() => undefined)
 }
 
-export async function sendDesktopTerminalInput(data: string) {
+export async function sendDesktopTerminalInput(data: string, sessionId = DEFAULT_TERMINAL_SESSION_ID) {
   if (!window.scriptManagerDesktop?.runtime) {
     throw new Error('Desktop runtime unavailable')
   }
 
-  await window.scriptManagerDesktop.runtime.sendTerminalInput(data)
+  await window.scriptManagerDesktop.runtime.sendTerminalInput({ sessionId, data })
 }
 
-export async function resizeDesktopTerminal(cols: number, rows: number) {
+export async function resizeDesktopTerminal(cols: number, rows: number, sessionId = DEFAULT_TERMINAL_SESSION_ID) {
   if (!window.scriptManagerDesktop?.runtime) {
     throw new Error('Desktop runtime unavailable')
   }
 
-  await window.scriptManagerDesktop.runtime.resizeTerminal(cols, rows)
+  await window.scriptManagerDesktop.runtime.resizeTerminal({ sessionId, cols, rows })
 }
 
-export async function closeDesktopTerminal() {
+export async function closeDesktopTerminal(sessionId = DEFAULT_TERMINAL_SESSION_ID) {
   if (!window.scriptManagerDesktop?.runtime) {
     return
   }
 
-  await window.scriptManagerDesktop.runtime.closeTerminal()
+  await window.scriptManagerDesktop.runtime.closeTerminal({ sessionId })
+}
+
+export async function readDesktopClipboardText(): Promise<string> {
+  if (window.scriptManagerDesktop?.readClipboardText) {
+    return window.scriptManagerDesktop.readClipboardText()
+  }
+
+  return navigator.clipboard.readText()
+}
+
+export async function copyDesktopClipboardText(value: string): Promise<void> {
+  if (window.scriptManagerDesktop?.copyText) {
+    await window.scriptManagerDesktop.copyText(value)
+    return
+  }
+
+  await navigator.clipboard.writeText(value)
 }
 
 export async function startBrowserRun(scriptId: string, paramValues?: Record<string, string>, buildId?: string) {

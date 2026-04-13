@@ -2,10 +2,10 @@ export {}
 
 declare global {
   type ScriptManagerDesktopTerminalEvent =
-    | { type: 'connected' }
-    | { type: 'data'; data: string }
-    | { type: 'closed' }
-    | { type: 'error'; message: string }
+    | { sessionId: string; type: 'connected' }
+    | { sessionId: string; type: 'data'; data: string }
+    | { sessionId: string; type: 'closed' }
+    | { sessionId: string; type: 'error'; message: string }
 
   type ScriptManagerDesktopBuildEvent =
     | { type: 'started'; buildId: string }
@@ -24,6 +24,7 @@ declare global {
       selectFolder: () => Promise<string | null>
       revealPath: (targetPath: string) => Promise<boolean>
       copyText: (value: string) => Promise<boolean>
+      readClipboardText: () => Promise<string>
       runtime?: {
         listScripts: () => Promise<unknown[]>
         listCollections: () => Promise<unknown[]>
@@ -38,12 +39,12 @@ declare global {
         deleteScript: (payload: { id: string }) => Promise<string>
         duplicateScript: (scriptId: string) => Promise<unknown>
         openFolder: (payload: unknown) => Promise<unknown>
-        setTerminalContext: (payload: { scriptId: string | null }) => Promise<{ ok: boolean }>
-        warmTerminal: () => Promise<{ ok: boolean }>
-        sendTerminalInput: (data: string) => Promise<{ ok: boolean }>
-        resizeTerminal: (cols: number, rows: number) => Promise<{ ok: boolean }>
-        closeTerminal: () => Promise<{ ok: boolean }>
-        runScriptInTerminal: (payload: { scriptId: string; paramValues?: Record<string, string> }) => Promise<{ ok: boolean }>
+        setTerminalContext: (payload: { sessionId?: string; scriptId: string | null }) => Promise<{ ok: boolean }>
+        warmTerminal: (payload?: { sessionId?: string }) => Promise<{ ok: boolean }>
+        sendTerminalInput: (payload: { sessionId?: string; data: string }) => Promise<{ ok: boolean }>
+        resizeTerminal: (payload: { sessionId?: string; cols: number; rows: number }) => Promise<{ ok: boolean }>
+        closeTerminal: (payload?: { sessionId?: string }) => Promise<{ ok: boolean }>
+        runScriptInTerminal: (payload: { sessionId?: string; scriptId: string; paramValues?: Record<string, string> }) => Promise<{ ok: boolean }>
         runScript: (payload: { scriptId: string; paramValues?: Record<string, string>; buildId?: string }) => Promise<{ buildId: string; status: 'started' | 'failed' }>
         listApiCollections: () => Promise<unknown[]>
         saveApiCollection: (payload: unknown) => Promise<unknown>

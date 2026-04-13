@@ -2,7 +2,10 @@ import { WebSocketServer, WebSocket } from 'ws';
 import * as pty from 'node-pty';
 import { Server } from 'http';
 import os from 'os';
+import { URL } from 'url';
+import fs from 'fs';
 import { isAuthenticatedCookieHeader } from '@/lib/session';
+import { getDesktopWorkspaceLayout } from '@/lib/workspaceLayout';
 
 interface TerminalSession {
     process: pty.IPty;
@@ -13,11 +16,38 @@ interface TerminalSession {
 const sessionsByKey = new Map<string, TerminalSession>();
 const socketToSessionKey = new Map<WebSocket, string>();
 const TERMINAL_IDLE_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_TERMINAL_SESSION_ID = 'terminal-1';
 
-function getSessionKey(cookieHeader?: string): string | null {
+function getUserSessionKey(cookieHeader?: string): string | null {
     if (!cookieHeader) return null;
     const match = cookieHeader.match(/(?:^|;\s*)sm_session=([^;]+)/);
     return match?.[1] ?? null;
+}
+
+function normalizeTerminalSessionId(sessionId?: string | null): string {
+    const trimmed = sessionId?.trim();
+    return trimmed || DEFAULT_TERMINAL_SESSION_ID;
+}
+
+function getSessionKey(cookieHeader?: string, terminalSessionId?: string | null): string | null {
+    const userSessionKey = getUserSessionKey(cookieHeader);
+    if (!userSessionKey) {
+        return null;
+    }
+
+    return `${userSessionKey}::${normalizeTerminalSessionId(terminalSessionId)}`;
+}
+
+function getDefaultTerminalCwd() {
+    const configured = process.env.SCRIPTS_DIR || `${process.cwd()}/user_scripts`;
+    const target = getDesktopWorkspaceLayout(configured).scriptsRoot;
+
+    try {
+        fs.mkdirSync(target, { recursive: true });
+        return target;
+    } catch {
+        return process.cwd();
+    }
 }
 
 function createPtyProcess() {
@@ -47,9 +77,9 @@ function createPtyProcess() {
                 name: 'xterm-color',
                 cols: 80,
                 rows: 24,
-                cwd: process.cwd(),
+                cwd: getDefaultTerminalCwd(),
                 env,
-                useConpty: isWindows,
+                useConpty: false,
             });
         } catch (err) {
             lastError = err;
@@ -122,12 +152,12 @@ function ensureTerminalSession(sessionKey: string): TerminalSession {
     return session;
 }
 
-export function warmTerminalSession(cookieHeader?: string): boolean {
+export function warmTerminalSession(cookieHeader?: string, terminalSessionId?: string | null): boolean {
     if (!isAuthenticatedCookieHeader(cookieHeader)) {
         return false;
     }
 
-    const sessionKey = getSessionKey(cookieHeader);
+    const sessionKey = getSessionKey(cookieHeader, terminalSessionId);
     if (!sessionKey) {
         return false;
     }
@@ -157,7 +187,9 @@ export const initWebSocketServer = (server: Server) => {
             return;
         }
 
-        const sessionKey = getSessionKey(req.headers.cookie);
+        const requestUrl = new URL(req.url ?? '/api/terminal', 'http://localhost');
+        const terminalSessionId = requestUrl.searchParams.get('sessionId');
+        const sessionKey = getSessionKey(req.headers.cookie, terminalSessionId);
         if (!sessionKey) {
             ws.close(1008, 'Unauthorized');
             return;
@@ -172,7 +204,9 @@ export const initWebSocketServer = (server: Server) => {
         // Pipe websocket input to pty
         ws.on('message', (message) => {
             const msg = message.toString();
-            if (msg.startsWith('\x01resize:')) {
+            if (msg === '\x01kill') {
+                destroySession(sessionKey);
+            } else if (msg.startsWith('\x01resize:')) {
                 // Handle resize: \x01resize:cols,rows
                 const parts = msg.slice(8).split(',');
                 const cols = parseInt(parts[0]);

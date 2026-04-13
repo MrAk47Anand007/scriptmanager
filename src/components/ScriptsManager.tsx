@@ -69,13 +69,13 @@ import {
 } from "@/components/ui/select";
 import {
     buildBrowserTerminalCommand,
+    DEFAULT_TERMINAL_SESSION_ID,
     hasDesktopScriptsRuntime,
     runScriptInDesktopTerminal,
     setDesktopTerminalContext,
     startBrowserRun,
     startDesktopLocalRun,
     subscribeToDesktopBuildEvents,
-    warmScriptsTerminal,
 } from '@/lib/scriptsRuntimeClient';
 
 const LANGUAGE_OPTIONS = [
@@ -427,8 +427,9 @@ export const ScriptsManager = () => {
 
     const [isTerminalOpen, setIsTerminalOpen] = useState(false);
     const [isTerminalMinimized, setIsTerminalMinimized] = useState(false);
-    const [pendingTerminalCommand, setPendingTerminalCommand] = useState<string | null>(null);
+    const [pendingTerminalCommand, setPendingTerminalCommand] = useState<{ sessionId: string; command: string } | null>(null);
     const [terminalHeight, setTerminalHeight] = useState(240);
+    const [activeTerminalSessionId, setActiveTerminalSessionId] = useState(DEFAULT_TERMINAL_SESSION_ID);
     const [scriptContent, setScriptContent] = useState('');
     const [buildOutput, setBuildOutput] = useState('');
 
@@ -519,16 +520,25 @@ export const ScriptsManager = () => {
     }, []);
 
     useEffect(() => {
-        warmScriptsTerminal().catch(() => undefined);
-    }, []);
-
-    useEffect(() => {
         if (!isDesktopRuntime) {
             return;
         }
 
-        setDesktopTerminalContext(activeScriptId ?? null).catch(() => undefined);
-    }, [activeScriptId, isDesktopRuntime]);
+        if (!isTerminalOpen) {
+            return;
+        }
+
+        setDesktopTerminalContext(activeScriptId ?? null, activeTerminalSessionId).catch(() => undefined);
+    }, [activeScriptId, activeTerminalSessionId, isDesktopRuntime, isTerminalOpen]);
+
+    useEffect(() => {
+        const handleOpenTerminal = () => {
+            openTerminalPanel();
+        };
+
+        window.addEventListener('scriptmanager:open-terminal', handleOpenTerminal);
+        return () => window.removeEventListener('scriptmanager:open-terminal', handleOpenTerminal);
+    }, [openTerminalPanel]);
 
     const flushBuildOutput = useCallback(() => {
         if (!buildOutputBufferRef.current) return;
@@ -912,7 +922,7 @@ export const ScriptsManager = () => {
         setIsTerminalMinimized(false);
         if (isDesktopRuntime) {
             try {
-                await runScriptInDesktopTerminal(activeScriptId, paramValues);
+                await runScriptInDesktopTerminal(activeScriptId, paramValues, activeTerminalSessionId);
             } catch (error) {
                 setTerminalLaunchStage(null);
                 alert(error instanceof Error ? error.message : 'Failed to start terminal run');
@@ -925,7 +935,7 @@ export const ScriptsManager = () => {
 
         try {
             const data = await buildBrowserTerminalCommand(activeScriptId, paramValues)
-            setPendingTerminalCommand(data.command);
+            setPendingTerminalCommand({ sessionId: activeTerminalSessionId, command: data.command });
         } catch (error) {
             setTerminalLaunchStage(null);
             alert(error instanceof Error ? error.message : 'Failed to build terminal command');
@@ -1178,8 +1188,9 @@ export const ScriptsManager = () => {
 
             {/* ── Main Editor Area ── */}
             <div className="flex-1 min-w-0 flex flex-col relative h-full">
-                {activeScriptId ? (
-                    <div className="h-full flex flex-col">
+                <div className="h-full flex flex-col">
+                    {activeScriptId ? (
+                        <>
                         <div className="border-b px-4 py-2 flex items-center justify-between gap-3 bg-white dark:bg-slate-950 dark:border-slate-800">
                             <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
                                 <span className="min-w-0 max-w-[320px] truncate font-semibold text-sm text-slate-700 dark:text-slate-200" title={activeScript?.name}>
@@ -1308,9 +1319,12 @@ export const ScriptsManager = () => {
                                 <span>{activeActionFeedback.text}</span>
                             </div>
                         )}
-                        <div className="flex-1 flex flex-col relative overflow-hidden"> {/* New flex-col wrapper with overflow handling */}
-                            <div className="flex-1 relative min-h-0"> {/* min-h-0 is critical for flex shrinking */}
-                                {contentStatus === 'loading' ? (
+                        </>
+                    ) : null}
+                    <div className="flex-1 flex flex-col relative overflow-hidden">
+                        <div className="flex-1 relative min-h-0">
+                            {activeScriptId ? (
+                                contentStatus === 'loading' ? (
                                     <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
                                         <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
                                     </div>
@@ -1344,43 +1358,48 @@ export const ScriptsManager = () => {
                                             },
                                         }}
                                     />
-                                )}
-                            </div>
-                            {activeScriptId && isTerminalOpen && (
-                                <>
-                                    {!isTerminalMinimized && (
-                                        <div
-                                            className="group flex h-2 cursor-row-resize items-center justify-center border-t border-slate-700/70 bg-slate-900/85"
-                                            onPointerDown={startTerminalResize}
-                                            title="Resize terminal"
-                                        >
-                                            <div className="h-1 w-16 rounded-full bg-slate-600 transition-colors group-hover:bg-blue-500" />
-                                        </div>
-                                    )}
-                                    <div style={isTerminalMinimized ? undefined : { height: `${terminalHeight}px` }} className={isTerminalMinimized ? '' : 'shrink-0'}>
-                                        <TerminalComponent
-                                            className="h-full"
-                                            isVisible={true}
-                                            isMinimized={isTerminalMinimized}
-                                            toggleMinimize={() => setIsTerminalMinimized(!isTerminalMinimized)}
-                                            onClose={() => setIsTerminalOpen(false)}
-                                            pendingCommand={pendingTerminalCommand}
-                                            onCommandSent={() => {
-                                                setPendingTerminalCommand(null);
-                                                setTerminalLaunchStage(null);
-                                            }}
-                                        />
+                                )
+                            ) : (
+                                <div className="flex h-full items-center justify-center text-slate-400 text-sm">
+                                    <div className="flex flex-col items-center gap-2">
+                                        <span>Select a script to start editing</span>
+                                        <span className="text-xs">
+                                            or click <span className="font-semibold">+</span> in the sidebar to create one
+                                        </span>
                                     </div>
-                                </>
+                                </div>
                             )}
                         </div>
+                        {isTerminalOpen && (
+                            <>
+                                {!isTerminalMinimized && (
+                                    <div
+                                        className="group flex h-2 cursor-row-resize items-center justify-center border-t border-slate-700/70 bg-slate-900/85"
+                                        onPointerDown={startTerminalResize}
+                                        title="Resize terminal"
+                                    >
+                                        <div className="h-1 w-16 rounded-full bg-slate-600 transition-colors group-hover:bg-blue-500" />
+                                    </div>
+                                )}
+                                <div style={!isTerminalMinimized ? { height: `${terminalHeight}px` } : undefined} className={!isTerminalMinimized ? 'shrink-0' : ''}>
+                                    <TerminalComponent
+                                        className="h-full"
+                                        isVisible={true}
+                                        isMinimized={isTerminalMinimized}
+                                        toggleMinimize={() => setIsTerminalMinimized(!isTerminalMinimized)}
+                                        onClose={() => setIsTerminalOpen(false)}
+                                        pendingCommand={pendingTerminalCommand}
+                                        onActiveSessionChange={setActiveTerminalSessionId}
+                                        onCommandSent={() => {
+                                            setPendingTerminalCommand(null);
+                                            setTerminalLaunchStage(null);
+                                        }}
+                                    />
+                                </div>
+                            </>
+                        )}
                     </div>
-                ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center text-slate-400 text-sm gap-2">
-                        <span>Select a script to start editing</span>
-                        <span className="text-xs">or click <span className="font-semibold">+</span> in the sidebar to create one</span>
-                    </div>
-                )}
+                </div>
             </div>
 
             {/* ── Right Panel ── */}

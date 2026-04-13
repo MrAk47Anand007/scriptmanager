@@ -40,7 +40,7 @@ async function loadBootstrap(dispatch: ReturnType<typeof import('@/store/hooks')
 }
 import { setOpsMode, fetchProjects, fetchServerProfiles } from '@/features/ops/opsSlice'
 import { fetchApiCollections, fetchApiRequests } from '@/features/api/apiSlice'
-import { Settings, Code2, Globe } from 'lucide-react'
+import { Settings, Code2, Globe, SquareTerminal } from 'lucide-react'
 import { ModeToggle } from '@/components/ModeToggle'
 import { OpsModeToggle } from '@/components/OpsModeToggle'
 import { Switch } from '@/components/ui/switch'
@@ -261,6 +261,18 @@ export default function Home() {
             <Settings className="h-3 w-3" />
             Settings
           </button>
+          {isDesktopShell && (
+            <button
+              onClick={() => {
+                setActiveTab('scripts')
+                window.dispatchEvent(new CustomEvent('scriptmanager:open-terminal'))
+              }}
+              className="px-3 py-1.5 text-xs rounded-md transition-colors flex items-center gap-1.5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900"
+            >
+              <SquareTerminal className="h-3 w-3" />
+              Terminal
+            </button>
+          )}
         </nav>
         <div className={`desktop-no-drag ml-auto flex items-center ${isDesktopShell ? 'gap-3' : 'gap-4'} min-w-0`}>
           <div className="flex items-center gap-2" title="Auto-save changes">

@@ -4,7 +4,7 @@ import path from 'path'
 import http from 'http'
 import crypto from 'crypto'
 import fs from 'fs'
-import { attachDesktopRuntime, initDesktopRuntimeIpc, warmWindowDesktopRuntime } from './desktopRuntime'
+import { attachDesktopRuntime, initDesktopRuntimeIpc } from './desktopRuntime'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
 // In production (packaged), Electron spawns the standalone server itself.
@@ -105,7 +105,7 @@ function createSplashWindow() {
     maximizable: false,
     fullscreenable: false,
     show: true,
-    backgroundColor: '#0b1020',
+    backgroundColor: '#030014',
     alwaysOnTop: true,
     webPreferences: {
       sandbox: false,
@@ -114,159 +114,296 @@ function createSplashWindow() {
 
   const splashHtml = `
     <!doctype html>
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <title>ScriptManager</title>
-        <style>
-          :root { color-scheme: dark; }
-          body {
-            margin: 0;
-            min-height: 100vh;
-            display: grid;
-            place-items: center;
-            overflow: hidden;
-            background:
-              radial-gradient(circle at 18% 12%, rgba(56, 189, 248, 0.22), transparent 36%),
-              radial-gradient(circle at 82% 20%, rgba(37, 99, 235, 0.18), transparent 32%),
-              linear-gradient(180deg, #09101c 0%, #060912 100%);
-            color: #e8eef9;
-            font-family: "Segoe UI", system-ui, sans-serif;
+    <html lang="en">
+    <head>
+      <meta charset="utf-8" />
+      <title>ScriptManager</title>
+      <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+      <style>
+        :root {
+          --bg: #030014;
+          --glass: rgba(255, 255, 255, 0.03);
+          --glass-border: rgba(255, 255, 255, 0.08); /* slight border */
+          --accent-1: #8b5cf6; /* purple */
+          --accent-2: #3b82f6; /* blue */
+          --accent-3: #ec4899; /* pink */
+          --text: #f8fafc;
+          --text-muted: #94a3b8;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+          margin: 0;
+          padding: 0;
+          width: 100vw;
+          height: 100vh;
+          background-color: var(--bg);
+          font-family: 'Outfit', -apple-system, sans-serif;
+          color: var(--text);
+          overflow: hidden;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          user-select: none;
+          -webkit-font-smoothing: antialiased;
+        }
+
+        /* Animated background orbs */
+        .orb {
+          position: absolute;
+          border-radius: 50%;
+          filter: blur(80px);
+          z-index: 0;
+          opacity: 0.6;
+          animation: float 10s infinite ease-in-out alternate;
+        }
+        .orb-1 {
+          width: 300px;
+          height: 300px;
+          background: var(--accent-1);
+          top: -100px;
+          left: -100px;
+        }
+        .orb-2 {
+          width: 400px;
+          height: 400px;
+          background: var(--accent-2);
+          bottom: -150px;
+          right: -100px;
+          animation-delay: -5s;
+        }
+        .orb-3 {
+          width: 250px;
+          height: 250px;
+          background: var(--accent-3);
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          opacity: 0.4;
+          animation-duration: 15s;
+        }
+
+        @keyframes float {
+          0% { transform: translate(0, 0) scale(1); }
+          100% { transform: translate(40px, -40px) scale(1.1); }
+        }
+
+        /* Glassmorphism Card */
+        .glass-card {
+          position: relative;
+          z-index: 10;
+          width: 88%;
+          height: 82%;
+          background: linear-gradient(145deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.01) 100%);
+          backdrop-filter: blur(28px);
+          -webkit-backdrop-filter: blur(28px);
+          border: 1px solid var(--glass-border);
+          border-radius: 20px;
+          padding: 36px;
+          display: flex;
+          flex-direction: column;
+          box-shadow: 0 30px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.1);
+          animation: popup 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+          opacity: 0;
+          transform: translateY(20px) scale(0.95);
+        }
+
+        @keyframes popup {
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
           }
-          .shell {
-            width: 100%;
-            height: 100%;
-            display: grid;
-            place-items: center;
-            padding: 22px;
-            box-sizing: border-box;
-          }
-          .panel {
-            width: min(100%, 496px);
-            min-height: 252px;
-            border-radius: 24px;
-            padding: 28px;
-            box-sizing: border-box;
-            position: relative;
-            overflow: hidden;
-            background:
-              linear-gradient(180deg, rgba(28, 40, 72, 0.92) 0%, rgba(11, 18, 33, 0.96) 100%);
-            border: 1px solid rgba(116, 141, 189, 0.28);
-            box-shadow:
-              0 24px 70px rgba(0, 0, 0, 0.38),
-              inset 0 1px 0 rgba(255, 255, 255, 0.04);
-          }
-          .panel::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            background:
-              radial-gradient(circle at top, rgba(96, 165, 250, 0.18), transparent 38%),
-              linear-gradient(135deg, rgba(59, 130, 246, 0.08), transparent 54%);
-            pointer-events: none;
-          }
-          .inner {
-            position: relative;
-            z-index: 1;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            gap: 18px;
-          }
-          .brand {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-size: 24px;
-            font-weight: 700;
-            letter-spacing: -0.04em;
-          }
-          .mark {
-            width: 40px;
-            height: 40px;
-            border-radius: 13px;
-            display: grid;
-            place-items: center;
-            background: linear-gradient(135deg, #3b82f6, #0ea5e9);
-            color: white;
-            font-weight: 800;
-            box-shadow: 0 12px 30px rgba(37, 99, 235, 0.34);
-          }
-          .copy {
-            max-width: 360px;
-          }
-          .eyebrow {
-            color: #7dd3fc;
-            font-size: 11px;
-            letter-spacing: 0.18em;
-            text-transform: uppercase;
-            font-weight: 700;
-            margin-bottom: 8px;
-          }
-          .subtle {
-            color: #acc0e0;
-            font-size: 15px;
-            line-height: 1.55;
-          }
-          .meter {
-            display: grid;
-            gap: 9px;
-          }
-          .meter-row {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            color: #90a4c6;
-            font-size: 11px;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-          }
-          .bar {
-            height: 7px;
-            border-radius: 999px;
-            overflow: hidden;
-            background: rgba(43, 57, 86, 0.92);
-          }
-          .bar::after {
-            content: "";
-            display: block;
-            width: 34%;
-            height: 100%;
-            border-radius: inherit;
-            background: linear-gradient(90deg, #3b82f6, #38bdf8 55%, #67e8f9);
-            box-shadow: 0 0 24px rgba(56, 189, 248, 0.45);
-            animation: pulse 1.1s ease-in-out infinite alternate;
-          }
-          @keyframes pulse {
-            from { transform: translateX(0); }
-            to { transform: translateX(185%); }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="shell">
-          <div class="panel">
-            <div class="inner">
-              <div class="copy">
-                <div class="eyebrow">Desktop Workspace</div>
-                <div class="brand">
-                  <div class="mark">&lt;/&gt;</div>
-                  <div>ScriptManager</div>
-                </div>
-                <div class="subtle">Starting the local workspace and preparing your tools for a faster desktop run.</div>
-              </div>
-              <div class="meter">
-                <div class="meter-row">
-                  <span>Booting Runtime</span>
-                  <span>Please wait</span>
-                </div>
-                <div class="bar"></div>
-              </div>
-            </div>
+        }
+
+        /* Header */
+        .header {
+          display: flex;
+          align-items: center;
+          gap: 24px;
+        }
+
+        .logo-wrap {
+          position: relative;
+          width: 64px;
+          height: 64px;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+          border-radius: 18px;
+          box-shadow: 0 0 20px rgba(139, 92, 246, 0.5), inset 0 2px 4px rgba(255,255,255,0.3);
+          font-size: 26px;
+          font-weight: 700;
+          color: #fff;
+          font-family: monospace;
+          overflow: hidden;
+        }
+
+        .logo-wrap::after {
+          content: '';
+          position: absolute;
+          top: -50%;
+          left: -50%;
+          width: 200%;
+          height: 200%;
+          background: linear-gradient(to right, transparent, rgba(255,255,255,0.4), transparent);
+          transform: rotate(45deg) translateX(-100%);
+          animation: shine 4s infinite cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes shine {
+          0%, 20% { transform: rotate(45deg) translateX(-100%); }
+          80%, 100% { transform: rotate(45deg) translateX(100%); }
+        }
+
+        .title-box {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .badge {
+          align-self: flex-start;
+          background: rgba(59, 130, 246, 0.15);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          color: #60a5fa;
+          padding: 4px 10px;
+          border-radius: 99px;
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 2px;
+          text-transform: uppercase;
+          margin-bottom: 8px;
+        }
+
+        .title {
+          font-size: 32px;
+          font-weight: 700;
+          margin: 0;
+          background: linear-gradient(to right, #fff, #cbd5e1);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          letter-spacing: -1px;
+        }
+
+        /* Body text */
+        .message {
+          margin-top: 24px;
+          font-size: 15px;
+          font-weight: 400;
+          color: var(--text-muted);
+          line-height: 1.6;
+          max-width: 95%;
+        }
+
+        /* Footer / Loading */
+        .footer {
+          margin-top: auto;
+          width: 100%;
+        }
+
+        .status-labels {
+          display: flex;
+          justify-content: space-between;
+          font-size: 11px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 1.5px;
+          margin-bottom: 12px;
+        }
+
+        .status-labels .left {
+          color: var(--text-muted);
+        }
+
+        .status-labels .right {
+          color: #fff;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        /* Loader pulse dot */
+        .pulse-dot {
+          width: 8px;
+          height: 8px;
+          background-color: var(--accent-3);
+          border-radius: 50%;
+          box-shadow: 0 0 10px var(--accent-3);
+          animation: heart-beat 1.5s infinite;
+        }
+
+        @keyframes heart-beat {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(0.6); opacity: 0.5; }
+        }
+
+        /* Progress bar */
+        .track {
+          width: 100%;
+          height: 4px;
+          background: rgba(0, 0, 0, 0.4);
+          border-radius: 10px;
+          overflow: hidden;
+          box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+          position: relative;
+        }
+
+        .bar {
+          position: absolute;
+          top: 0;
+          left: 0;
+          height: 100%;
+          width: 50%;
+          background: linear-gradient(90deg, transparent, var(--accent-2), var(--accent-1), var(--accent-3), transparent);
+          background-size: 200% 100%;
+          border-radius: 10px;
+          animation: scroll-gradient 2s linear infinite, slide-bar 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        }
+
+        @keyframes scroll-gradient {
+          0% { background-position: 100% 0; }
+          100% { background-position: -100% 0; }
+        }
+
+        @keyframes slide-bar {
+          0% { transform: translateX(-100%); width: 30%; }
+          50% { width: 60%; }
+          100% { transform: translateX(250%); width: 30%; }
+        }
+      </style>
+    </head>
+    <body>
+      <!-- Ambient Background -->
+      <div class="orb orb-1"></div>
+      <div class="orb orb-2"></div>
+      <div class="orb orb-3"></div>
+
+      <!-- Main Card -->
+      <div class="glass-card">
+        <div class="header">
+          <div class="logo-wrap">&lt;/&gt;</div>
+          <div class="title-box">
+            <div class="badge">Desktop Environment</div>
+            <h1 class="title">ScriptManager</h1>
           </div>
         </div>
-      </body>
+        
+        <div class="message">
+          Initializing a secure local workspace. Setting up the embedded runtime and compiling your tools for an ultra-fast desktop experience.
+        </div>
+        
+        <div class="footer">
+          <div class="status-labels">
+            <span class="left">Booting Engine</span>
+            <span class="right">Please Wait <div class="pulse-dot"></div></span>
+          </div>
+          <div class="track">
+            <div class="bar"></div>
+          </div>
+        </div>
+      </div>
+    </body>
     </html>
   `
 
@@ -437,14 +574,14 @@ async function createWindow() {
     minHeight: 600,
     title: 'ScriptManager',
     show: false,
-    backgroundColor: '#0b1020',
+    backgroundColor: '#0a0a0c',
     autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     titleBarOverlay: process.platform === 'darwin'
       ? false
       : {
-          color: '#090f19',
-          symbolColor: '#d8e2f1',
+          color: '#0a0a0c',
+          symbolColor: '#ffffff',
           height: 44,
         },
     webPreferences: {
@@ -485,9 +622,6 @@ async function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
-  mainWindow.webContents.once('did-finish-load', () => {
-    warmWindowDesktopRuntime(mainWindow!)
-  })
 }
 
 app.whenReady().then(() => {
@@ -523,6 +657,10 @@ ipcMain.handle('scriptmanager:reveal-path', async (_event, targetPath: string) =
 ipcMain.handle('scriptmanager:copy-text', async (_event, value: string) => {
   clipboard.writeText(value ?? '')
   return true
+})
+
+ipcMain.handle('scriptmanager:read-text', async () => {
+  return clipboard.readText()
 })
 
 app.on('window-all-closed', () => {

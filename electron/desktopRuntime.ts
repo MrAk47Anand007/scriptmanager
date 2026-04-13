@@ -43,10 +43,10 @@ import {
 } from './opsRuntime'
 
 type TerminalEvent =
-  | { type: 'connected' }
-  | { type: 'data'; data: string }
-  | { type: 'closed' }
-  | { type: 'error'; message: string }
+  | { sessionId: string; type: 'connected' }
+  | { sessionId: string; type: 'data'; data: string }
+  | { sessionId: string; type: 'closed' }
+  | { sessionId: string; type: 'error'; message: string }
 
 type BuildEvent =
   | { type: 'started'; buildId: string }
@@ -61,6 +61,7 @@ type RunScriptPayload = {
 }
 
 type RunScriptInTerminalPayload = {
+  sessionId?: string
   scriptId: string
   paramValues?: Record<string, string>
 }
@@ -198,10 +199,15 @@ type FolderInspection = {
 
 type TerminalShellKind = 'powershell' | 'cmd' | 'posix'
 
+type TerminalSessionRuntime = {
+  terminal: pty.IPty
+  shellKind: TerminalShellKind
+  contextKey: string | null
+}
+
 type WindowRuntime = {
-  terminal: pty.IPty | null
-  terminalShellKind: TerminalShellKind | null
-  terminalContextKey: string | null
+  terminalSessions: Map<string, TerminalSessionRuntime>
+  pendingTerminalContexts: Map<string, ScriptExecutionContext>
   activeBuilds: Map<string, ReturnType<typeof spawn>>
 }
 
@@ -211,6 +217,7 @@ const prisma = new PrismaClient({
 
 const windowRuntimes = new Map<number, WindowRuntime>()
 const DEFAULT_TIMEOUT_MS = 30_000
+const DEFAULT_TERMINAL_SESSION_ID = 'terminal-1'
 const MAX_SCRIPT_VERSIONS = 10
 const SCRIPT_EXTENSIONS = new Set(['.py', '.js', '.ts', '.sh', '.ps1', '.bat'])
 const PYTHON_MANIFESTS = ['requirements.txt', 'pyproject.toml', 'Pipfile']
@@ -455,6 +462,18 @@ function toAbsolutePath(targetPath: string): string {
   return path.isAbsolute(targetPath) ? targetPath : path.join(process.cwd(), targetPath)
 }
 
+function getDefaultTerminalCwd(): string {
+  const target = cachedWorkspaceRoot?.value
+    ?? getDesktopWorkspaceLayout(toAbsolutePath(process.env.SCRIPTS_DIR || path.join(process.cwd(), 'user_scripts'))).scriptsRoot
+
+  try {
+    fs.mkdirSync(target, { recursive: true })
+    return target
+  } catch {
+    return process.cwd()
+  }
+}
+
 async function getWorkspaceRoot(): Promise<string> {
   if (cachedWorkspaceRoot && cachedWorkspaceRoot.expiresAt > Date.now()) {
     return cachedWorkspaceRoot.value
@@ -589,9 +608,8 @@ function getRuntime(windowId: number): WindowRuntime {
   let runtime = windowRuntimes.get(windowId)
   if (!runtime) {
     runtime = {
-      terminal: null,
-      terminalShellKind: null,
-      terminalContextKey: null,
+      terminalSessions: new Map(),
+      pendingTerminalContexts: new Map(),
       activeBuilds: new Map(),
     }
     windowRuntimes.set(windowId, runtime)
@@ -628,6 +646,11 @@ function resolveWindow(event: IpcMainInvokeEvent): BrowserWindow {
   return window
 }
 
+function normalizeTerminalSessionId(sessionId?: string | null): string {
+  const trimmed = sessionId?.trim()
+  return trimmed || DEFAULT_TERMINAL_SESSION_ID
+}
+
 function getSessionTerminalShellCandidates() {
   const isWindows = process.platform === 'win32'
   if (isWindows) {
@@ -644,7 +667,7 @@ function getSessionTerminalShellCandidates() {
   ]
 }
 
-function createTerminalForWindow(window: BrowserWindow): pty.IPty {
+function createTerminalForWindow(window: BrowserWindow, sessionId: string): TerminalSessionRuntime {
   const env = {
     ...(process.env as NodeJS.ProcessEnv),
     TERM: 'xterm-256color',
@@ -659,28 +682,39 @@ function createTerminalForWindow(window: BrowserWindow): pty.IPty {
         name: 'xterm-color',
         cols: 80,
         rows: 24,
-        cwd: process.platform === 'win32' ? process.cwd() : process.cwd(),
+        cwd: getDefaultTerminalCwd(),
         env: env as { [key: string]: string },
-        useConpty: isWindows,
+        useConpty: false,
       })
       const runtime = getRuntime(window.id)
-      runtime.terminalShellKind = candidate.kind
-      runtime.terminalContextKey = null
+      const sessionRuntime: TerminalSessionRuntime = {
+        terminal,
+        shellKind: candidate.kind,
+        contextKey: null,
+      }
 
       terminal.onData((data) => {
-        sendTerminalEvent(window.webContents, { type: 'data', data })
+        sendTerminalEvent(window.webContents, { sessionId, type: 'data', data })
       })
 
       terminal.onExit(() => {
         const runtime = getRuntime(window.id)
-        runtime.terminal = null
-        runtime.terminalShellKind = null
-        runtime.terminalContextKey = null
-        sendTerminalEvent(window.webContents, { type: 'closed' })
+        const existing = runtime.terminalSessions.get(sessionId)
+        if (existing?.terminal === terminal) {
+          runtime.terminalSessions.delete(sessionId)
+        }
+        sendTerminalEvent(window.webContents, { sessionId, type: 'closed' })
       })
 
-      sendTerminalEvent(window.webContents, { type: 'connected' })
-      return terminal
+      runtime.terminalSessions.set(sessionId, sessionRuntime)
+      const pendingContext = runtime.pendingTerminalContexts.get(sessionId)
+      if (pendingContext) {
+        sessionRuntime.contextKey = pendingContext.key
+        sessionRuntime.terminal.write(buildTerminalContextCommands(pendingContext.cwd, pendingContext.venvPath, sessionRuntime.shellKind))
+        runtime.pendingTerminalContexts.delete(sessionId)
+      }
+      sendTerminalEvent(window.webContents, { sessionId, type: 'connected' })
+      return sessionRuntime
     } catch (error) {
       lastError = error
       console.warn(`[DesktopRuntime] Failed to spawn ${candidate.shell}, trying fallback`, error)
@@ -690,14 +724,15 @@ function createTerminalForWindow(window: BrowserWindow): pty.IPty {
   throw lastError instanceof Error ? lastError : new Error('Unable to start terminal shell')
 }
 
-function ensureTerminal(window: BrowserWindow): pty.IPty {
+function ensureTerminal(window: BrowserWindow, sessionId = DEFAULT_TERMINAL_SESSION_ID): TerminalSessionRuntime {
   const runtime = getRuntime(window.id)
-  if (runtime.terminal) {
-    return runtime.terminal
+  const normalizedSessionId = normalizeTerminalSessionId(sessionId)
+  const existing = runtime.terminalSessions.get(normalizedSessionId)
+  if (existing) {
+    return existing
   }
 
-  runtime.terminal = createTerminalForWindow(window)
-  return runtime.terminal
+  return createTerminalForWindow(window, normalizedSessionId)
 }
 
 async function getScriptRecord(scriptId: string) {
@@ -830,34 +865,27 @@ function buildTerminalContextCommands(cwd: string, venvPath: string | null, shel
   return `cd ${posixCwd}${activation}\n`
 }
 
-function applyTerminalContext(window: BrowserWindow, context: ScriptExecutionContext, force = false) {
-  const runtime = getRuntime(window.id)
-  const terminal = ensureTerminal(window)
-  if (!force && runtime.terminalContextKey === context.key) {
+function applyTerminalContext(window: BrowserWindow, sessionId: string, context: ScriptExecutionContext, force = false) {
+  const session = ensureTerminal(window, sessionId)
+  if (!force && session.contextKey === context.key) {
     return
   }
 
-  runtime.terminalContextKey = context.key
-  if (runtime.terminalShellKind) {
-    terminal.write(buildTerminalContextCommands(context.cwd, context.venvPath, runtime.terminalShellKind))
-  }
+  session.contextKey = context.key
+  session.terminal.write(buildTerminalContextCommands(context.cwd, context.venvPath, session.shellKind))
 }
 
 function releaseWorkspaceFromTerminal(folderPath: string) {
   const normalizedFolder = path.resolve(folderPath)
   for (const runtime of windowRuntimes.values()) {
-    if (!runtime.terminal) {
-      continue
-    }
-
-    const activeContext = runtime.terminalContextKey?.split('::')[0]
-    if (activeContext && path.resolve(activeContext) === normalizedFolder) {
-      try {
-        runtime.terminal.kill()
-      } catch {}
-      runtime.terminal = null
-      runtime.terminalShellKind = null
-      runtime.terminalContextKey = null
+    for (const [sessionId, session] of runtime.terminalSessions.entries()) {
+      const activeContext = session.contextKey?.split('::')[0]
+      if (activeContext && path.resolve(activeContext) === normalizedFolder) {
+        try {
+          session.terminal.kill()
+        } catch {}
+        runtime.terminalSessions.delete(sessionId)
+      }
     }
   }
 }
@@ -1645,9 +1673,9 @@ function destroyWindowRuntime(windowId: number) {
   const runtime = windowRuntimes.get(windowId)
   if (!runtime) return
 
-  if (runtime.terminal) {
+  for (const session of runtime.terminalSessions.values()) {
     try {
-      runtime.terminal.kill()
+      session.terminal.kill()
     } catch {}
   }
 
@@ -1658,6 +1686,7 @@ function destroyWindowRuntime(windowId: number) {
   }
 
   runtime.activeBuilds.clear()
+  runtime.terminalSessions.clear()
   windowRuntimes.delete(windowId)
 }
 
@@ -1668,7 +1697,7 @@ export function attachDesktopRuntime(window: BrowserWindow) {
 
 export function warmWindowDesktopRuntime(window: BrowserWindow) {
   try {
-    ensureTerminal(window)
+    ensureTerminal(window, DEFAULT_TERMINAL_SESSION_ID)
   } catch (error) {
     console.error('[DesktopRuntime] Failed to warm terminal runtime:', error)
   }
@@ -1851,46 +1880,51 @@ export function initDesktopRuntimeIpc() {
     return listDesktopAuditLog(payload ?? undefined)
   })
 
-  ipcMain.handle('scriptmanager:runtime:warm-terminal', async (event) => {
+  ipcMain.handle('scriptmanager:runtime:warm-terminal', async (event, payload?: { sessionId?: string }) => {
     const window = resolveWindow(event)
-    ensureTerminal(window)
+    ensureTerminal(window, normalizeTerminalSessionId(payload?.sessionId))
     return { ok: true }
   })
 
-  ipcMain.handle('scriptmanager:runtime:terminal-input', async (event, data: string) => {
+  ipcMain.handle('scriptmanager:runtime:terminal-input', async (event, payload: { sessionId?: string; data: string }) => {
     const window = resolveWindow(event)
-    const terminal = ensureTerminal(window)
-    terminal.write(data)
+    const terminal = ensureTerminal(window, normalizeTerminalSessionId(payload.sessionId))
+    terminal.terminal.write(payload.data)
     return { ok: true }
   })
 
-  ipcMain.handle('scriptmanager:runtime:terminal-resize', async (event, payload: { cols: number; rows: number }) => {
+  ipcMain.handle('scriptmanager:runtime:terminal-resize', async (event, payload: { sessionId?: string; cols: number; rows: number }) => {
     const window = resolveWindow(event)
-    const terminal = ensureTerminal(window)
+    const terminal = ensureTerminal(window, normalizeTerminalSessionId(payload.sessionId))
     if (payload.cols > 0 && payload.rows > 0) {
-      terminal.resize(payload.cols, payload.rows)
+      terminal.terminal.resize(payload.cols, payload.rows)
     }
     return { ok: true }
   })
 
-  ipcMain.handle('scriptmanager:runtime:terminal-close', async (event) => {
+  ipcMain.handle('scriptmanager:runtime:terminal-close', async (event, payload?: { sessionId?: string }) => {
     const window = resolveWindow(event)
     const runtime = getRuntime(window.id)
-    if (runtime.terminal) {
-      runtime.terminal.kill()
-      runtime.terminal = null
-      runtime.terminalShellKind = null
-      runtime.terminalContextKey = null
+    const sessionId = normalizeTerminalSessionId(payload?.sessionId)
+    const session = runtime.terminalSessions.get(sessionId)
+    if (session) {
+      session.terminal.kill()
+      runtime.terminalSessions.delete(sessionId)
     }
     return { ok: true }
   })
 
-  ipcMain.handle('scriptmanager:runtime:set-terminal-context', async (event, payload: { scriptId: string | null }) => {
+  ipcMain.handle('scriptmanager:runtime:set-terminal-context', async (event, payload: { sessionId?: string; scriptId: string | null }) => {
     const window = resolveWindow(event)
     const runtime = getRuntime(window.id)
+    const sessionId = normalizeTerminalSessionId(payload.sessionId)
+    const session = runtime.terminalSessions.get(sessionId)
 
     if (!payload.scriptId) {
-      runtime.terminalContextKey = null
+      runtime.pendingTerminalContexts.delete(sessionId)
+      if (session) {
+        session.contextKey = null
+      }
       return { ok: true }
     }
 
@@ -1900,7 +1934,11 @@ export function initDesktopRuntimeIpc() {
     }
 
     const context = await getScriptExecutionContext(script)
-    applyTerminalContext(window, context)
+    if (session) {
+      applyTerminalContext(window, sessionId, context)
+    } else {
+      runtime.pendingTerminalContexts.set(sessionId, context)
+    }
     return { ok: true }
   })
 
@@ -1912,8 +1950,9 @@ export function initDesktopRuntimeIpc() {
     }
 
     const context = await getScriptExecutionContext(script)
-    const terminal = ensureTerminal(window)
-    applyTerminalContext(window, context)
+    const sessionId = normalizeTerminalSessionId(payload.sessionId)
+    const terminal = ensureTerminal(window, sessionId)
+    applyTerminalContext(window, sessionId, context)
     const command = buildLocalTerminalCommand({
       filePath: resolveScriptPath(script),
       language: script.language,
@@ -1921,7 +1960,7 @@ export function initDesktopRuntimeIpc() {
         ?? script.interpreter,
       paramValues: payload.paramValues,
     })
-    terminal.write(`${command}\r`)
+    terminal.terminal.write(`${command}\r`)
     return { ok: true }
   })
 
