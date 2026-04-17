@@ -39,7 +39,7 @@ export async function POST(
   const baseName = `${original.name} (copy)`
   let newName = baseName
   let counter = 2
-  while (await prisma.script.findUnique({ where: { name: newName } })) {
+  while (await prisma.script.findFirst({ where: { name: newName } })) {
     newName = `${baseName} ${counter++}`
   }
 

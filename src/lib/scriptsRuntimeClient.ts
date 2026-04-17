@@ -70,6 +70,7 @@ type DesktopCollectionRecord = {
   description?: string
   script_count?: number
   project_id?: string | null
+  parent_id?: string | null
   folder_path?: string | null
   is_temporary?: boolean
   runtime_preset?: 'general' | 'python' | 'node' | 'shell' | 'powershell'
@@ -82,12 +83,25 @@ type DesktopCollectionRecord = {
 type DesktopCreateCollectionPayload = {
   name: string
   projectId?: string | null
+  parentId?: string | null
   runtimePreset?: DesktopCollectionRecord['runtime_preset']
   pythonToolchainEnabled?: boolean
 }
 
+type DesktopUpdateCollectionPayload = {
+  id: string
+  name?: string
+  projectId?: string | null
+  parentId?: string | null
+}
+
+type DesktopUpdateCollectionResult = {
+  updatedCollections: DesktopCollectionRecord[]
+}
+
 type DesktopDeleteCollectionResult = {
   id: string
+  deletedCollectionIds: string[]
   deletedScriptIds: string[]
   deletedFolderPath: string | null
 }
@@ -130,6 +144,14 @@ export async function createDesktopCollection(payload: DesktopCreateCollectionPa
   }
 
   return window.scriptManagerDesktop.runtime.createCollection(payload) as Promise<DesktopCollectionRecord>
+}
+
+export async function updateDesktopCollection(payload: DesktopUpdateCollectionPayload): Promise<DesktopUpdateCollectionResult> {
+  if (!window.scriptManagerDesktop?.runtime) {
+    throw new Error('Desktop runtime unavailable')
+  }
+
+  return window.scriptManagerDesktop.runtime.updateCollection(payload) as Promise<DesktopUpdateCollectionResult>
 }
 
 export async function deleteDesktopCollection(id: string, hardDelete = false): Promise<DesktopDeleteCollectionResult> {

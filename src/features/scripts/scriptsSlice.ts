@@ -13,6 +13,7 @@ import {
     openDesktopScriptsFolder,
     readDesktopScript,
     saveDesktopScript,
+    updateDesktopCollection,
 } from '@/lib/scriptsRuntimeClient'
 
 export interface Tag {
@@ -81,6 +82,7 @@ export interface Collection {
     description?: string;
     script_count?: number;
     project_id?: string | null;
+    parent_id?: string | null;
     folder_path?: string | null;
     is_temporary?: boolean;
     runtime_preset?: 'general' | 'python' | 'node' | 'shell' | 'powershell';
@@ -413,6 +415,7 @@ export const fetchCollections = createAsyncThunk('scripts/fetchCollections', asy
 export const createCollection = createAsyncThunk('scripts/createCollection', async (payload: {
     name: string
     projectId?: string | null
+    parentId?: string | null
     runtimePreset?: Collection['runtime_preset']
     pythonToolchainEnabled?: boolean
 }) => {
@@ -420,6 +423,7 @@ export const createCollection = createAsyncThunk('scripts/createCollection', asy
         return createDesktopCollection({
             name: payload.name,
             projectId: payload.projectId,
+            parentId: payload.parentId,
             runtimePreset: payload.runtimePreset,
             pythonToolchainEnabled: payload.pythonToolchainEnabled,
         })
@@ -427,6 +431,7 @@ export const createCollection = createAsyncThunk('scripts/createCollection', asy
     const response = await axios.post('/api/collections', {
         name: payload.name,
         project_id: payload.projectId,
+        parent_id: payload.parentId,
         runtime_preset: payload.runtimePreset,
         python_toolchain_enabled: payload.pythonToolchainEnabled,
     })
@@ -440,6 +445,7 @@ export const deleteCollection = createAsyncThunk('scripts/deleteCollection', asy
     await axios.delete(`/api/collections/${id}`)
     return {
         id,
+        deletedCollectionIds: [id],
         deletedScriptIds: [] as string[],
         deletedFolderPath: null as string | null,
     }
@@ -454,6 +460,7 @@ export const removeTemporaryCollection = createAsyncThunk(
         const response = await axios.delete(`/api/collections/${id}?hardDelete=true`)
         return {
             id,
+            deletedCollectionIds: [id],
             deletedScriptIds: (response.data.deleted_script_ids ?? []) as string[],
             deletedFolderPath: null as string | null,
         }
@@ -476,9 +483,19 @@ export const moveScript = createAsyncThunk('scripts/moveScript', async ({ script
     return { scriptId, collectionId: response.data.collection_id }
 })
 
-export const moveCollection = createAsyncThunk('scripts/moveCollection', async ({ collectionId, projectId }: { collectionId: string, projectId: string | null }) => {
-    const response = await axios.put(`/api/collections/${collectionId}`, { project_id: projectId })
-    return { collectionId, projectId: response.data.project_id }
+export const moveCollection = createAsyncThunk('scripts/moveCollection', async ({ collectionId, projectId, parentId }: { collectionId: string, projectId?: string | null, parentId?: string | null }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return updateDesktopCollection({
+            id: collectionId,
+            projectId,
+            parentId,
+        })
+    }
+    const payload: any = {}
+    if (projectId !== undefined) payload.project_id = projectId;
+    if (parentId !== undefined) payload.parent_id = parentId;
+    const response = await axios.put(`/api/collections/${collectionId}`, payload)
+    return { updatedCollections: [response.data as Collection] }
 })
 
 // --- Env Var Thunks ---
@@ -670,7 +687,10 @@ const scriptsSlice = createSlice({
                 state.collections.push(action.payload)
             })
             .addCase(deleteCollection.fulfilled, (state, action) => {
-                state.collections = state.collections.filter(c => c.id !== action.payload.id)
+                const deletedCollectionIds = action.payload.deletedCollectionIds?.length
+                    ? action.payload.deletedCollectionIds
+                    : [action.payload.id]
+                state.collections = state.collections.filter(c => !deletedCollectionIds.includes(c.id))
                 if (action.payload.deletedScriptIds.length > 0) {
                     state.items = state.items.filter(script => !action.payload.deletedScriptIds.includes(script.id))
                     if (state.activeScriptId && action.payload.deletedScriptIds.includes(state.activeScriptId)) {
@@ -679,14 +699,17 @@ const scriptsSlice = createSlice({
                     }
                 } else {
                     state.items.forEach(script => {
-                        if (script.collection_id === action.payload.id) {
+                        if (script.collection_id && deletedCollectionIds.includes(script.collection_id)) {
                             script.collection_id = null
                         }
                     })
                 }
             })
             .addCase(removeTemporaryCollection.fulfilled, (state, action) => {
-                state.collections = state.collections.filter(c => c.id !== action.payload.id)
+                const deletedCollectionIds = action.payload.deletedCollectionIds?.length
+                    ? action.payload.deletedCollectionIds
+                    : [action.payload.id]
+                state.collections = state.collections.filter(c => !deletedCollectionIds.includes(c.id))
                 state.items = state.items.filter(script => !action.payload.deletedScriptIds.includes(script.id))
                 if (state.activeScriptId && action.payload.deletedScriptIds.includes(state.activeScriptId)) {
                     state.activeScriptId = null
@@ -714,9 +737,13 @@ const scriptsSlice = createSlice({
                 }
             })
             .addCase(moveCollection.fulfilled, (state, action) => {
-                const collection = state.collections.find(c => c.id === action.payload.collectionId)
-                if (collection) {
-                    collection.project_id = action.payload.projectId
+                for (const updatedCollection of action.payload.updatedCollections ?? []) {
+                    const existing = state.collections.find(c => c.id === updatedCollection.id)
+                    if (existing) {
+                        Object.assign(existing, updatedCollection)
+                    } else {
+                        state.collections.push(updatedCollection)
+                    }
                 }
             })
             .addCase(forceSyncGist.fulfilled, (state, action) => {

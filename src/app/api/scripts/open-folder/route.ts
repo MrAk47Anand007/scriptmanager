@@ -11,7 +11,7 @@ async function buildUniqueScriptName(baseName: string, currentSourcePath: string
   let suffix = 2
 
   while (true) {
-    const existing = await prisma.script.findUnique({ where: { name: candidate } })
+    const existing = await prisma.script.findFirst({ where: { name: candidate } })
     if (!existing || existing.sourcePath === currentSourcePath) {
       return candidate
     }

@@ -12,6 +12,7 @@ export async function PUT(
   const {
     name,
     project_id,
+    parent_id,
     folder_path,
     is_temporary,
     runtime_preset,
@@ -30,6 +31,7 @@ export async function PUT(
     data: {
       name: name?.trim() ? name.trim() : collection.name,
       projectId: project_id ?? null,
+      parentId: parent_id !== undefined ? (parent_id || null) : collection.parentId,
       folderPath: folder_path !== undefined ? (folder_path || null) : collection.folderPath,
       isTemporary: is_temporary !== undefined ? !!is_temporary : collection.isTemporary,
       runtimePreset: runtime_preset ?? collection.runtimePreset,
@@ -44,6 +46,7 @@ export async function PUT(
     name: updated.name,
     description: updated.description,
     project_id: updated.projectId,
+    parent_id: updated.parentId,
     folder_path: updated.folderPath,
     is_temporary: updated.isTemporary,
     runtime_preset: updated.runtimePreset,

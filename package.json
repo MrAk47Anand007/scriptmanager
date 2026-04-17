@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "A standalone self-hosted script manager - write, run, schedule, and organize scripts",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/electron/main.js",
   "bin": {
     "sm": "./cli/sm.mjs"
   },
@@ -16,9 +16,10 @@
     "db:studio": "prisma studio",
     "db:reset:clean": "node ./scripts/reset-workspace-db.mjs",
     "db:reset:clean:files": "node ./scripts/reset-workspace-db.mjs --wipe-workspace --wipe-builds",
+    "workspace:reset:fresh": "node ./scripts/reset-workspace-db.mjs --wipe-workspace --wipe-builds --workspace-root ./ScriptsSaved",
     "next:dev": "next dev",
     "cli": "node ./cli/sm.mjs",
-    "electron:dev": "cross-env DESKTOP_AUTH_SECRET=dev-desktop-secret-local concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron:dev": "npx tsc -p electron/tsconfig.json && cross-env DESKTOP_AUTH_SECRET=dev-desktop-secret-local concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "npx prisma generate && cross-env ELECTRON_BUILD=1 next build && tsc -p electron/tsconfig.json && electron-builder",
     "electron:pack": "npx prisma generate && cross-env ELECTRON_BUILD=1 next build && tsc -p electron/tsconfig.json && electron-builder --dir"
   },

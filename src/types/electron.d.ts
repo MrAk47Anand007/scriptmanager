@@ -29,6 +29,7 @@ declare global {
         listScripts: () => Promise<unknown[]>
         listCollections: () => Promise<unknown[]>
         createCollection: (payload: unknown) => Promise<unknown>
+        updateCollection: (payload: unknown) => Promise<unknown>
         deleteCollection: (payload: { id: string; hardDelete?: boolean }) => Promise<unknown>
         inspectFolder: (folderPath: string) => Promise<unknown>
         inspectCollectionWorkspace: (collectionId: string) => Promise<unknown>

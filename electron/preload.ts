@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     listScripts: () => ipcRenderer.invoke('scriptmanager:runtime:list-scripts') as Promise<unknown[]>,
     listCollections: () => ipcRenderer.invoke('scriptmanager:runtime:list-collections') as Promise<unknown[]>,
     createCollection: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:create-collection', payload) as Promise<unknown>,
+    updateCollection: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:update-collection', payload) as Promise<unknown>,
     deleteCollection: (payload: { id: string; hardDelete?: boolean }) =>
       ipcRenderer.invoke('scriptmanager:runtime:delete-collection', payload) as Promise<unknown>,
     inspectFolder: (folderPath: string) => ipcRenderer.invoke('scriptmanager:runtime:inspect-folder', folderPath) as Promise<unknown>,

@@ -104,6 +104,7 @@ type CollectionDto = {
   description: string
   script_count: number
   project_id: string | null
+  parent_id: string | null
   folder_path: string | null
   is_temporary: boolean
   runtime_preset: 'general' | 'python' | 'node' | 'shell' | 'powershell'
@@ -161,8 +162,16 @@ type OpenFolderPayload = {
 type CreateCollectionPayload = {
   name: string
   projectId?: string | null
+  parentId?: string | null
   runtimePreset?: CollectionDto['runtime_preset']
   pythonToolchainEnabled?: boolean
+}
+
+type UpdateCollectionPayload = {
+  id: string
+  name?: string
+  projectId?: string | null
+  parentId?: string | null
 }
 
 type DeleteCollectionPayload = {
@@ -180,6 +189,7 @@ type CollectionRecord = {
   name: string
   description: string | null
   projectId: string | null
+  parentId: string | null
   folderPath: string | null
   isTemporary: boolean
   runtimePreset: string
@@ -404,6 +414,7 @@ function serializeCollectionRecord(collection: CollectionRecord): CollectionDto 
     description: collection.description ?? '',
     script_count: collection._count?.scripts ?? 0,
     project_id: collection.projectId ?? null,
+    parent_id: collection.parentId ?? null,
     folder_path: collection.folderPath ?? null,
     is_temporary: collection.isTemporary,
     runtime_preset: normalizeRuntimePreset(collection.runtimePreset),
@@ -456,6 +467,83 @@ function listScriptFiles(folderPath: string): string[] {
 
 function sanitizeCollectionFolderName(name: string): string {
   return sanitizeWorkspaceName(name, 'collection')
+}
+
+function isPathInside(basePath: string, targetPath: string): boolean {
+  const normalizedBase = path.resolve(basePath)
+  const normalizedTarget = path.resolve(targetPath)
+  const relative = path.relative(normalizedBase, normalizedTarget)
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+}
+
+function replacePathPrefix(targetPath: string | null, oldBasePath: string, newBasePath: string): string | null {
+  if (!targetPath) {
+    return null
+  }
+
+  if (!isPathInside(oldBasePath, targetPath)) {
+    return targetPath
+  }
+
+  const relative = path.relative(path.resolve(oldBasePath), path.resolve(targetPath))
+  return path.resolve(newBasePath, relative)
+}
+
+function buildCollectionFolderPath(basePath: string, name: string, currentPath?: string | null): string {
+  const normalizedCurrentPath = currentPath ? path.resolve(currentPath) : null
+  let folderName = sanitizeCollectionFolderName(name)
+  let folderPath = path.join(basePath, folderName)
+  let suffix = 2
+
+  while (fs.existsSync(folderPath) && path.resolve(folderPath) !== normalizedCurrentPath) {
+    folderName = `${sanitizeCollectionFolderName(name)}_${suffix++}`
+    folderPath = path.join(basePath, folderName)
+  }
+
+  return folderPath
+}
+
+async function getCollectionSubtree(rootCollectionId: string): Promise<CollectionRecord[]> {
+  const collections = await prisma.collection.findMany({
+    orderBy: [{ parentId: 'asc' }, { name: 'asc' }],
+    include: { _count: { select: { scripts: true } } },
+  })
+
+  const root = collections.find((collection) => collection.id === rootCollectionId)
+  if (!root) {
+    throw new Error('Collection not found')
+  }
+
+  const childrenByParentId = new Map<string | null, CollectionRecord[]>()
+  for (const collection of collections) {
+    const siblings = childrenByParentId.get(collection.parentId ?? null) ?? []
+    siblings.push(collection)
+    childrenByParentId.set(collection.parentId ?? null, siblings)
+  }
+
+  const subtree: CollectionRecord[] = []
+  const stack: CollectionRecord[] = [root]
+  while (stack.length > 0) {
+    const current = stack.pop()!
+    subtree.push(current)
+    const children = childrenByParentId.get(current.id) ?? []
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      stack.push(children[index]!)
+    }
+  }
+
+  return subtree
+}
+
+async function getCollectionParentRecord(parentId: string | null | undefined): Promise<CollectionRecord | null> {
+  if (!parentId) {
+    return null
+  }
+
+  return prisma.collection.findUnique({
+    where: { id: parentId },
+    include: { _count: { select: { scripts: true } } },
+  })
 }
 
 function toAbsolutePath(targetPath: string): string {
@@ -663,6 +751,10 @@ function getSessionTerminalShellCandidates() {
   ]
 }
 
+function getShellPromptKick(shellKind: TerminalShellKind): string {
+  return shellKind === 'posix' ? '\n' : '\r'
+}
+
 function createTerminalForWindow(window: BrowserWindow, sessionId: string): TerminalSessionRuntime {
   const env = {
     ...(process.env as NodeJS.ProcessEnv),
@@ -680,7 +772,7 @@ function createTerminalForWindow(window: BrowserWindow, sessionId: string): Term
         rows: 24,
         cwd: getDefaultTerminalCwd(),
         env: env as { [key: string]: string },
-        useConpty: isWindows,
+        useConpty: false,
       })
       const runtime = getRuntime(window.id)
       const sessionRuntime: TerminalSessionRuntime = {
@@ -688,12 +780,24 @@ function createTerminalForWindow(window: BrowserWindow, sessionId: string): Term
         shellKind: candidate.kind,
         contextKey: null,
       }
+      let receivedInitialData = false
+      const promptKickTimer = setTimeout(() => {
+        const currentRuntime = getRuntime(window.id)
+        const currentSession = currentRuntime.terminalSessions.get(sessionId)
+        if (!receivedInitialData && currentSession?.terminal === terminal) {
+          try {
+            terminal.write(getShellPromptKick(candidate.kind))
+          } catch {}
+        }
+      }, 900)
 
       terminal.onData((data) => {
+        receivedInitialData = true
         sendTerminalEvent(window.webContents, { sessionId, type: 'data', data })
       })
 
       terminal.onExit(() => {
+        clearTimeout(promptKickTimer)
         const runtime = getRuntime(window.id)
         const existing = runtime.terminalSessions.get(sessionId)
         if (existing?.terminal === terminal) {
@@ -876,7 +980,7 @@ function releaseWorkspaceFromTerminal(folderPath: string) {
   for (const runtime of windowRuntimes.values()) {
     for (const [sessionId, session] of runtime.terminalSessions.entries()) {
       const activeContext = session.contextKey?.split('::')[0]
-      if (activeContext && path.resolve(activeContext) === normalizedFolder) {
+      if (activeContext && isPathInside(normalizedFolder, activeContext)) {
         try {
           session.terminal.kill()
         } catch {}
@@ -1022,13 +1126,15 @@ async function createLocalCollection(payload: CreateCollectionPayload): Promise<
   const workspaceRoot = await getWorkspaceRoot()
   fs.mkdirSync(workspaceRoot, { recursive: true })
 
-  let folderName = sanitizeCollectionFolderName(name)
-  let folderPath = path.join(workspaceRoot, folderName)
-  let suffix = 2
-  while (fs.existsSync(folderPath)) {
-    folderName = `${sanitizeCollectionFolderName(name)}_${suffix++}`
-    folderPath = path.join(workspaceRoot, folderName)
+  const parentCollection = await getCollectionParentRecord(payload.parentId)
+  if (payload.parentId && !parentCollection) {
+    throw new Error('Parent collection not found')
   }
+
+  const baseFolderPath = parentCollection?.folderPath
+    ? path.resolve(parentCollection.folderPath)
+    : workspaceRoot
+  const folderPath = buildCollectionFolderPath(baseFolderPath, name)
 
   fs.mkdirSync(folderPath, { recursive: true })
   let pythonInspection = inspectFolderState(folderPath)
@@ -1041,7 +1147,8 @@ async function createLocalCollection(payload: CreateCollectionPayload): Promise<
     data: {
       name,
       description: '',
-      projectId: payload.projectId ?? null,
+      projectId: payload.projectId !== undefined ? payload.projectId : (parentCollection?.projectId ?? null),
+      parentId: payload.parentId ?? null,
       folderPath,
       isTemporary: false,
       runtimePreset: payload.runtimePreset ?? 'general',
@@ -1055,39 +1162,146 @@ async function createLocalCollection(payload: CreateCollectionPayload): Promise<
   return serializeCollectionRecord(collection)
 }
 
-async function deleteLocalCollection(payload: DeleteCollectionPayload): Promise<{
-  id: string
-  deletedScriptIds: string[]
-  deletedFolderPath: string | null
-}> {
-  const collection = await prisma.collection.findUnique({
-    where: { id: payload.id },
-    include: {
-      scripts: {
-        select: { id: true },
-      },
-    },
-  })
-
+async function updateLocalCollection(payload: UpdateCollectionPayload): Promise<{ updatedCollections: CollectionDto[] }> {
+  const collection = await getCollectionRecord(payload.id)
   if (!collection) {
     throw new Error('Collection not found')
   }
 
-  const deletedScriptIds = collection.scripts.map((script) => script.id)
+  const subtree = await getCollectionSubtree(collection.id)
+  const descendantIds = new Set(subtree.slice(1).map((entry) => entry.id))
+  if (payload.parentId && descendantIds.has(payload.parentId)) {
+    throw new Error('A collection cannot be moved inside one of its descendants')
+  }
+
+  if (payload.parentId && payload.parentId === collection.id) {
+    throw new Error('A collection cannot be its own parent')
+  }
+
+  const parentCollection = await getCollectionParentRecord(
+    payload.parentId !== undefined ? payload.parentId : collection.parentId,
+  )
+  if ((payload.parentId !== undefined ? payload.parentId : collection.parentId) && !parentCollection) {
+    throw new Error('Parent collection not found')
+  }
+
+  const nextName = payload.name?.trim() || collection.name
+  const nextProjectId = payload.projectId !== undefined
+    ? payload.projectId ?? null
+    : (parentCollection?.projectId ?? collection.projectId ?? null)
+  const nextParentId = payload.parentId !== undefined ? (payload.parentId || null) : collection.parentId
+  const oldRootFolderPath = collection.folderPath ? path.resolve(collection.folderPath) : null
+  const destinationBasePath = parentCollection?.folderPath
+    ? path.resolve(parentCollection.folderPath)
+    : await getWorkspaceRoot()
+  const nextRootFolderPath = oldRootFolderPath
+    ? buildCollectionFolderPath(destinationBasePath, nextName, oldRootFolderPath)
+    : null
+
+  if (oldRootFolderPath && nextRootFolderPath && oldRootFolderPath !== nextRootFolderPath) {
+    fs.mkdirSync(path.dirname(nextRootFolderPath), { recursive: true })
+    if (fs.existsSync(oldRootFolderPath)) {
+      fs.renameSync(oldRootFolderPath, nextRootFolderPath)
+    } else {
+      fs.mkdirSync(nextRootFolderPath, { recursive: true })
+    }
+  }
+
+  const subtreeCollectionIds = subtree.map((entry) => entry.id)
+  const scriptsWithSourcePaths = oldRootFolderPath
+    ? await prisma.script.findMany({
+      where: {
+        collectionId: { in: subtreeCollectionIds },
+        sourcePath: { not: null },
+      },
+      select: {
+        id: true,
+        sourcePath: true,
+      },
+    })
+    : []
+
+  const updatedCollections = await prisma.$transaction(async (tx) => {
+    const records: CollectionRecord[] = []
+
+    for (const entry of subtree) {
+      const isRoot = entry.id === collection.id
+      const updated = await tx.collection.update({
+        where: { id: entry.id },
+        data: {
+          name: isRoot ? nextName : entry.name,
+          projectId: nextProjectId,
+          parentId: isRoot ? nextParentId : entry.parentId,
+          folderPath: oldRootFolderPath && nextRootFolderPath
+            ? replacePathPrefix(entry.folderPath, oldRootFolderPath, nextRootFolderPath)
+            : entry.folderPath,
+          pythonVenvPath: oldRootFolderPath && nextRootFolderPath
+            ? replacePathPrefix(entry.pythonVenvPath, oldRootFolderPath, nextRootFolderPath)
+            : entry.pythonVenvPath,
+          pythonInterpreterPath: oldRootFolderPath && nextRootFolderPath
+            ? replacePathPrefix(entry.pythonInterpreterPath, oldRootFolderPath, nextRootFolderPath)
+            : entry.pythonInterpreterPath,
+        },
+        include: { _count: { select: { scripts: true } } },
+      })
+      records.push(updated)
+    }
+
+    if (oldRootFolderPath && nextRootFolderPath) {
+      for (const script of scriptsWithSourcePaths) {
+        await tx.script.update({
+          where: { id: script.id },
+          data: {
+            sourcePath: replacePathPrefix(script.sourcePath, oldRootFolderPath, nextRootFolderPath),
+          },
+        })
+      }
+    }
+
+    return records
+  })
+
+  return {
+    updatedCollections: updatedCollections.map(serializeCollectionRecord),
+  }
+}
+
+async function deleteLocalCollection(payload: DeleteCollectionPayload): Promise<{
+  id: string
+  deletedCollectionIds: string[]
+  deletedScriptIds: string[]
+  deletedFolderPath: string | null
+}> {
+  const subtree = await getCollectionSubtree(payload.id)
+  const collection = subtree[0]
+  const subtreeCollectionIds = subtree.map((entry) => entry.id)
+  const deletedScripts = await prisma.script.findMany({
+    where: { collectionId: { in: subtreeCollectionIds } },
+    select: { id: true },
+  })
+  const deletedScriptIds = deletedScripts.map((script) => script.id)
   const hardDelete = Boolean(payload.hardDelete)
+  const parentCollection = await getCollectionParentRecord(collection.parentId)
   const managedWorkspace = await isManagedCollectionWorkspace(collection.folderPath)
-  const shouldDeleteWorkspace = managedWorkspace && (hardDelete || !collection.isTemporary)
+  const ownedSubfolder = Boolean(
+    collection.folderPath &&
+    parentCollection?.folderPath &&
+    isPathInside(parentCollection.folderPath, collection.folderPath),
+  )
+  const shouldDeleteWorkspace = Boolean(collection.folderPath) &&
+    (managedWorkspace || ownedSubfolder) &&
+    (hardDelete || !collection.isTemporary)
 
   if (hardDelete || shouldDeleteWorkspace) {
     await prisma.$transaction(async (tx) => {
       if (deletedScriptIds.length > 0) {
         await tx.script.deleteMany({
-          where: { collectionId: collection.id },
+          where: { collectionId: { in: subtreeCollectionIds } },
         })
       }
 
-      await tx.collection.delete({
-        where: { id: collection.id },
+      await tx.collection.deleteMany({
+        where: { id: { in: subtreeCollectionIds } },
       })
     })
 
@@ -1103,6 +1317,7 @@ async function deleteLocalCollection(payload: DeleteCollectionPayload): Promise<
 
     return {
       id: collection.id,
+      deletedCollectionIds: subtreeCollectionIds,
       deletedScriptIds,
       deletedFolderPath: shouldDeleteWorkspace ? path.resolve(collection.folderPath!) : null,
     }
@@ -1110,17 +1325,18 @@ async function deleteLocalCollection(payload: DeleteCollectionPayload): Promise<
 
   await prisma.$transaction(async (tx) => {
     await tx.script.updateMany({
-      where: { collectionId: collection.id },
+      where: { collectionId: { in: subtreeCollectionIds } },
       data: { collectionId: null },
     })
 
-    await tx.collection.delete({
-      where: { id: collection.id },
+    await tx.collection.deleteMany({
+      where: { id: { in: subtreeCollectionIds } },
     })
   })
 
   return {
     id: collection.id,
+    deletedCollectionIds: subtreeCollectionIds,
     deletedScriptIds: [],
     deletedFolderPath: null,
   }
@@ -1158,11 +1374,6 @@ async function createLocalScript(payload: CreateScriptPayload): Promise<ScriptDt
   }
 
   await ensureScriptsDirExists()
-
-  const existing = await prisma.script.findUnique({ where: { name } })
-  if (existing) {
-    throw new Error('A script with this name already exists')
-  }
 
   const collection = payload.collectionId
     ? await prisma.collection.findUnique({ where: { id: payload.collectionId } })
@@ -1278,7 +1489,7 @@ async function duplicateLocalScript(scriptId: string): Promise<ScriptDto> {
   const baseName = `${original.name} (copy)`
   let newName = baseName
   let counter = 2
-  while (await prisma.script.findUnique({ where: { name: newName } })) {
+  while (await prisma.script.findFirst({ where: { name: newName } })) {
     newName = `${baseName} ${counter++}`
   }
 
@@ -1332,7 +1543,7 @@ async function buildUniqueScriptName(baseName: string, currentSourcePath: string
   let suffix = 2
 
   while (true) {
-    const existing = await prisma.script.findUnique({ where: { name: candidate } })
+    const existing = await prisma.script.findFirst({ where: { name: candidate } })
     if (!existing || existing.sourcePath === currentSourcePath) {
       return candidate
     }
@@ -1710,6 +1921,10 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:create-collection', async (_event, payload: CreateCollectionPayload) => {
     return createLocalCollection(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:update-collection', async (_event, payload: UpdateCollectionPayload) => {
+    return updateLocalCollection(payload)
   })
 
   ipcMain.handle('scriptmanager:runtime:delete-collection', async (_event, payload: DeleteCollectionPayload) => {

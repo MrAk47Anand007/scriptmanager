@@ -120,11 +120,6 @@ export async function POST(req: Request) {
   } else {
     // Create new script
     // Check if name already taken
-    const existing = await prisma.script.findUnique({ where: { name } })
-    if (existing) {
-      return NextResponse.json({ error: 'A script with this name already exists' }, { status: 409 })
-    }
-
     const collection = collection_id
       ? await prisma.collection.findUnique({ where: { id: collection_id } })
       : null
@@ -136,9 +131,14 @@ export async function POST(req: Request) {
     if (collection?.folderPath) {
       filePath = path.join(collection.folderPath, filename)
       sourcePath = filePath
-      if (fs.existsSync(filePath)) {
-        return NextResponse.json({ error: 'A file with this name already exists in the linked folder' }, { status: 409 })
-      }
+    }
+
+    if (fs.existsSync(filePath)) {
+      return NextResponse.json({
+        error: collection?.folderPath
+          ? 'A file with this name already exists in the collection folder'
+          : 'A file with this name already exists in the local scripts folder'
+      }, { status: 409 })
     }
 
     // Check global settings for default Gist sync

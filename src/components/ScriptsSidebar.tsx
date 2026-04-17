@@ -153,9 +153,10 @@ const DraggableScript = memo(({
                         isDragging && "opacity-50 bg-slate-50 dark:bg-slate-800"
                     )}
                 >
-                    <FileCode className="h-3.5 w-3.5 flex-shrink-0" />
-                    <span className="truncate text-xs flex-1">{script.name}<UnsavedIndicator scriptId={script.id} /></span>
-                    <GripVertical className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <div className="w-4 flex-shrink-0" />
+                    <FileCode className={cn("h-4 w-4 flex-shrink-0", isActive ? "text-blue-600 dark:text-blue-400" : "text-slate-500")} />
+                    <span className="truncate text-[13px] flex-1">{script.name}<UnsavedIndicator scriptId={script.id} /></span>
+                    <GripVertical className="h-3.5 w-3.5 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-auto" />
                 </div>
             </ContextMenuTrigger>
             <ContextMenuContent>
@@ -214,6 +215,36 @@ const CollectionScriptRows = memo(({
     prev.activeScriptId === next.activeScriptId
 );
 
+const getCollectionTreeKey = (parentId: string | null, projectId: string | null) =>
+    `${projectId ?? '__root_project__'}::${parentId ?? '__root_parent__'}`;
+
+const CollectionLinkStatusDot = ({
+    hasLinkedFolder,
+    isTemporary,
+}: {
+    hasLinkedFolder: boolean
+    isTemporary: boolean
+}) => {
+    const tooltip = hasLinkedFolder
+        ? (isTemporary
+            ? 'Green dot: this temporary workspace is backed by a local folder.'
+            : 'Green dot: this collection is linked to a real folder, so scripts and sub-collections stay mapped to folders on disk.')
+        : 'Red dot: this collection is not linked to a folder yet, so it only exists inside ScriptManager metadata until you link or save it.';
+
+    return (
+        <span
+            className={cn(
+                "inline-flex h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-inset",
+                hasLinkedFolder
+                    ? "bg-emerald-500 ring-emerald-400/60"
+                    : "bg-rose-500 ring-rose-400/60"
+            )}
+            title={tooltip}
+            aria-label={tooltip}
+        />
+    );
+};
+
 // Droppable Collection Component — memoized; only re-renders when collection data or expand state changes
 const DroppableCollection = memo(({
     collection,
@@ -230,6 +261,8 @@ const DroppableCollection = memo(({
     onDeleteScript,
     onConvertToCollection,
     onManagePythonEnv,
+    subCollectionsNode,
+    onCreateSubCollection,
 }: {
     collection: Collection,
     isExpanded: boolean,
@@ -245,6 +278,8 @@ const DroppableCollection = memo(({
     onDeleteScript: (script: Script) => void
     onConvertToCollection?: () => void
     onManagePythonEnv?: () => void
+    subCollectionsNode?: React.ReactNode
+    onCreateSubCollection: () => void
 }) => {
     const { setNodeRef: setDroppableNodeRef, isOver } = useDroppable({
         id: `drop-col-${collection.id}`,
@@ -258,84 +293,109 @@ const DroppableCollection = memo(({
 
     return (
         <ContextMenu>
-            <ContextMenuTrigger>
-                <div ref={setDroppableNodeRef} className={cn("space-y-0.5 rounded-md transition-colors", isOver && "bg-blue-50 dark:bg-blue-900/40 ring-1 ring-blue-200 dark:ring-blue-800")}>
+            <div ref={setDroppableNodeRef} className={cn("space-y-0.5 rounded-md transition-colors", isOver && "bg-blue-50 dark:bg-blue-900/40 ring-1 ring-blue-200 dark:ring-blue-800")}>
+                <ContextMenuTrigger asChild>
                     <div
                         ref={setDraggableNodeRef}
-                        {...attributes}
-                        {...listeners}
-                        className={cn("flex items-center gap-1 px-2 py-1.5 text-sm font-medium rounded-md hover:bg-slate-200/50 dark:hover:bg-slate-800 group cursor-pointer", isDragging && "opacity-50 line-through")}
+                        className={cn("flex items-center gap-1 px-1.5 py-1.5 text-sm font-medium rounded-md hover:bg-slate-200/50 dark:hover:bg-slate-800 group cursor-pointer", isDragging && "opacity-50 line-through")}
                         onClick={toggle}
                     >
-                        <GripVertical className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-                        {isExpanded ? (
-                            <ChevronDown className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                        ) : (
-                            <ChevronRight className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                        )}
-                        <Folder className={cn("h-4 w-4 flex-shrink-0", isOver ? "text-blue-500" : "text-slate-500")} />
-                        <span className="truncate flex-1 min-w-0 text-slate-700 dark:text-slate-300" title={collection.name}>{collection.name}</span>
-                        {collection.folder_path && (
-                            <span className="shrink-0 text-[9px] uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
-                                {collection.is_temporary ? 'temp' : 'linked'}
-                            </span>
-                        )}
-                        {isDeleting && (
-                            <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-blue-500" />
-                        )}
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400"
-                            onClick={(e) => { e.stopPropagation(); onCreateScript(); }}
-                            title="New Script"
-                            disabled={isDeleting}
-                        >
-                            <Plus className="h-3.5 w-3.5" />
-                        </Button>
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()} disabled={isDeleting}>
-                                    <MoreVertical className="h-3 w-3" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onCreateScript(); }}>
-                                    <Plus className="mr-2 h-4 w-4" /> New Script
-                                </DropdownMenuItem>
-                                {collection.is_temporary && onConvertToCollection && (
-                                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onConvertToCollection(); }}>
-                                        <FolderOpen className="mr-2 h-4 w-4" /> Save as Collection
-                                    </DropdownMenuItem>
-                                )}
-                                {onManagePythonEnv && (
-                                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onManagePythonEnv(); }}>
-                                        <Folder className="mr-2 h-4 w-4" /> Python Environment...
-                                    </DropdownMenuItem>
-                                )}
-                                <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
-                                    <Trash2 className="mr-2 h-4 w-4" /> {collection.is_temporary ? 'Remove Workspace' : 'Delete'}
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    </div>
-                    {isExpanded && (
-                        <div className="pl-4 space-y-0.5">
-                            <CollectionScriptRows
-                                scripts={scripts}
-                                activeScriptId={activeScriptId}
-                                onActivateScript={onActivateScript}
-                                onSaveAsTemplate={onSaveAsTemplate}
-                                onDuplicateScript={onDuplicateScript}
-                                onDeleteScript={onDeleteScript}
-                            />
+                        <div className="flex h-3.5 w-3.5 items-center justify-center shrink-0">
+                            {isExpanded ? (
+                                <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+                            ) : (
+                                <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                            )}
                         </div>
-                    )}
-                </div>
-            </ContextMenuTrigger>
+                        <Folder className={cn("h-4 w-4 flex-shrink-0", isOver ? "text-blue-500" : "text-slate-500")} />
+                        <span className="min-w-0 flex-1 truncate pr-1 text-[13px] leading-5 text-slate-700 dark:text-slate-300" title={collection.name}>
+                            {collection.name}
+                        </span>
+                        <div className="ml-auto flex shrink-0 items-center gap-1">
+                            <CollectionLinkStatusDot hasLinkedFolder={Boolean(collection.folder_path)} isTemporary={Boolean(collection.is_temporary)} />
+                            {isDeleting && (
+                                <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-blue-500" />
+                            )}
+                            <div className="flex max-w-0 items-center gap-0.5 overflow-hidden opacity-0 transition-[max-width,opacity] duration-150 group-hover:max-w-20 group-hover:opacity-100 group-focus-within:max-w-20 group-focus-within:opacity-100">
+                                <button
+                                    type="button"
+                                    {...attributes}
+                                    {...listeners}
+                                    className="flex h-5 w-5 items-center justify-center rounded-sm text-slate-300 transition-colors hover:text-slate-500 cursor-grab active:cursor-grabbing"
+                                    onClick={(e) => e.stopPropagation()}
+                                    title="Drag collection"
+                                    aria-label={`Drag collection ${collection.name}`}
+                                >
+                                    <GripVertical className="h-3.5 w-3.5 flex-shrink-0" />
+                                </button>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-5 w-5 text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400"
+                                    onClick={(e) => { e.stopPropagation(); onCreateScript(); }}
+                                    title="New Script"
+                                    disabled={isDeleting}
+                                >
+                                    <Plus className="h-3.5 w-3.5" />
+                                </Button>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-5 w-5"
+                                            onClick={(e) => e.stopPropagation()}
+                                            disabled={isDeleting}
+                                        >
+                                            <MoreVertical className="h-3 w-3" />
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onCreateScript(); }}>
+                                            <Plus className="mr-2 h-4 w-4" /> New Script
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onCreateSubCollection(); }}>
+                                            <Folder className="mr-2 h-4 w-4" /> New Sub-collection
+                                        </DropdownMenuItem>
+                                        {collection.is_temporary && onConvertToCollection && (
+                                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onConvertToCollection(); }}>
+                                                <FolderOpen className="mr-2 h-4 w-4" /> Save as Collection
+                                            </DropdownMenuItem>
+                                        )}
+                                        {onManagePythonEnv && (
+                                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onManagePythonEnv(); }}>
+                                                <Folder className="mr-2 h-4 w-4" /> Python Environment...
+                                            </DropdownMenuItem>
+                                        )}
+                                        <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
+                                            <Trash2 className="mr-2 h-4 w-4" /> {collection.is_temporary ? 'Remove Workspace' : 'Delete'}
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </div>
+                        </div>
+                    </div>
+                </ContextMenuTrigger>
+                {isExpanded && (
+                    <div className="ml-3.5 mt-0.5 space-y-0.5 border-l-[1.5px] border-slate-100 pl-2.5 dark:border-slate-800/80">
+                        {subCollectionsNode}
+                        <CollectionScriptRows
+                            scripts={scripts}
+                            activeScriptId={activeScriptId}
+                            onActivateScript={onActivateScript}
+                            onSaveAsTemplate={onSaveAsTemplate}
+                            onDuplicateScript={onDuplicateScript}
+                            onDeleteScript={onDeleteScript}
+                        />
+                    </div>
+                )}
+            </div>
             <ContextMenuContent>
                 <ContextMenuItem onClick={onCreateScript}>
                     <Plus className="mr-2 h-4 w-4" /> New Script here
+                </ContextMenuItem>
+                <ContextMenuItem onClick={onCreateSubCollection}>
+                    <Folder className="mr-2 h-4 w-4" /> New Sub-collection here
                 </ContextMenuItem>
                 {collection.is_temporary && onConvertToCollection && (
                     <ContextMenuItem onClick={onConvertToCollection}>
@@ -359,7 +419,8 @@ const DroppableCollection = memo(({
     prev.isExpanded === next.isExpanded &&
     prev.scripts === next.scripts &&
     prev.activeScriptId === next.activeScriptId &&
-    prev.isDeleting === next.isDeleting
+    prev.isDeleting === next.isDeleting &&
+    prev.subCollectionsNode === next.subCollectionsNode
 );
 
 // Droppable Project Component
@@ -395,12 +456,14 @@ const DroppableProject = ({
     return (
         <div ref={setNodeRef} className={cn("space-y-0.5 rounded-md transition-colors", isOver && "bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-200 dark:ring-amber-800")}>
             <div
-                className="flex items-center gap-1 px-2 py-1.5 text-xs font-semibold rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 group cursor-pointer"
+                className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-semibold rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 group cursor-pointer"
                 onClick={toggleProject}
             >
-                {isExpanded ? <ChevronDown className="h-3 w-3 text-slate-400 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 text-slate-400 flex-shrink-0" />}
-                <Layers className="h-3.5 w-3.5 flex-shrink-0" style={{ color: project.color }} />
-                <span className="flex-1 truncate text-slate-700 dark:text-slate-300">{project.name}</span>
+                <div className="flex h-4 w-4 items-center justify-center shrink-0">
+                    {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
+                </div>
+                <Layers className="h-4 w-4 flex-shrink-0" style={{ color: project.color }} />
+                <span className="flex-1 truncate text-[13px] text-slate-700 dark:text-slate-300">{project.name}</span>
                 <span
                     className="text-[9px] font-bold px-1 py-0.5 rounded flex-shrink-0"
                     style={{ backgroundColor: project.color + '22', color: project.color }}
@@ -428,7 +491,7 @@ const DroppableProject = ({
                 </DropdownMenu>
             </div>
             {isExpanded && (
-                <div className="pl-3 space-y-0.5">
+                <div className="ml-[18px] pl-2 mt-0.5 border-l-[1.5px] border-slate-100 dark:border-slate-800/80 space-y-0.5 relative">
                     {children}
                 </div>
             )}
@@ -456,6 +519,7 @@ const ScriptsSidebarComponent = () => {
     const [newCollectionRuntimePreset, setNewCollectionRuntimePreset] = useState<NonNullable<Collection['runtime_preset']>>('general');
     const [newCollectionPythonTools, setNewCollectionPythonTools] = useState(false);
     const [parentProjectId, setParentProjectId] = useState<string | null>(null);
+    const [parentCreationCollectionId, setParentCreationCollectionId] = useState<string | null>(null);
     const [activeDragScript, setActiveDragScript] = useState<Script | null>(null);
     const [activeDragCollection, setActiveDragCollection] = useState<Collection | null>(null);
 
@@ -639,8 +703,9 @@ const ScriptsSidebarComponent = () => {
         setIsCreateScriptOpen(true);
     };
 
-    const openCreateCollectionDialog = (projectId?: string | null) => {
+    const openCreateCollectionDialog = (projectId?: string | null, parentId?: string | null) => {
         setParentProjectId(projectId ?? null);
+        setParentCreationCollectionId(parentId ?? null);
         setNewCollectionName('');
         setNewCollectionRuntimePreset('general');
         setNewCollectionPythonTools(false);
@@ -652,6 +717,7 @@ const ScriptsSidebarComponent = () => {
         setNewCollectionRuntimePreset('general');
         setNewCollectionPythonTools(false);
         setParentProjectId(null);
+        setParentCreationCollectionId(null);
         setIsCreatingCollection(false);
     };
 
@@ -893,12 +959,19 @@ const ScriptsSidebarComponent = () => {
         if (!newCollectionName.trim() || isSubmittingCollection) return;
         setIsSubmittingCollection(true);
         try {
-            await dispatch(createCollection({
+            const createdCollection = await dispatch(createCollection({
                 name: newCollectionName.trim(),
                 projectId: parentProjectId,
+                parentId: parentCreationCollectionId,
                 runtimePreset: newCollectionRuntimePreset,
                 pythonToolchainEnabled: newCollectionRuntimePreset === 'python' ? true : newCollectionPythonTools,
             })).unwrap();
+            if (parentCreationCollectionId) {
+                setExpandedCollections(prev => ({ ...prev, [parentCreationCollectionId]: true }));
+            }
+            if (createdCollection.project_id) {
+                setExpandedProjects(prev => ({ ...prev, [createdCollection.project_id!]: true }));
+            }
             resetCollectionCreationState();
         } finally {
             setIsSubmittingCollection(false);
@@ -982,11 +1055,18 @@ const ScriptsSidebarComponent = () => {
                 await dispatch(moveScript({ scriptId, collectionId }));
                 setExpandedCollections(prev => ({ ...prev, [collectionId]: true }));
             }
+        } else if (activeData?.type === 'collection' && overData?.type === 'collection') {
+            const collectionId = activeData.collection.id;
+            const parentId = overData.collection.id;
+            if (activeData.collection.parent_id !== parentId && activeData.collection.id !== parentId) {
+                await dispatch(moveCollection({ collectionId, parentId, projectId: overData.collection.project_id }));
+                setExpandedCollections(prev => ({ ...prev, [parentId]: true }));
+            }
         } else if (activeData?.type === 'collection' && overData?.type === 'project') {
             const collectionId = activeData.collection.id;
             const projectId = overData.project.id;
-            if (activeData.collection.project_id !== projectId) {
-                await dispatch(moveCollection({ collectionId, projectId }));
+            if (activeData.collection.project_id !== projectId || activeData.collection.parent_id !== null) {
+                await dispatch(moveCollection({ collectionId, projectId, parentId: null }));
                 setExpandedProjects(prev => ({ ...prev, [projectId]: true }));
             }
         }
@@ -1110,6 +1190,34 @@ const ScriptsSidebarComponent = () => {
         [collections]
     );
 
+    const savedCollectionsByTreeKey = useMemo(() => {
+        const map: Record<string, Collection[]> = {};
+
+        for (const collection of savedCollections) {
+            const key = getCollectionTreeKey(collection.parent_id ?? null, collection.project_id ?? null);
+            map[key] ??= [];
+            map[key].push(collection);
+        }
+
+        return map;
+    }, [savedCollections]);
+
+    const projectCollectionCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+
+        for (const collection of savedCollections) {
+            if (!collection.project_id) continue;
+            counts[collection.project_id] = (counts[collection.project_id] ?? 0) + 1;
+        }
+
+        return counts;
+    }, [savedCollections]);
+
+    const rootSavedCollections = useMemo(
+        () => savedCollectionsByTreeKey[getCollectionTreeKey(null, null)] ?? [],
+        [savedCollectionsByTreeKey]
+    );
+
     const isDeleteTemporaryWorkspace = Boolean(collectionToDelete?.is_temporary);
     const hasCollectionFolder = Boolean(collectionToDelete?.folder_path && !collectionToDelete?.is_temporary);
     const sidebarBusyText = useMemo(() => {
@@ -1145,6 +1253,36 @@ const ScriptsSidebarComponent = () => {
             },
         })
     );
+
+    const renderCollectionTree = (parentId: string | null = null, currentProjectId: string | null = null): React.ReactNode => {
+        const children = savedCollectionsByTreeKey[getCollectionTreeKey(parentId, currentProjectId)] ?? [];
+        if (children.length === 0) return null;
+
+        return (
+            <div className="space-y-0.5">
+                {children.map((collection) => (
+                    <DroppableCollection
+                        key={collection.id}
+                        collection={collection}
+                        isExpanded={!!expandedCollections[collection.id]}
+                        isDeleting={pendingCollectionDeleteId === collection.id}
+                        toggle={() => toggleCollection(collection.id)}
+                        scripts={grouped.result[collection.id] ?? []}
+                        activeScriptId={activeScriptId}
+                        onDelete={() => handleDeleteCollection(collection)}
+                        onCreateScript={() => handleCreateScript(collection.id)}
+                        onCreateSubCollection={() => openCreateCollectionDialog(collection.project_id, collection.id)}
+                        onActivateScript={handleActivateScript}
+                        onSaveAsTemplate={openSaveAsTemplate}
+                        onDuplicateScript={handleDuplicateScript}
+                        onDeleteScript={handleDeleteScriptRequest}
+                        onManagePythonEnv={hasDesktopFolderPicker && collection.folder_path ? () => openPythonEnvironmentDialog(collection) : undefined}
+                        subCollectionsNode={renderCollectionTree(collection.id, currentProjectId)}
+                    />
+                ))}
+            </div>
+        );
+    };
 
     return (
         <>
@@ -1343,6 +1481,7 @@ const ScriptsSidebarComponent = () => {
                                                 activeScriptId={activeScriptId}
                                                 onDelete={() => handleRemoveTemporaryCollection(collection)}
                                                 onCreateScript={() => handleCreateScript(collection.id)}
+                                                onCreateSubCollection={() => openCreateCollectionDialog(collection.project_id, collection.id)}
                                                 onActivateScript={handleActivateScript}
                                                 onSaveAsTemplate={openSaveAsTemplate}
                                                 onDuplicateScript={handleDuplicateScript}
@@ -1354,14 +1493,7 @@ const ScriptsSidebarComponent = () => {
                                     </>
                                 )}
                                 {projects.map(project => {
-                                    const projectCollections = savedCollections.filter(c => c.project_id === project.id);
                                     const isExpanded = !!expandedProjects[project.id];
-                                    const envLabels: Record<string, string> = {
-                                        development: 'DEV',
-                                        qa: 'QA',
-                                        uat: 'UAT',
-                                        production: 'PROD',
-                                    };
                                     return (
                                         <DroppableProject
                                             key={project.id}
@@ -1373,25 +1505,8 @@ const ScriptsSidebarComponent = () => {
                                             handleDeleteProject={() => handleDeleteProject(project.id)}
                                         >
                                             <div className="space-y-0.5">
-                                                {projectCollections.map(collection => (
-                                                    <DroppableCollection
-                                                        key={collection.id}
-                                                        collection={collection}
-                                                        isExpanded={!!expandedCollections[collection.id]}
-                                                        isDeleting={pendingCollectionDeleteId === collection.id}
-                                                        toggle={() => toggleCollection(collection.id)}
-                                                        scripts={grouped.result[collection.id] ?? []}
-                                                        activeScriptId={activeScriptId}
-                                                        onDelete={() => handleDeleteCollection(collection)}
-                                                        onCreateScript={() => handleCreateScript(collection.id)}
-                                                        onActivateScript={handleActivateScript}
-                                                        onSaveAsTemplate={openSaveAsTemplate}
-                                                        onDuplicateScript={handleDuplicateScript}
-                                                        onDeleteScript={handleDeleteScriptRequest}
-                                                        onManagePythonEnv={hasDesktopFolderPicker && collection.folder_path ? () => openPythonEnvironmentDialog(collection) : undefined}
-                                                    />
-                                                ))}
-                                                {projectCollections.length === 0 && (
+                                                {renderCollectionTree(null, project.id)}
+                                                {(projectCollectionCounts[project.id] ?? 0) === 0 && (
                                                     <div className="px-4 py-1 text-xs text-slate-400 italic">No collections</div>
                                                 )}
                                             </div>
@@ -1401,33 +1516,15 @@ const ScriptsSidebarComponent = () => {
 
                                 {/* Unassigned collections in Ops Mode */}
                                 {(() => {
-                                    const unassigned = savedCollections.filter(c => !c.project_id);
-                                    if (unassigned.length === 0 && grouped.unsorted.length === 0) return null;
+                                    if (rootSavedCollections.length === 0 && grouped.unsorted.length === 0) return null;
                                     return (
                                         <div className="space-y-0.5 mt-2">
-                                            {(unassigned.length > 0 || grouped.unsorted.length > 0) && (
-                                                <div className="px-2 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                                                    <Folder className="h-3 w-3" /> Unassigned
+                                            {(rootSavedCollections.length > 0 || grouped.unsorted.length > 0) && (
+                                                <div className="px-2 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1 mt-2 mb-1">
+                                                    Unassigned
                                                 </div>
                                             )}
-                                            {unassigned.map(collection => (
-                                                <DroppableCollection
-                                                    key={collection.id}
-                                                    collection={collection}
-                                                    isExpanded={!!expandedCollections[collection.id]}
-                                                    isDeleting={pendingCollectionDeleteId === collection.id}
-                                                    toggle={() => toggleCollection(collection.id)}
-                                                    scripts={grouped.result[collection.id] ?? []}
-                                                    activeScriptId={activeScriptId}
-                                                    onDelete={() => handleDeleteCollection(collection)}
-                                                    onCreateScript={() => handleCreateScript(collection.id)}
-                                                    onActivateScript={handleActivateScript}
-                                                    onSaveAsTemplate={openSaveAsTemplate}
-                                                    onDuplicateScript={handleDuplicateScript}
-                                                    onDeleteScript={handleDeleteScriptRequest}
-                                                    onManagePythonEnv={hasDesktopFolderPicker && collection.folder_path ? () => openPythonEnvironmentDialog(collection) : undefined}
-                                                />
-                                            ))}
+                                            {renderCollectionTree(null, null)}
                                             {grouped.unsorted.map(script => (
                                                 <DraggableScript
                                                     key={script.id}
@@ -1462,6 +1559,7 @@ const ScriptsSidebarComponent = () => {
                                         activeScriptId={activeScriptId}
                                         onDelete={() => handleRemoveTemporaryCollection(collection)}
                                         onCreateScript={() => handleCreateScript(collection.id)}
+                                        onCreateSubCollection={() => openCreateCollectionDialog(collection.project_id, collection.id)}
                                         onActivateScript={handleActivateScript}
                                         onSaveAsTemplate={openSaveAsTemplate}
                                         onDuplicateScript={handleDuplicateScript}
@@ -1471,12 +1569,12 @@ const ScriptsSidebarComponent = () => {
                                     />
                                 ))}
 
-                                {savedCollections.filter(c => searchQuery.trim() || !c.project_id).length > 0 && (
+                                {(searchQuery.trim() ? savedCollections.length > 0 : rootSavedCollections.length > 0) && (
                                     <div className="px-2 py-2 text-xs font-semibold text-slate-400 uppercase">
                                         {temporaryCollections.length > 0 ? 'Collections' : ''}
                                     </div>
                                 )}
-                                {(searchQuery.trim() ? savedCollections : savedCollections.filter(c => !c.project_id)).map(collection => (
+                                {searchQuery.trim() ? savedCollections.map(collection => (
                                     <DroppableCollection
                                         key={collection.id}
                                         collection={collection}
@@ -1487,6 +1585,7 @@ const ScriptsSidebarComponent = () => {
                                         activeScriptId={activeScriptId}
                                         onDelete={() => handleDeleteCollection(collection)}
                                         onCreateScript={() => handleCreateScript(collection.id)}
+                                        onCreateSubCollection={() => openCreateCollectionDialog(collection.project_id, collection.id)}
                                         onActivateScript={handleActivateScript}
                                         onSaveAsTemplate={openSaveAsTemplate}
                                         onDuplicateScript={handleDuplicateScript}
@@ -1494,10 +1593,10 @@ const ScriptsSidebarComponent = () => {
                                         onConvertToCollection={collection.is_temporary ? () => openConvertCollectionDialog(collection) : undefined}
                                         onManagePythonEnv={hasDesktopFolderPicker && collection.folder_path ? () => openPythonEnvironmentDialog(collection) : undefined}
                                     />
-                                ))}
+                                )) : renderCollectionTree(null, null)}
 
                                 {grouped.unsorted.length > 0 && (!isModeActive || searchQuery.trim()) && (
-                                    <div className="px-2 py-2 text-xs font-semibold text-slate-400 uppercase">Unsorted</div>
+                                    <div className="px-2 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider mt-2 mb-1">Unsorted</div>
                                 )}
                                 {grouped.unsorted.map((script) => (
                                     <DraggableScript

@@ -17,7 +17,7 @@ async function buildUniqueScriptName(baseName: string): Promise<string> {
   let candidate = baseName
   let suffix = 2
 
-  while (await prisma.script.findUnique({ where: { name: candidate } })) {
+  while (await prisma.script.findFirst({ where: { name: candidate } })) {
     candidate = `${baseName} (${suffix++})`
   }
 

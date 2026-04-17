@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     if (!item.name?.trim()) continue
 
     // Deduplicate: if a script with this name already exists, skip it
-    const existing = await prisma.script.findUnique({ where: { name: item.name.trim() } })
+    const existing = await prisma.script.findFirst({ where: { name: item.name.trim() } })
     if (existing) {
       results.push({ name: item.name.trim(), id: existing.id, status: 'skipped' })
       continue
