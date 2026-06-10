@@ -31,6 +31,7 @@ import { CreateCollectionDialog } from './sidebar/CreateCollectionDialog';
 import { OpenFolderDialog, type OpenFolderSubmitValues } from './sidebar/OpenFolderDialog';
 import { DeleteScriptDialog } from './sidebar/DeleteScriptDialog';
 import { DeleteCollectionDialog } from './sidebar/DeleteCollectionDialog';
+import { PythonEnvDialog } from './sidebar/PythonEnvDialog';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
 import {
     DropdownMenu,
@@ -64,19 +65,6 @@ import {
 import { DndContext, DragEndEvent, DragOverlay, useDraggable, useDroppable, DragStartEvent, useSensors, useSensor, PointerSensor } from '@dnd-kit/core';
 import { createPortal } from 'react-dom';
 import axios from 'axios';
-import {
-    inspectDesktopCollectionWorkspace,
-    manageDesktopCollectionPythonEnv,
-} from '@/lib/scriptsRuntimeClient';
-
-type CollectionWorkspaceStatus = {
-    collection: Collection
-    workspacePath: string | null
-    hasVenv: boolean
-    venvPath: string | null
-    interpreterPath: string | null
-    manifests: string[]
-}
 
 const GistSyncStatus = () => {
     const settings = useAppSelector(selectSettings);
@@ -518,9 +506,7 @@ const ScriptsSidebarComponent = () => {
     const [isConvertingCollection, setIsConvertingCollection] = useState(false);
     const [hasDesktopFolderPicker, setHasDesktopFolderPicker] = useState(false);
     const [pythonEnvCollection, setPythonEnvCollection] = useState<Collection | null>(null);
-    const [pythonEnvStatus, setPythonEnvStatus] = useState<CollectionWorkspaceStatus | null>(null);
     const [isPythonEnvLoading, setIsPythonEnvLoading] = useState(false);
-    const [pythonEnvError, setPythonEnvError] = useState('');
 
     // Search + filter state
     const [searchQuery, setSearchQuery] = useState('');
@@ -708,47 +694,13 @@ const ScriptsSidebarComponent = () => {
         return { finalName, language, content };
     }, [collections]);
 
-    const openPythonEnvironmentDialog = useCallback(async (collection: Collection) => {
+    const openPythonEnvironmentDialog = useCallback((collection: Collection) => {
         setPythonEnvCollection(collection);
-        setPythonEnvStatus(null);
-        setPythonEnvError('');
-        setIsPythonEnvLoading(true);
-
-        try {
-            const status = await inspectDesktopCollectionWorkspace(collection.id);
-            setPythonEnvStatus(status);
-        } catch (error) {
-            setPythonEnvError(error instanceof Error ? error.message : 'Failed to inspect collection workspace');
-        } finally {
-            setIsPythonEnvLoading(false);
-        }
     }, []);
 
-    const handleCreateOrRepairPythonEnv = useCallback(async (recreate = false) => {
-        if (!pythonEnvCollection) {
-            return;
-        }
-
-        setPythonEnvError('');
-        setIsPythonEnvLoading(true);
-        try {
-            const status = await manageDesktopCollectionPythonEnv(pythonEnvCollection.id, recreate);
-            setPythonEnvStatus(status);
-            await dispatch(fetchCollections());
-        } catch (error) {
-            setPythonEnvError(error instanceof Error ? error.message : 'Failed to manage Python environment');
-        } finally {
-            setIsPythonEnvLoading(false);
-        }
-    }, [dispatch, pythonEnvCollection]);
-
-    const handleRevealWorkspace = useCallback(async () => {
-        const workspacePath = pythonEnvStatus?.workspacePath;
-        if (!workspacePath || !window.scriptManagerDesktop?.revealPath) {
-            return;
-        }
-        await window.scriptManagerDesktop.revealPath(workspacePath);
-    }, [pythonEnvStatus?.workspacePath]);
+    const handlePythonEnvChanged = useCallback(async () => {
+        await dispatch(fetchCollections());
+    }, [dispatch]);
 
     const handleOpenFolderSubmit = async (values: OpenFolderSubmitValues): Promise<string | null> => {
         if (isOpeningFolder) return null;
@@ -1478,84 +1430,13 @@ const ScriptsSidebarComponent = () => {
                     onOpenChange={setIsOpenFolderDialogOpen}
                     onSubmit={handleOpenFolderSubmit}
                 />
-                <Dialog open={!!pythonEnvCollection} onOpenChange={(open) => !open && setPythonEnvCollection(null)}>
-                    <DialogContent className="sm:max-w-lg">
-                        <DialogHeader>
-                            <DialogTitle>Python Environment</DialogTitle>
-                            <DialogDescription>
-                                {pythonEnvCollection
-                                    ? `Manage Python tooling for ${pythonEnvCollection.name}.`
-                                    : 'Manage collection Python tooling.'}
-                            </DialogDescription>
-                        </DialogHeader>
-                        <div className="space-y-4 py-2 text-sm">
-                            {isPythonEnvLoading && (
-                                <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    <span>Loading workspace status...</span>
-                                </div>
-                            )}
-                            {pythonEnvError && (
-                                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
-                                    {pythonEnvError}
-                                </div>
-                            )}
-                            {pythonEnvStatus && (
-                                <div className="space-y-3">
-                                    <div className="rounded-md border border-slate-200 px-3 py-2 dark:border-slate-700">
-                                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Workspace</div>
-                                        <div className="mt-1 break-all text-xs text-slate-700 dark:text-slate-200">
-                                            {pythonEnvStatus.workspacePath ?? 'No linked workspace path'}
-                                        </div>
-                                    </div>
-                                    <div className="rounded-md border border-slate-200 px-3 py-2 dark:border-slate-700">
-                                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Python Status</div>
-                                        <div className="mt-1 text-sm text-slate-700 dark:text-slate-200">
-                                            {pythonEnvStatus.hasVenv ? 'Virtual environment detected and ready.' : 'No .venv detected yet.'}
-                                        </div>
-                                        {pythonEnvStatus.interpreterPath && (
-                                            <div className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">
-                                                Interpreter: {pythonEnvStatus.interpreterPath}
-                                            </div>
-                                        )}
-                                        {pythonEnvStatus.manifests.length > 0 && (
-                                            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                                Detected manifests: {pythonEnvStatus.manifests.join(', ')}
-                                            </div>
-                                        )}
-                                        {pythonEnvStatus.hasVenv && pythonEnvStatus.manifests.length > 0 && (
-                                            <div className="mt-2 rounded-md bg-blue-50 px-2 py-1 text-[11px] text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
-                                                Python environment is ready. Install dependencies from the detected manifest when you need them.
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                        <DialogFooter className="flex-wrap gap-2">
-                            <Button variant="outline" onClick={handleRevealWorkspace} disabled={!pythonEnvStatus?.workspacePath}>
-                                Reveal Folder
-                            </Button>
-                            <Button
-                                variant="secondary"
-                                onClick={() => handleCreateOrRepairPythonEnv(false)}
-                                disabled={isPythonEnvLoading || !pythonEnvCollection?.folder_path}
-                            >
-                                Create Venv
-                            </Button>
-                            <Button
-                                variant="secondary"
-                                onClick={() => handleCreateOrRepairPythonEnv(true)}
-                                disabled={isPythonEnvLoading || !pythonEnvCollection?.folder_path}
-                            >
-                                Recreate Venv
-                            </Button>
-                            <Button variant="ghost" onClick={() => setPythonEnvCollection(null)}>
-                                Close
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+                <PythonEnvDialog
+                    collection={pythonEnvCollection}
+                    loading={isPythonEnvLoading}
+                    onLoadingChange={setIsPythonEnvLoading}
+                    onOpenChange={(open) => !open && setPythonEnvCollection(null)}
+                    onEnvChanged={handlePythonEnvChanged}
+                />
                 <Dialog open={!!collectionToConvert} onOpenChange={(open) => !open && setCollectionToConvert(null)}>
                     <DialogContent className="sm:max-w-md">
                         <DialogHeader>
