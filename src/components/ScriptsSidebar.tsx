@@ -22,8 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
-    FileCode, Plus, Folder, MoreVertical, Trash2, ChevronRight, ChevronDown,
-    GripVertical, Search, LayoutTemplate, Copy, Loader2, Layers, FolderOpen,
+    FileCode, Plus, Folder, Search, LayoutTemplate, Loader2, Layers, FolderOpen,
 } from 'lucide-react';
 import { QuickSwitcher } from './QuickSwitcher';
 import { CreateScriptDialog } from './sidebar/CreateScriptDialog';
@@ -33,6 +32,7 @@ import { DeleteScriptDialog } from './sidebar/DeleteScriptDialog';
 import { DeleteCollectionDialog } from './sidebar/DeleteCollectionDialog';
 import { PythonEnvDialog } from './sidebar/PythonEnvDialog';
 import { SaveAsTemplateDialog } from './sidebar/SaveAsTemplateDialog';
+import { ScriptTree, getCollectionTreeKey, type ScriptTreeCallbacks } from './sidebar/ScriptTree';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
 import {
     DropdownMenu,
@@ -41,12 +41,6 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-    ContextMenu,
-    ContextMenuContent,
-    ContextMenuItem,
-    ContextMenuTrigger,
-} from "@/components/ui/context-menu";
 import {
     Dialog,
     DialogContent,
@@ -63,7 +57,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { DndContext, DragEndEvent, DragOverlay, useDraggable, useDroppable, DragStartEvent, useSensors, useSensor, PointerSensor } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, useSensors, useSensor, PointerSensor } from '@dnd-kit/core';
 import { createPortal } from 'react-dom';
 import axios from 'axios';
 
@@ -75,404 +69,6 @@ const GistSyncStatus = () => {
         <span className={cn("font-medium", isEnabled ? "text-green-600" : "text-slate-400")}>
             {isEnabled ? "Auto" : "Manual"}
         </span>
-    );
-};
-
-const UnsavedIndicator = ({ scriptId }: { scriptId: string }) => {
-    const isDirty = useAppSelector((state) => {
-        if (state.scripts.activeScriptId !== scriptId) return false;
-        const script = state.scripts.items.find(s => s.id === scriptId);
-        if (!script) return false;
-        // If content is undefined in items, assume empty string.
-        // We compare activeScriptContent (current editor state) with script.content (saved state).
-        const saved = script.content || '';
-        const current = state.scripts.activeScriptContent || '';
-        return saved !== current;
-    });
-
-    if (!isDirty) return null;
-    return <span className="text-amber-500 ml-1 font-bold" title="Unsaved changes">*</span>;
-};
-
-// Draggable Script Component — memoized; only re-renders when script data or active state changes
-const DraggableScript = memo(({
-    script,
-    isActive,
-    onClick,
-    onSaveAsTemplate,
-    onDuplicate,
-    onDelete,
-}: {
-    script: Script;
-    isActive: boolean;
-    onClick: () => void;
-    onSaveAsTemplate: () => void;
-    onDuplicate: () => void;
-    onDelete: () => void;
-}) => {
-    const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-        id: script.id,
-        data: { type: 'script', script }
-    });
-
-    return (
-        <ContextMenu>
-            <ContextMenuTrigger asChild>
-                <div
-                    ref={setNodeRef}
-                    style={{ opacity: isDragging ? 0.5 : 1 }}
-                    {...attributes}
-                    {...listeners}
-                    onClick={onClick}
-                    className={cn(
-                        "group flex items-center gap-2 px-2 py-1.5 rounded-md text-sm cursor-pointer transition-colors select-none",
-                        isActive ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
-                        isDragging && "opacity-50 bg-slate-50 dark:bg-slate-800"
-                    )}
-                >
-                    <div className="w-4 flex-shrink-0" />
-                    <FileCode className={cn("h-4 w-4 flex-shrink-0", isActive ? "text-blue-600 dark:text-blue-400" : "text-slate-500")} />
-                    <span className="truncate text-[13px] flex-1">{script.name}<UnsavedIndicator scriptId={script.id} /></span>
-                    <GripVertical className="h-3.5 w-3.5 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-auto" />
-                </div>
-            </ContextMenuTrigger>
-            <ContextMenuContent>
-                <ContextMenuItem onClick={onDuplicate}>
-                    <Copy className="mr-2 h-4 w-4" /> Duplicate
-                </ContextMenuItem>
-                <ContextMenuItem onClick={onSaveAsTemplate}>
-                    <LayoutTemplate className="mr-2 h-4 w-4" /> Save as Template
-                </ContextMenuItem>
-                <DropdownMenuSeparator />
-                <ContextMenuItem className="text-red-600 focus:text-red-600" onClick={onDelete}>
-                    <Trash2 className="mr-2 h-4 w-4" /> Delete Script
-                </ContextMenuItem>
-            </ContextMenuContent>
-        </ContextMenu>
-    );
-// Only re-render when script data or active state changes (ignore inline callback reference changes)
-}, (prev, next) => prev.script === next.script && prev.isActive === next.isActive);
-
-const CollectionScriptRows = memo(({
-    scripts,
-    activeScriptId,
-    onActivateScript,
-    onSaveAsTemplate,
-    onDuplicateScript,
-    onDeleteScript,
-}: {
-    scripts: Script[]
-    activeScriptId: string | null
-    onActivateScript: (scriptId: string) => void
-    onSaveAsTemplate: (script: Script) => void
-    onDuplicateScript: (scriptId: string) => void
-    onDeleteScript: (script: Script) => void
-}) => {
-    if (scripts.length === 0) {
-        return <div className="px-2 py-1 text-xs text-slate-400 italic">Empty</div>;
-    }
-
-    return (
-        <>
-            {scripts.map((script) => (
-                <DraggableScript
-                    key={script.id}
-                    script={script}
-                    isActive={activeScriptId === script.id}
-                    onClick={() => onActivateScript(script.id)}
-                    onSaveAsTemplate={() => onSaveAsTemplate(script)}
-                    onDuplicate={() => onDuplicateScript(script.id)}
-                    onDelete={() => onDeleteScript(script)}
-                />
-            ))}
-        </>
-    );
-}, (prev, next) =>
-    prev.scripts === next.scripts &&
-    prev.activeScriptId === next.activeScriptId
-);
-
-const getCollectionTreeKey = (parentId: string | null, projectId: string | null) =>
-    `${projectId ?? '__root_project__'}::${parentId ?? '__root_parent__'}`;
-
-const CollectionLinkStatusDot = ({
-    hasLinkedFolder,
-    isTemporary,
-}: {
-    hasLinkedFolder: boolean
-    isTemporary: boolean
-}) => {
-    const tooltip = hasLinkedFolder
-        ? (isTemporary
-            ? 'Green dot: this temporary workspace is backed by a local folder.'
-            : 'Green dot: this collection is linked to a real folder, so scripts and sub-collections stay mapped to folders on disk.')
-        : 'Red dot: this collection is not linked to a folder yet, so it only exists inside ScriptManager metadata until you link or save it.';
-
-    return (
-        <span
-            className={cn(
-                "inline-flex h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-inset",
-                hasLinkedFolder
-                    ? "bg-emerald-500 ring-emerald-400/60"
-                    : "bg-rose-500 ring-rose-400/60"
-            )}
-            title={tooltip}
-            aria-label={tooltip}
-        />
-    );
-};
-
-// Droppable Collection Component — memoized; only re-renders when collection data or expand state changes
-const DroppableCollection = memo(({
-    collection,
-    isExpanded,
-    toggle,
-    scripts,
-    activeScriptId,
-    isDeleting,
-    onDelete,
-    onCreateScript,
-    onActivateScript,
-    onSaveAsTemplate,
-    onDuplicateScript,
-    onDeleteScript,
-    onConvertToCollection,
-    onManagePythonEnv,
-    subCollectionsNode,
-    onCreateSubCollection,
-}: {
-    collection: Collection,
-    isExpanded: boolean,
-    toggle: () => void,
-    scripts: Script[],
-    activeScriptId: string | null,
-    isDeleting?: boolean,
-    onDelete: () => void,
-    onCreateScript: () => void
-    onActivateScript: (scriptId: string) => void
-    onSaveAsTemplate: (script: Script) => void
-    onDuplicateScript: (scriptId: string) => void
-    onDeleteScript: (script: Script) => void
-    onConvertToCollection?: () => void
-    onManagePythonEnv?: () => void
-    subCollectionsNode?: React.ReactNode
-    onCreateSubCollection: () => void
-}) => {
-    const { setNodeRef: setDroppableNodeRef, isOver } = useDroppable({
-        id: `drop-col-${collection.id}`,
-        data: { type: 'collection', collection }
-    });
-
-    const { attributes, listeners, setNodeRef: setDraggableNodeRef, isDragging } = useDraggable({
-        id: `drag-col-${collection.id}`,
-        data: { type: 'collection', collection }
-    });
-
-    return (
-        <ContextMenu>
-            <div ref={setDroppableNodeRef} className={cn("space-y-0.5 rounded-md transition-colors", isOver && "bg-blue-50 dark:bg-blue-900/40 ring-1 ring-blue-200 dark:ring-blue-800")}>
-                <ContextMenuTrigger asChild>
-                    <div
-                        ref={setDraggableNodeRef}
-                        className={cn("flex items-center gap-1 px-1.5 py-1.5 text-sm font-medium rounded-md hover:bg-slate-200/50 dark:hover:bg-slate-800 group cursor-pointer", isDragging && "opacity-50 line-through")}
-                        onClick={toggle}
-                    >
-                        <div className="flex h-3.5 w-3.5 items-center justify-center shrink-0">
-                            {isExpanded ? (
-                                <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
-                            ) : (
-                                <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
-                            )}
-                        </div>
-                        <Folder className={cn("h-4 w-4 flex-shrink-0", isOver ? "text-blue-500" : "text-slate-500")} />
-                        <span className="min-w-0 flex-1 truncate pr-1 text-[13px] leading-5 text-slate-700 dark:text-slate-300" title={collection.name}>
-                            {collection.name}
-                        </span>
-                        <div className="ml-auto flex shrink-0 items-center gap-1">
-                            <CollectionLinkStatusDot hasLinkedFolder={Boolean(collection.folder_path)} isTemporary={Boolean(collection.is_temporary)} />
-                            {isDeleting && (
-                                <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-blue-500" />
-                            )}
-                            <div className="flex max-w-0 items-center gap-0.5 overflow-hidden opacity-0 transition-[max-width,opacity] duration-150 group-hover:max-w-20 group-hover:opacity-100 group-focus-within:max-w-20 group-focus-within:opacity-100">
-                                <button
-                                    type="button"
-                                    {...attributes}
-                                    {...listeners}
-                                    className="flex h-5 w-5 items-center justify-center rounded-sm text-slate-300 transition-colors hover:text-slate-500 cursor-grab active:cursor-grabbing"
-                                    onClick={(e) => e.stopPropagation()}
-                                    title="Drag collection"
-                                    aria-label={`Drag collection ${collection.name}`}
-                                >
-                                    <GripVertical className="h-3.5 w-3.5 flex-shrink-0" />
-                                </button>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-5 w-5 text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400"
-                                    onClick={(e) => { e.stopPropagation(); onCreateScript(); }}
-                                    title="New Script"
-                                    disabled={isDeleting}
-                                >
-                                    <Plus className="h-3.5 w-3.5" />
-                                </Button>
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-5 w-5"
-                                            onClick={(e) => e.stopPropagation()}
-                                            disabled={isDeleting}
-                                        >
-                                            <MoreVertical className="h-3 w-3" />
-                                        </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onCreateScript(); }}>
-                                            <Plus className="mr-2 h-4 w-4" /> New Script
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onCreateSubCollection(); }}>
-                                            <Folder className="mr-2 h-4 w-4" /> New Sub-collection
-                                        </DropdownMenuItem>
-                                        {collection.is_temporary && onConvertToCollection && (
-                                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onConvertToCollection(); }}>
-                                                <FolderOpen className="mr-2 h-4 w-4" /> Save as Collection
-                                            </DropdownMenuItem>
-                                        )}
-                                        {onManagePythonEnv && (
-                                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onManagePythonEnv(); }}>
-                                                <Folder className="mr-2 h-4 w-4" /> Python Environment...
-                                            </DropdownMenuItem>
-                                        )}
-                                        <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
-                                            <Trash2 className="mr-2 h-4 w-4" /> {collection.is_temporary ? 'Remove Workspace' : 'Delete'}
-                                        </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
-                            </div>
-                        </div>
-                    </div>
-                </ContextMenuTrigger>
-                {isExpanded && (
-                    <div className="ml-3.5 mt-0.5 space-y-0.5 border-l-[1.5px] border-slate-100 pl-2.5 dark:border-slate-800/80">
-                        {subCollectionsNode}
-                        <CollectionScriptRows
-                            scripts={scripts}
-                            activeScriptId={activeScriptId}
-                            onActivateScript={onActivateScript}
-                            onSaveAsTemplate={onSaveAsTemplate}
-                            onDuplicateScript={onDuplicateScript}
-                            onDeleteScript={onDeleteScript}
-                        />
-                    </div>
-                )}
-            </div>
-            <ContextMenuContent>
-                <ContextMenuItem onClick={onCreateScript}>
-                    <Plus className="mr-2 h-4 w-4" /> New Script here
-                </ContextMenuItem>
-                <ContextMenuItem onClick={onCreateSubCollection}>
-                    <Folder className="mr-2 h-4 w-4" /> New Sub-collection here
-                </ContextMenuItem>
-                {collection.is_temporary && onConvertToCollection && (
-                    <ContextMenuItem onClick={onConvertToCollection}>
-                        <FolderOpen className="mr-2 h-4 w-4" /> Save as Collection
-                    </ContextMenuItem>
-                )}
-                {onManagePythonEnv && (
-                    <ContextMenuItem onClick={onManagePythonEnv}>
-                        <Folder className="mr-2 h-4 w-4" /> Python Environment...
-                    </ContextMenuItem>
-                )}
-                <ContextMenuItem className="text-red-600 focus:text-red-600" onClick={onDelete}>
-                    <Trash2 className="mr-2 h-4 w-4" /> {collection.is_temporary ? 'Remove Workspace' : 'Delete Collection'}
-                </ContextMenuItem>
-            </ContextMenuContent>
-        </ContextMenu>
-    );
-// Only re-render when collection data, expand state, or children change
-}, (prev, next) =>
-    prev.collection === next.collection &&
-    prev.isExpanded === next.isExpanded &&
-    prev.scripts === next.scripts &&
-    prev.activeScriptId === next.activeScriptId &&
-    prev.isDeleting === next.isDeleting &&
-    prev.subCollectionsNode === next.subCollectionsNode
-);
-
-// Droppable Project Component
-const DroppableProject = ({
-    project,
-    isExpanded,
-    toggleProject,
-    handleCreateScript,
-    handleCreateCollection,
-    handleDeleteProject,
-    children
-}: {
-    project: any;
-    isExpanded: boolean;
-    toggleProject: () => void;
-    handleCreateScript: () => void;
-    handleCreateCollection: () => void;
-    handleDeleteProject: () => void;
-    children: React.ReactNode;
-}) => {
-    const { setNodeRef, isOver } = useDroppable({
-        id: `drop-proj-${project.id}`,
-        data: { type: 'project', project }
-    });
-
-    const envLabels: Record<string, string> = {
-        development: 'DEV',
-        qa: 'QA',
-        uat: 'UAT',
-        production: 'PROD',
-    };
-
-    return (
-        <div ref={setNodeRef} className={cn("space-y-0.5 rounded-md transition-colors", isOver && "bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-200 dark:ring-amber-800")}>
-            <div
-                className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-semibold rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 group cursor-pointer"
-                onClick={toggleProject}
-            >
-                <div className="flex h-4 w-4 items-center justify-center shrink-0">
-                    {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
-                </div>
-                <Layers className="h-4 w-4 flex-shrink-0" style={{ color: project.color }} />
-                <span className="flex-1 truncate text-[13px] text-slate-700 dark:text-slate-300">{project.name}</span>
-                <span
-                    className="text-[9px] font-bold px-1 py-0.5 rounded flex-shrink-0"
-                    style={{ backgroundColor: project.color + '22', color: project.color }}
-                >
-                    {envLabels[project.environment] ?? project.environment.toUpperCase()}
-                </span>
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-5 w-5 opacity-0 group-hover:opacity-100 flex-shrink-0" onClick={e => e.stopPropagation()}>
-                            <MoreVertical className="h-3 w-3" />
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={e => { e.stopPropagation(); handleCreateScript(); }}>
-                            <FileCode className="mr-2 h-4 w-4" /> New Script
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={e => { e.stopPropagation(); handleCreateCollection(); }}>
-                            <Folder className="mr-2 h-4 w-4" /> New Collection
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={e => { e.stopPropagation(); handleDeleteProject(); }}>
-                            <Trash2 className="mr-2 h-4 w-4" /> Delete Project
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
-            </div>
-            {isExpanded && (
-                <div className="ml-[18px] pl-2 mt-0.5 border-l-[1.5px] border-slate-100 dark:border-slate-800/80 space-y-0.5 relative">
-                    {children}
-                </div>
-            )}
-        </div>
     );
 };
 
@@ -538,9 +134,9 @@ const ScriptsSidebarComponent = () => {
     const [newProjectName, setNewProjectName] = useState('');
     const [newProjectEnv, setNewProjectEnv] = useState<'development' | 'qa' | 'uat' | 'production'>('development');
 
-    const toggleProject = (id: string) => {
+    const toggleProject = useCallback((id: string) => {
         setExpandedProjects(prev => ({ ...prev, [id]: !prev[id] }));
-    };
+    }, []);
 
     const handleCreateProject = async () => {
         if (!newProjectName.trim()) return;
@@ -559,11 +155,11 @@ const ScriptsSidebarComponent = () => {
         setIsCreatingProject(false);
     };
 
-    const handleDeleteProject = async (id: string) => {
+    const handleDeleteProject = useCallback(async (id: string) => {
         if (confirm('Delete this project? Collections will become unassigned (not deleted).')) {
             await dispatch(deleteProject(id));
         }
-    };
+    }, [dispatch]);
 
     // Ctrl+P / Cmd+P global shortcut
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -593,9 +189,9 @@ const ScriptsSidebarComponent = () => {
 
     // Initial data fetching is centralized in page.tsx
 
-    const toggleCollection = (id: string) => {
+    const toggleCollection = useCallback((id: string) => {
         setExpandedCollections(prev => ({ ...prev, [id]: !prev[id] }));
-    };
+    }, []);
 
     const handleActivateScript = useCallback((scriptId: string) => {
         dispatch(setActiveScript(scriptId));
@@ -625,16 +221,16 @@ const ScriptsSidebarComponent = () => {
         }
     };
 
-    const openCreateScriptDialog = (collectionId?: string) => {
+    const openCreateScriptDialog = useCallback((collectionId?: string) => {
         setParentCollectionId(collectionId || null);
         setIsCreateScriptOpen(true);
-    };
+    }, []);
 
-    const openCreateCollectionDialog = (projectId?: string | null, parentId?: string | null) => {
+    const openCreateCollectionDialog = useCallback((projectId?: string | null, parentId?: string | null) => {
         setParentProjectId(projectId ?? null);
         setParentCreationCollectionId(parentId ?? null);
         setIsCreatingCollection(true);
-    };
+    }, []);
 
     const resetCollectionCreationState = () => {
         setParentProjectId(null);
@@ -768,9 +364,7 @@ const ScriptsSidebarComponent = () => {
         }
     };
 
-    const handleCreateScript = async (collectionId?: string) => {
-        openCreateScriptDialog(collectionId);
-    };
+    const handleCreateScript = openCreateScriptDialog;
 
     const handleCreateCollection = async (values: { name: string; runtimePreset: NonNullable<Collection['runtime_preset']>; pythonTools: boolean }) => {
         if (!values.name.trim() || isSubmittingCollection) return;
@@ -795,13 +389,11 @@ const ScriptsSidebarComponent = () => {
         }
     };
 
-    const handleDeleteCollection = async (collection: Collection) => {
+    // Covers both saved collections and temporary workspaces — confirmDeleteCollection
+    // branches on `is_temporary` when the user confirms.
+    const handleDeleteCollection = useCallback((collection: Collection) => {
         setCollectionToDelete(collection);
-    };
-
-    const handleRemoveTemporaryCollection = async (collection: Collection) => {
-        setCollectionToDelete(collection);
-    };
+    }, []);
 
     const confirmDeleteCollection = async () => {
         if (!collectionToDelete || isDeletingCollectionDialog) {
@@ -823,10 +415,10 @@ const ScriptsSidebarComponent = () => {
         }
     };
 
-    const openConvertCollectionDialog = (collection: Collection) => {
+    const openConvertCollectionDialog = useCallback((collection: Collection) => {
         setCollectionToConvert(collection);
         setConvertCollectionName(collection.name.replace(/\s+\(Temporary\)$/i, ''));
-    };
+    }, []);
 
     const handleConvertTemporaryCollection = async () => {
         if (!collectionToConvert || !convertCollectionName.trim() || isConvertingCollection) return;
@@ -1068,35 +660,26 @@ const ScriptsSidebarComponent = () => {
         })
     );
 
-    const renderCollectionTree = (parentId: string | null = null, currentProjectId: string | null = null): React.ReactNode => {
-        const children = savedCollectionsByTreeKey[getCollectionTreeKey(parentId, currentProjectId)] ?? [];
-        if (children.length === 0) return null;
-
-        return (
-            <div className="space-y-0.5">
-                {children.map((collection) => (
-                    <DroppableCollection
-                        key={collection.id}
-                        collection={collection}
-                        isExpanded={!!expandedCollections[collection.id]}
-                        isDeleting={pendingCollectionDeleteId === collection.id}
-                        toggle={() => toggleCollection(collection.id)}
-                        scripts={grouped.result[collection.id] ?? []}
-                        activeScriptId={activeScriptId}
-                        onDelete={() => handleDeleteCollection(collection)}
-                        onCreateScript={() => handleCreateScript(collection.id)}
-                        onCreateSubCollection={() => openCreateCollectionDialog(collection.project_id, collection.id)}
-                        onActivateScript={handleActivateScript}
-                        onSaveAsTemplate={openSaveAsTemplate}
-                        onDuplicateScript={handleDuplicateScript}
-                        onDeleteScript={handleDeleteScriptRequest}
-                        onManagePythonEnv={hasDesktopFolderPicker && collection.folder_path ? () => openPythonEnvironmentDialog(collection) : undefined}
-                        subCollectionsNode={renderCollectionTree(collection.id, currentProjectId)}
-                    />
-                ))}
-            </div>
-        );
-    };
+    // Stable callback bag for the virtualized tree — keeps ScriptTree's memo effective.
+    const treeCallbacks = useMemo<ScriptTreeCallbacks>(() => ({
+        onToggleCollection: toggleCollection,
+        onToggleProject: toggleProject,
+        onActivateScript: handleActivateScript,
+        onSaveAsTemplate: openSaveAsTemplate,
+        onDuplicateScript: handleDuplicateScript,
+        onDeleteScript: handleDeleteScriptRequest,
+        onDeleteCollection: handleDeleteCollection,
+        onCreateScript: openCreateScriptDialog,
+        onCreateCollection: openCreateCollectionDialog,
+        onConvertCollection: openConvertCollectionDialog,
+        onManagePythonEnv: openPythonEnvironmentDialog,
+        onDeleteProject: handleDeleteProject,
+    }), [
+        toggleCollection, toggleProject, handleActivateScript, openSaveAsTemplate,
+        handleDuplicateScript, handleDeleteScriptRequest, handleDeleteCollection,
+        openCreateScriptDialog, openCreateCollectionDialog, openConvertCollectionDialog,
+        openPythonEnvironmentDialog, handleDeleteProject,
+    ]);
 
     return (
         <>
@@ -1222,164 +805,26 @@ const ScriptsSidebarComponent = () => {
                         </div>
                     )}
 
-                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                        {status === 'loading' && (
-                            <div className="flex justify-center p-4">
-                                <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
-                            </div>
-                        )}
-                        {searchQuery.trim() && filteredScripts.length === 0 && status !== 'loading' && (
-                            <div className="px-2 py-6 text-xs text-slate-400 text-center italic">No scripts match &quot;{searchQuery}&quot;</div>
-                        )}
-
-                        {/* === Ops Mode: 3-level Project → Collection → Script hierarchy === */}
-                        {isModeActive && !searchQuery.trim() && (
-                            <>
-                                {temporaryCollections.length > 0 && (
-                                    <>
-                                        <div className="px-2 py-2 text-xs font-semibold text-amber-500 uppercase">Temporary</div>
-                                        {temporaryCollections.map(collection => (
-                                            <DroppableCollection
-                                                key={collection.id}
-                                                collection={collection}
-                                                isExpanded={!!expandedCollections[collection.id]}
-                                                isDeleting={pendingCollectionDeleteId === collection.id}
-                                                toggle={() => toggleCollection(collection.id)}
-                                                scripts={grouped.result[collection.id] ?? []}
-                                                activeScriptId={activeScriptId}
-                                                onDelete={() => handleRemoveTemporaryCollection(collection)}
-                                                onCreateScript={() => handleCreateScript(collection.id)}
-                                                onCreateSubCollection={() => openCreateCollectionDialog(collection.project_id, collection.id)}
-                                                onActivateScript={handleActivateScript}
-                                                onSaveAsTemplate={openSaveAsTemplate}
-                                                onDuplicateScript={handleDuplicateScript}
-                                                onDeleteScript={handleDeleteScriptRequest}
-                                                onConvertToCollection={() => openConvertCollectionDialog(collection)}
-                                                onManagePythonEnv={hasDesktopFolderPicker && collection.folder_path ? () => openPythonEnvironmentDialog(collection) : undefined}
-                                            />
-                                        ))}
-                                    </>
-                                )}
-                                {projects.map(project => {
-                                    const isExpanded = !!expandedProjects[project.id];
-                                    return (
-                                        <DroppableProject
-                                            key={project.id}
-                                            project={project}
-                                            isExpanded={isExpanded}
-                                            toggleProject={() => toggleProject(project.id)}
-                                            handleCreateScript={() => handleCreateScript()}
-                                            handleCreateCollection={() => openCreateCollectionDialog(project.id)}
-                                            handleDeleteProject={() => handleDeleteProject(project.id)}
-                                        >
-                                            <div className="space-y-0.5">
-                                                {renderCollectionTree(null, project.id)}
-                                                {(projectCollectionCounts[project.id] ?? 0) === 0 && (
-                                                    <div className="px-4 py-1 text-xs text-slate-400 italic">No collections</div>
-                                                )}
-                                            </div>
-                                        </DroppableProject>
-                                    );
-                                })}
-
-                                {/* Unassigned collections in Ops Mode */}
-                                {(() => {
-                                    if (rootSavedCollections.length === 0 && grouped.unsorted.length === 0) return null;
-                                    return (
-                                        <div className="space-y-0.5 mt-2">
-                                            {(rootSavedCollections.length > 0 || grouped.unsorted.length > 0) && (
-                                                <div className="px-2 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1 mt-2 mb-1">
-                                                    Unassigned
-                                                </div>
-                                            )}
-                                            {renderCollectionTree(null, null)}
-                                            {grouped.unsorted.map(script => (
-                                                <DraggableScript
-                                                    key={script.id}
-                                                    script={script}
-                                                    isActive={activeScriptId === script.id}
-                                                    onClick={() => handleActivateScript(script.id)}
-                                                    onSaveAsTemplate={() => openSaveAsTemplate(script)}
-                                                    onDuplicate={() => handleDuplicateScript(script.id)}
-                                                    onDelete={() => handleDeleteScriptRequest(script)}
-                                                />
-                                            ))}
-                                        </div>
-                                    );
-                                })()}
-                            </>
-                        )}
-
-                        {/* === Normal Mode (or search active): flat collection → script view === */}
-                        {(!isModeActive || searchQuery.trim()) && (
-                            <>
-                                {temporaryCollections.length > 0 && (
-                                    <div className="px-2 py-2 text-xs font-semibold text-amber-500 uppercase">Temporary</div>
-                                )}
-                                {temporaryCollections.map(collection => (
-                                    <DroppableCollection
-                                        key={collection.id}
-                                        collection={collection}
-                                        isExpanded={!!expandedCollections[collection.id]}
-                                        isDeleting={pendingCollectionDeleteId === collection.id}
-                                        toggle={() => toggleCollection(collection.id)}
-                                        scripts={grouped.result[collection.id] ?? []}
-                                        activeScriptId={activeScriptId}
-                                        onDelete={() => handleRemoveTemporaryCollection(collection)}
-                                        onCreateScript={() => handleCreateScript(collection.id)}
-                                        onCreateSubCollection={() => openCreateCollectionDialog(collection.project_id, collection.id)}
-                                        onActivateScript={handleActivateScript}
-                                        onSaveAsTemplate={openSaveAsTemplate}
-                                        onDuplicateScript={handleDuplicateScript}
-                                        onDeleteScript={handleDeleteScriptRequest}
-                                        onConvertToCollection={() => openConvertCollectionDialog(collection)}
-                                        onManagePythonEnv={hasDesktopFolderPicker && collection.folder_path ? () => openPythonEnvironmentDialog(collection) : undefined}
-                                    />
-                                ))}
-
-                                {(searchQuery.trim() ? savedCollections.length > 0 : rootSavedCollections.length > 0) && (
-                                    <div className="px-2 py-2 text-xs font-semibold text-slate-400 uppercase">
-                                        {temporaryCollections.length > 0 ? 'Collections' : ''}
-                                    </div>
-                                )}
-                                {searchQuery.trim() ? savedCollections.map(collection => (
-                                    <DroppableCollection
-                                        key={collection.id}
-                                        collection={collection}
-                                        isExpanded={!!expandedCollections[collection.id]}
-                                        isDeleting={pendingCollectionDeleteId === collection.id}
-                                        toggle={() => toggleCollection(collection.id)}
-                                        scripts={grouped.result[collection.id] ?? []}
-                                        activeScriptId={activeScriptId}
-                                        onDelete={() => handleDeleteCollection(collection)}
-                                        onCreateScript={() => handleCreateScript(collection.id)}
-                                        onCreateSubCollection={() => openCreateCollectionDialog(collection.project_id, collection.id)}
-                                        onActivateScript={handleActivateScript}
-                                        onSaveAsTemplate={openSaveAsTemplate}
-                                        onDuplicateScript={handleDuplicateScript}
-                                        onDeleteScript={handleDeleteScriptRequest}
-                                        onConvertToCollection={collection.is_temporary ? () => openConvertCollectionDialog(collection) : undefined}
-                                        onManagePythonEnv={hasDesktopFolderPicker && collection.folder_path ? () => openPythonEnvironmentDialog(collection) : undefined}
-                                    />
-                                )) : renderCollectionTree(null, null)}
-
-                                {grouped.unsorted.length > 0 && (!isModeActive || searchQuery.trim()) && (
-                                    <div className="px-2 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider mt-2 mb-1">Unsorted</div>
-                                )}
-                                {grouped.unsorted.map((script) => (
-                                    <DraggableScript
-                                        key={script.id}
-                                        script={script}
-                                        isActive={activeScriptId === script.id}
-                                        onClick={() => handleActivateScript(script.id)}
-                                        onSaveAsTemplate={() => openSaveAsTemplate(script)}
-                                        onDuplicate={() => handleDuplicateScript(script.id)}
-                                        onDelete={() => handleDeleteScriptRequest(script)}
-                                    />
-                                ))}
-                            </>
-                        )}
-                    </div>
+                    <ScriptTree
+                        isOpsMode={isModeActive}
+                        searchActive={Boolean(searchQuery.trim())}
+                        isLoading={status === 'loading'}
+                        noMatchMessage={searchQuery.trim() && filteredScripts.length === 0 && status !== 'loading' ? `No scripts match "${searchQuery}"` : null}
+                        temporaryCollections={temporaryCollections}
+                        savedCollections={savedCollections}
+                        collectionsByTreeKey={savedCollectionsByTreeKey}
+                        rootSavedCollections={rootSavedCollections}
+                        projects={projects}
+                        projectCollectionCounts={projectCollectionCounts}
+                        scriptsByCollection={grouped.result}
+                        unsortedScripts={grouped.unsorted}
+                        expandedCollections={expandedCollections}
+                        expandedProjects={expandedProjects}
+                        activeScriptId={activeScriptId}
+                        pendingCollectionDeleteId={pendingCollectionDeleteId}
+                        hasDesktopFolderPicker={hasDesktopFolderPicker}
+                        callbacks={treeCallbacks}
+                    />
 
                     <div className="p-2 border-t bg-slate-50 dark:bg-slate-900 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 flex justify-between items-center">
                         <span>
