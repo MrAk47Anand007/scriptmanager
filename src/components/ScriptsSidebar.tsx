@@ -32,6 +32,7 @@ import { OpenFolderDialog, type OpenFolderSubmitValues } from './sidebar/OpenFol
 import { DeleteScriptDialog } from './sidebar/DeleteScriptDialog';
 import { DeleteCollectionDialog } from './sidebar/DeleteCollectionDialog';
 import { PythonEnvDialog } from './sidebar/PythonEnvDialog';
+import { SaveAsTemplateDialog } from './sidebar/SaveAsTemplateDialog';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
 import {
     DropdownMenu,
@@ -520,10 +521,6 @@ const ScriptsSidebarComponent = () => {
     // Save as Template dialog state
     const [isSaveAsTemplateOpen, setIsSaveAsTemplateOpen] = useState(false);
     const [saveAsSourceScript, setSaveAsSourceScript] = useState<Script | null>(null);
-    const [saveAsTemplateName, setSaveAsTemplateName] = useState('');
-    const [saveAsDescription, setSaveAsDescription] = useState('');
-    const [saveAsCategory, setSaveAsCategory] = useState('general');
-    const [saveAsError, setSaveAsError] = useState('');
     const [saveAsLoading, setSaveAsLoading] = useState(false);
 
     // Delete confirmation dialog state
@@ -896,18 +893,13 @@ const ScriptsSidebarComponent = () => {
 
     const openSaveAsTemplate = useCallback((script: Script) => {
         setSaveAsSourceScript(script);
-        setSaveAsTemplateName(script.name);
-        setSaveAsDescription('');
-        setSaveAsCategory('general');
-        setSaveAsError('');
         setSaveAsLoading(false);
         setIsSaveAsTemplateOpen(true);
     }, []);
 
-    const handleSaveAsTemplate = async () => {
-        if (!saveAsSourceScript || !saveAsTemplateName.trim()) return;
+    const handleSaveAsTemplate = async (values: { name: string; description: string; category: string }): Promise<string | null> => {
+        if (!saveAsSourceScript || !values.name.trim()) return null;
         setSaveAsLoading(true);
-        setSaveAsError('');
 
         try {
             // Get content: use active script content if this is the active script, else fetch
@@ -921,9 +913,9 @@ const ScriptsSidebarComponent = () => {
             }
 
             const result = await dispatch(saveAsTemplate({
-                name: saveAsTemplateName.trim(),
-                description: saveAsDescription.trim(),
-                category: saveAsCategory,
+                name: values.name.trim(),
+                description: values.description.trim(),
+                category: values.category,
                 language: saveAsSourceScript.language ?? 'python',
                 interpreter: saveAsSourceScript.interpreter ?? null,
                 content,
@@ -932,12 +924,15 @@ const ScriptsSidebarComponent = () => {
 
             if (saveAsTemplate.fulfilled.match(result)) {
                 setIsSaveAsTemplateOpen(false)
-            } else if (saveAsTemplate.rejected.match(result)) {
-                const payload = result.payload as { error?: string } | undefined
-                setSaveAsError(payload?.error ?? 'Failed to save template')
+                return null
             }
+            if (saveAsTemplate.rejected.match(result)) {
+                const payload = result.payload as { error?: string } | undefined
+                return payload?.error ?? 'Failed to save template'
+            }
+            return null
         } catch {
-            setSaveAsError('Failed to save template')
+            return 'Failed to save template'
         } finally {
             setSaveAsLoading(false)
         }
@@ -1474,83 +1469,13 @@ const ScriptsSidebarComponent = () => {
                     </DialogContent>
                 </Dialog>
                 {/* Save as Template dialog */}
-                <Dialog open={isSaveAsTemplateOpen} onOpenChange={setIsSaveAsTemplateOpen}>
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle className="flex items-center gap-2">
-                                <LayoutTemplate className="h-4 w-4 text-blue-500" />
-                                Save as Template
-                            </DialogTitle>
-                            <DialogDescription>
-                                Save &quot;{saveAsSourceScript?.name}&quot; as a reusable template.
-                            </DialogDescription>
-                        </DialogHeader>
-                        <div className="flex flex-col gap-3 py-2">
-                            <div className="flex flex-col gap-1.5">
-                                <Label htmlFor="tpl-name" className="text-xs">Template Name</Label>
-                                <Input
-                                    id="tpl-name"
-                                    placeholder="My Template"
-                                    value={saveAsTemplateName}
-                                    onChange={(e) => {
-                                        setSaveAsTemplateName(e.target.value)
-                                        if (saveAsError) setSaveAsError('')
-                                    }}
-                                    autoFocus
-                                    className="h-8 text-xs"
-                                />
-                                {saveAsError && (
-                                    <p className="text-[10px] text-red-500">{saveAsError}</p>
-                                )}
-                            </div>
-                            <div className="flex flex-col gap-1.5">
-                                <Label htmlFor="tpl-desc" className="text-xs">Description <span className="text-slate-400 font-normal">(optional)</span></Label>
-                                <Input
-                                    id="tpl-desc"
-                                    placeholder="What does this template do?"
-                                    value={saveAsDescription}
-                                    onChange={(e) => setSaveAsDescription(e.target.value)}
-                                    className="h-8 text-xs"
-                                />
-                            </div>
-                            <div className="flex flex-col gap-1.5">
-                                <Label htmlFor="tpl-category" className="text-xs">Category</Label>
-                                <Select value={saveAsCategory} onValueChange={setSaveAsCategory}>
-                                    <SelectTrigger id="tpl-category" className="h-8 text-xs">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="general">general</SelectItem>
-                                        <SelectItem value="networking">networking</SelectItem>
-                                        <SelectItem value="filesystem">filesystem</SelectItem>
-                                        <SelectItem value="system">system</SelectItem>
-                                        <SelectItem value="data">data</SelectItem>
-                                        <SelectItem value="automation">automation</SelectItem>
-                                        <SelectItem value="other">other</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
-                        <DialogFooter>
-                            <Button
-                                variant="secondary"
-                                size="sm"
-                                className="text-xs"
-                                onClick={() => setIsSaveAsTemplateOpen(false)}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                size="sm"
-                                className="text-xs"
-                                onClick={handleSaveAsTemplate}
-                                disabled={!saveAsTemplateName.trim() || saveAsLoading}
-                            >
-                                {saveAsLoading ? 'Saving…' : 'Save Template'}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+                <SaveAsTemplateDialog
+                    open={isSaveAsTemplateOpen}
+                    sourceScript={saveAsSourceScript}
+                    submitting={saveAsLoading}
+                    onOpenChange={setIsSaveAsTemplateOpen}
+                    onSubmit={handleSaveAsTemplate}
+                />
 
                 <DeleteCollectionDialog
                     collection={collectionToDelete}
