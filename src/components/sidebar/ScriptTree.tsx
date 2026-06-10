@@ -231,7 +231,7 @@ const ScriptRow = memo(({
         id: script.id,
         data: { type: 'script', script }
     });
-    const { setNodeRef: setDroppableNodeRef } = useDroppable({
+    const { setNodeRef: setDroppableNodeRef, isOver } = useDroppable({
         id: `drop-script-${script.id}`,
         data: parentCollection ? { type: 'collection', collection: parentCollection } : undefined,
         disabled: !parentCollection,
@@ -249,7 +249,8 @@ const ScriptRow = memo(({
                     className={cn(
                         "group flex items-center gap-2 px-2 py-1.5 rounded-md text-sm cursor-pointer transition-colors select-none",
                         isActive ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
-                        isDragging && "opacity-50 bg-slate-50 dark:bg-slate-800"
+                        isDragging && "opacity-50 bg-slate-50 dark:bg-slate-800",
+                        isOver && "bg-blue-50 dark:bg-blue-900/40 ring-1 ring-blue-200 dark:ring-blue-800"
                     )}
                 >
                     <div className="w-4 flex-shrink-0" />

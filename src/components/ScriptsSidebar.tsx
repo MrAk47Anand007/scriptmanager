@@ -558,6 +558,12 @@ const ScriptsSidebarComponent = () => {
         );
     }, [deferredSearchQuery, scripts, selectedTagId]);
 
+    const noMatchMessage = useMemo(() =>
+        deferredSearchQuery.trim() && filteredScripts.length === 0 && status !== 'loading'
+            ? `No scripts match "${deferredSearchQuery}"`
+            : null,
+        [deferredSearchQuery, filteredScripts, status]);
+
     // Auto-expand collections that contain matching scripts when searching or filtering
     useEffect(() => {
         if (!deferredSearchQuery.trim() && !selectedTagId) return;
@@ -809,7 +815,7 @@ const ScriptsSidebarComponent = () => {
                         isOpsMode={isModeActive}
                         searchActive={Boolean(searchQuery.trim())}
                         isLoading={status === 'loading'}
-                        noMatchMessage={searchQuery.trim() && filteredScripts.length === 0 && status !== 'loading' ? `No scripts match "${searchQuery}"` : null}
+                        noMatchMessage={noMatchMessage}
                         temporaryCollections={temporaryCollections}
                         savedCollections={savedCollections}
                         collectionsByTreeKey={savedCollectionsByTreeKey}
