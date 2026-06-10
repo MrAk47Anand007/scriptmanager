@@ -4,6 +4,8 @@ import type { RootState } from '@/store/store'
 export const selectOpsProjects = (state: RootState) => state.ops.projects
 export const selectSelectedProfileId = (state: RootState) => state.ops.selectedProfileId
 export const selectServerProfiles = (state: RootState) => state.ops.serverProfiles
+export const selectServerProfilesStatus = (state: RootState) => state.ops.serverProfilesStatus
+export const selectIsModeActive = (state: RootState) => state.ops.isModeActive
 export const selectRemoteExecStatus = (state: RootState) => state.ops.remoteExecStatus
 export const selectRemoteExecOutput = (state: RootState) => state.ops.remoteExecOutput
 export const selectConnectionTestResult = (state: RootState) => state.ops.connectionTestResult

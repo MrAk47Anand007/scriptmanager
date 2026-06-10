@@ -9,6 +9,12 @@ import {
     deleteServerProfile,
     setSelectedProfile,
 } from '@/features/ops/opsSlice'
+import {
+    selectServerProfiles,
+    selectSelectedProfileId,
+    selectServerProfilesStatus,
+    selectOpsProjects,
+} from '@/features/ops/selectors'
 import type { ServerProfile } from '@/features/ops/opsSlice'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,9 +65,10 @@ const defaultForm = (): ProfileFormState => ({
 
 export function ServerProfilesPanel() {
     const dispatch = useAppDispatch()
-    const { serverProfiles, selectedProfileId, serverProfilesStatus, projects } = useAppSelector(
-        (state) => state.ops
-    )
+    const serverProfiles = useAppSelector(selectServerProfiles)
+    const selectedProfileId = useAppSelector(selectSelectedProfileId)
+    const serverProfilesStatus = useAppSelector(selectServerProfilesStatus)
+    const projects = useAppSelector(selectOpsProjects)
 
     const [isExpanded, setIsExpanded] = useState(true)
     const [isAdding, setIsAdding] = useState(false)

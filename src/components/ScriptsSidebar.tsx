@@ -13,7 +13,7 @@ import {
     selectScriptItems, selectCollections, selectActiveScriptId,
     selectTemplates, selectAllTags, selectScriptsStatus,
 } from '@/features/scripts/selectors';
-import { selectOpsProjects } from '@/features/ops/selectors';
+import { selectOpsProjects, selectIsModeActive } from '@/features/ops/selectors';
 import { selectSettings } from '@/features/settings/selectors';
 import {
     createProject, deleteProject,
@@ -583,7 +583,7 @@ const ScriptsSidebarComponent = () => {
     const [isDeletingCollectionDialog, setIsDeletingCollectionDialog] = useState(false);
 
     const settings = useAppSelector(selectSettings);
-    const isModeActive = useAppSelector((state) => state.ops.isModeActive);
+    const isModeActive = useAppSelector(selectIsModeActive);
     const projects = useAppSelector(selectOpsProjects);
     const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
     const [isCreatingProject, setIsCreatingProject] = useState(false);
