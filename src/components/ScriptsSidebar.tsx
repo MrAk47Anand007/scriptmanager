@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, type ChangeEvent, memo } from 'react';
+import { useState, useMemo, useEffect, useCallback, useDeferredValue, memo } from 'react';
 import { useAppDispatch, useAppSelector, useAppStore } from '@/store/hooks';
 import type { RootState } from '@/store/store';
 import {
@@ -28,6 +28,7 @@ import {
 import { QuickSwitcher } from './QuickSwitcher';
 import { CreateScriptDialog } from './sidebar/CreateScriptDialog';
 import { CreateCollectionDialog } from './sidebar/CreateCollectionDialog';
+import { OpenFolderDialog, type OpenFolderSubmitValues } from './sidebar/OpenFolderDialog';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
 import {
     DropdownMenu,
@@ -63,23 +64,9 @@ import { DndContext, DragEndEvent, DragOverlay, useDraggable, useDroppable, Drag
 import { createPortal } from 'react-dom';
 import axios from 'axios';
 import {
-    hasDesktopScriptsRuntime,
     inspectDesktopCollectionWorkspace,
-    inspectDesktopFolder,
     manageDesktopCollectionPythonEnv,
 } from '@/lib/scriptsRuntimeClient';
-
-type BrowserFolderFile = {
-    relativePath: string
-    content: string
-}
-
-type FolderInspection = {
-    hasVenv: boolean
-    venvPath: string | null
-    interpreterPath: string | null
-    manifests: string[]
-}
 
 type CollectionWorkspaceStatus = {
     collection: Collection
@@ -89,14 +76,6 @@ type CollectionWorkspaceStatus = {
     interpreterPath: string | null
     manifests: string[]
 }
-
-const RUNTIME_OPTIONS: Array<{ value: NonNullable<Collection['runtime_preset']>; label: string }> = [
-    { value: 'general', label: 'General' },
-    { value: 'python', label: 'Python' },
-    { value: 'node', label: 'JavaScript / Node' },
-    { value: 'shell', label: 'Shell' },
-    { value: 'powershell', label: 'PowerShell' },
-]
 
 const GistSyncStatus = () => {
     const settings = useAppSelector(selectSettings);
@@ -532,17 +511,7 @@ const ScriptsSidebarComponent = () => {
     const [isCreatingScript, setIsCreatingScript] = useState(false);
     const [parentCollectionId, setParentCollectionId] = useState<string | null>(null);
     const [isOpenFolderDialogOpen, setIsOpenFolderDialogOpen] = useState(false);
-    const [folderPath, setFolderPath] = useState('');
-    const [folderMode, setFolderMode] = useState<'temporary' | 'collection'>('temporary');
-    const [folderCollectionName, setFolderCollectionName] = useState('');
-    const [folderRuntimePreset, setFolderRuntimePreset] = useState<NonNullable<Collection['runtime_preset']>>('general');
-    const [folderPythonTools, setFolderPythonTools] = useState(false);
-    const [folderCreateVenvIfMissing, setFolderCreateVenvIfMissing] = useState(false);
-    const [folderInspection, setFolderInspection] = useState<FolderInspection | null>(null);
     const [isOpeningFolder, setIsOpeningFolder] = useState(false);
-    const [openFolderError, setOpenFolderError] = useState('');
-    const [browserFolderFiles, setBrowserFolderFiles] = useState<BrowserFolderFile[]>([]);
-    const filePickerRef = useRef<HTMLInputElement | null>(null);
     const [collectionToConvert, setCollectionToConvert] = useState<Collection | null>(null);
     const [convertCollectionName, setConvertCollectionName] = useState('');
     const [isConvertingCollection, setIsConvertingCollection] = useState(false);
@@ -639,15 +608,6 @@ const ScriptsSidebarComponent = () => {
         };
     }, []);
 
-    useEffect(() => {
-        if (folderRuntimePreset === 'python') {
-            setFolderPythonTools(true);
-            if (!folderInspection?.hasVenv) {
-                setFolderCreateVenvIfMissing(true);
-            }
-        }
-    }, [folderInspection?.hasVenv, folderRuntimePreset]);
-
     // Initial data fetching is centralized in page.tsx
 
     const toggleCollection = (id: string) => {
@@ -700,30 +660,7 @@ const ScriptsSidebarComponent = () => {
         setIsCreatingCollection(false);
     };
 
-    const detectFolderWorkspaceState = useCallback(async (selectedPath: string) => {
-        if (!hasDesktopScriptsRuntime()) {
-            return null;
-        }
-
-        const inspection = await inspectDesktopFolder(selectedPath);
-        setFolderInspection(inspection);
-        if (inspection.hasVenv) {
-            setFolderPythonTools(true);
-            setFolderCreateVenvIfMissing(false);
-        }
-        return inspection;
-    }, []);
-
     const openFolderDialog = () => {
-        setFolderMode('temporary');
-        setFolderPath('');
-        setFolderCollectionName('');
-        setFolderRuntimePreset('general');
-        setFolderPythonTools(false);
-        setFolderCreateVenvIfMissing(false);
-        setFolderInspection(null);
-        setOpenFolderError('');
-        setBrowserFolderFiles([]);
         setIsOpenFolderDialogOpen(true);
     };
 
@@ -814,71 +751,25 @@ const ScriptsSidebarComponent = () => {
         await window.scriptManagerDesktop.revealPath(workspacePath);
     }, [pythonEnvStatus?.workspacePath]);
 
-    const selectFolderPath = async () => {
-        setOpenFolderError('');
-
-        if (window.scriptManagerDesktop?.selectFolder) {
-            const selected = await window.scriptManagerDesktop.selectFolder();
-            if (selected) {
-                setFolderPath(selected);
-                await detectFolderWorkspaceState(selected);
-                if (!folderCollectionName.trim()) {
-                    const parts = selected.split(/[\\/]/).filter(Boolean);
-                    setFolderCollectionName(parts[parts.length - 1] ?? '');
-                }
-            }
-            return;
-        }
-
-        filePickerRef.current?.click();
-    };
-
-    const handleFolderInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
-        const selectedFiles = Array.from(event.target.files ?? []) as Array<File & { webkitRelativePath?: string }>;
-        if (selectedFiles.length === 0) return;
-
-        setOpenFolderError('');
-
-        const folderRoot = selectedFiles[0].webkitRelativePath?.split('/')[0] || 'Imported Folder';
-        const loadedFiles = await Promise.all(
-            selectedFiles
-                .filter((file) => file.webkitRelativePath)
-                .map(async (file) => ({
-                    relativePath: file.webkitRelativePath!,
-                    content: await file.text(),
-                }))
-        );
-
-        setBrowserFolderFiles(loadedFiles);
-        setFolderPath(folderRoot);
-        setFolderInspection(null);
-        if (!folderCollectionName.trim()) {
-            setFolderCollectionName(folderRoot);
-        }
-
-        event.target.value = '';
-    };
-
-    const handleOpenFolderSubmit = async () => {
-        if (!folderPath.trim() || isOpeningFolder) return;
+    const handleOpenFolderSubmit = async (values: OpenFolderSubmitValues): Promise<string | null> => {
+        if (isOpeningFolder) return null;
 
         setIsOpeningFolder(true);
-        setOpenFolderError('');
         try {
             const result = hasDesktopFolderPicker
                 ? await dispatch(openScriptsFolder({
-                    folderPath: folderPath.trim(),
-                    mode: folderMode,
-                    collectionName: folderMode === 'collection' ? folderCollectionName.trim() || undefined : undefined,
-                    runtimePreset: folderRuntimePreset,
-                    pythonToolchainEnabled: folderInspection?.hasVenv ? true : folderPythonTools,
-                    createVenvIfMissing: folderInspection?.hasVenv ? false : folderCreateVenvIfMissing,
+                    folderPath: values.folderPath,
+                    mode: values.mode,
+                    collectionName: values.collectionName,
+                    runtimePreset: values.runtimePreset,
+                    pythonToolchainEnabled: values.pythonToolchainEnabled,
+                    createVenvIfMissing: values.createVenvIfMissing,
                 }))
                 : await dispatch(importScriptsFolder({
-                    mode: folderMode,
-                    folderName: folderPath.trim(),
-                    collectionName: folderMode === 'collection' ? folderCollectionName.trim() || undefined : undefined,
-                    files: browserFolderFiles,
+                    mode: values.mode,
+                    folderName: values.folderPath,
+                    collectionName: values.collectionName,
+                    files: values.files,
                 }));
 
             if (openScriptsFolder.fulfilled.match(result) || importScriptsFolder.fulfilled.match(result)) {
@@ -890,12 +781,12 @@ const ScriptsSidebarComponent = () => {
                     dispatch(setActiveScript(firstScriptId));
                 }
                 setIsOpenFolderDialogOpen(false);
-            } else {
-                const message = typeof result.payload === 'string'
-                    ? result.payload
-                    : (result.error?.message || 'Failed to open folder');
-                setOpenFolderError(message);
+                return null;
             }
+
+            return typeof result.payload === 'string'
+                ? result.payload
+                : (result.error?.message || 'Failed to open folder');
         } finally {
             setIsOpeningFolder(false);
         }
@@ -1582,176 +1473,13 @@ const ScriptsSidebarComponent = () => {
                     onCreate={handleCreateScriptSubmit}
                 />
 
-                <Dialog open={isOpenFolderDialogOpen} onOpenChange={(open) => !isOpeningFolder && setIsOpenFolderDialogOpen(open)}>
-                    <DialogContent className="sm:max-w-lg">
-                        <DialogHeader>
-                            <DialogTitle className="flex items-center gap-2">
-                                <FolderOpen className="h-4 w-4 text-blue-500" />
-                                Open Local Folder
-                            </DialogTitle>
-                            <DialogDescription>
-                                {hasDesktopFolderPicker
-                                    ? 'Link a local folder into ScriptManager. You can open it as a temporary workspace or save it as a reusable collection.'
-                                    : 'Import a local folder into ScriptManager using the browser picker. You can open it as a temporary workspace or save it as a collection copy.'}
-                            </DialogDescription>
-                        </DialogHeader>
-                        <div className="flex flex-col gap-4 py-2">
-                            <div className="flex flex-col gap-2">
-                                <Label htmlFor="folder-path">Folder Path</Label>
-                                <div className="flex gap-2">
-                                    <Input
-                                        id="folder-path"
-                                        value={folderPath}
-                                        onChange={(e) => setFolderPath(e.target.value)}
-                                        placeholder="Select a local folder"
-                                        disabled={isOpeningFolder || !hasDesktopFolderPicker}
-                                    />
-                                    <Button type="button" variant="outline" onClick={selectFolderPath} disabled={isOpeningFolder}>
-                                        Browse
-                                    </Button>
-                                </div>
-                                {!hasDesktopFolderPicker && (
-                                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                                        The browser will open a real folder picker and import supported script files from the selected folder.
-                                    </p>
-                                )}
-                            </div>
-
-                            <div className="flex flex-col gap-2">
-                                <Label>Open Mode</Label>
-                                <Select value={folderMode} onValueChange={(value: 'temporary' | 'collection') => setFolderMode(value)}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="temporary">Temporary workspace</SelectItem>
-                                        <SelectItem value="collection">Save as collection</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                                <p className="text-xs text-slate-500 dark:text-slate-400">
-                                    {folderMode === 'temporary'
-                                        ? 'Good for a quick browse or one-off editing session.'
-                                        : 'Keeps this folder linked in the database as a collection for later use.'}
-                                </p>
-                            </div>
-
-                            {folderMode === 'collection' && (
-                                <div className="flex flex-col gap-2">
-                                    <Label htmlFor="folder-collection-name">Collection Name</Label>
-                                    <Input
-                                        id="folder-collection-name"
-                                        value={folderCollectionName}
-                                        onChange={(e) => setFolderCollectionName(e.target.value)}
-                                        placeholder="Collection name"
-                                        disabled={isOpeningFolder}
-                                    />
-                                </div>
-                            )}
-
-                            {hasDesktopFolderPicker && (
-                                <>
-                                    <div className="flex flex-col gap-2">
-                                        <Label>Primary Runtime</Label>
-                                        <Select value={folderRuntimePreset} onValueChange={(value: NonNullable<Collection['runtime_preset']>) => setFolderRuntimePreset(value)}>
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {RUNTIME_OPTIONS.map((option) => (
-                                                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-
-                                    <div className="rounded-md border border-slate-200 px-3 py-3 dark:border-slate-700">
-                                        <div className="flex items-start space-x-2">
-                                            <Checkbox
-                                                id="folder-python-tools"
-                                                checked={folderInspection?.hasVenv ? true : folderPythonTools}
-                                                onCheckedChange={(checked) => {
-                                                    if (folderInspection?.hasVenv) return;
-                                                    setFolderPythonTools(Boolean(checked));
-                                                }}
-                                                disabled={Boolean(folderInspection?.hasVenv) || folderRuntimePreset === 'python'}
-                                            />
-                                            <div className="space-y-1">
-                                                <Label htmlFor="folder-python-tools" className="text-sm font-medium">
-                                                    Enable Python tools
-                                                </Label>
-                                                <p className="text-xs text-slate-500 dark:text-slate-400">
-                                                    Use a collection-level <code>.venv</code> inside this workspace for Python scripts.
-                                                </p>
-                                                {folderInspection?.hasVenv && (
-                                                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
-                                                        Existing <code>.venv</code> detected. ScriptManager will adopt it automatically.
-                                                    </p>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        {!folderInspection?.hasVenv && folderPythonTools && (
-                                            <div className="mt-3 flex items-start space-x-2 border-t border-slate-200 pt-3 dark:border-slate-700">
-                                                <Checkbox
-                                                    id="folder-create-venv"
-                                                    checked={folderCreateVenvIfMissing}
-                                                    onCheckedChange={(checked) => setFolderCreateVenvIfMissing(Boolean(checked))}
-                                                />
-                                                <div className="space-y-1">
-                                                    <Label htmlFor="folder-create-venv" className="text-sm font-medium">
-                                                        Create <code>.venv</code> if missing
-                                                    </Label>
-                                                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                                                        ScriptManager will create a Python virtual environment inside the selected folder after linking it.
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {folderInspection && (
-                                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/60">
-                                            <div className="font-medium text-slate-700 dark:text-slate-200">
-                                                Workspace scan
-                                            </div>
-                                            <div className="mt-1 text-slate-500 dark:text-slate-400">
-                                                {folderInspection.hasVenv
-                                                    ? `Python environment ready at ${folderInspection.venvPath}`
-                                                    : 'No .venv detected in this folder yet.'}
-                                            </div>
-                                            {folderInspection.manifests.length > 0 && (
-                                                <div className="mt-1 text-slate-500 dark:text-slate-400">
-                                                    Detected manifests: {folderInspection.manifests.join(', ')}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </>
-                            )}
-
-                            {openFolderError && (
-                                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
-                                    {openFolderError}
-                                </div>
-                            )}
-                        </div>
-                        <DialogFooter>
-                            <Button variant="secondary" onClick={() => setIsOpenFolderDialogOpen(false)} disabled={isOpeningFolder}>
-                                Cancel
-                            </Button>
-                            <Button onClick={handleOpenFolderSubmit} disabled={!folderPath.trim() || isOpeningFolder}>
-                                {isOpeningFolder ? (
-                                    <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        Opening...
-                                    </>
-                                ) : (
-                                    'Open Folder'
-                                )}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+                <OpenFolderDialog
+                    open={isOpenFolderDialogOpen}
+                    hasDesktopFolderPicker={hasDesktopFolderPicker}
+                    submitting={isOpeningFolder}
+                    onOpenChange={setIsOpenFolderDialogOpen}
+                    onSubmit={handleOpenFolderSubmit}
+                />
                 <Dialog open={!!pythonEnvCollection} onOpenChange={(open) => !open && setPythonEnvCollection(null)}>
                     <DialogContent className="sm:max-w-lg">
                         <DialogHeader>
@@ -1866,16 +1594,6 @@ const ScriptsSidebarComponent = () => {
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
-                <input
-                    ref={filePickerRef}
-                    type="file"
-                    className="hidden"
-                    multiple
-                    // @ts-expect-error Chromium directory picker attribute
-                    webkitdirectory=""
-                    onChange={handleFolderInputChange}
-                />
-
                 {/* Save as Template dialog */}
                 <Dialog open={isSaveAsTemplateOpen} onOpenChange={setIsSaveAsTemplateOpen}>
                     <DialogContent className="sm:max-w-md">
