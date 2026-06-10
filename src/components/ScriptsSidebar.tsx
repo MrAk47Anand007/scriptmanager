@@ -26,6 +26,7 @@ import {
     GripVertical, Search, LayoutTemplate, Copy, Loader2, Layers, FolderOpen, AlertTriangle,
 } from 'lucide-react';
 import { QuickSwitcher } from './QuickSwitcher';
+import { CreateScriptDialog } from './sidebar/CreateScriptDialog';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
 import {
     DropdownMenu,
@@ -530,11 +531,8 @@ const ScriptsSidebarComponent = () => {
 
     // New Script Dialog State
     const [isCreateScriptOpen, setIsCreateScriptOpen] = useState(false);
-    const [newScriptName, setNewScriptName] = useState('');
-    const [newScriptDescription, setNewScriptDescription] = useState('');
     const [isCreatingScript, setIsCreatingScript] = useState(false);
     const [parentCollectionId, setParentCollectionId] = useState<string | null>(null);
-    const [syncToGistOverride, setSyncToGistOverride] = useState(false);
     const [isOpenFolderDialogOpen, setIsOpenFolderDialogOpen] = useState(false);
     const [folderPath, setFolderPath] = useState('');
     const [folderMode, setFolderMode] = useState<'temporary' | 'collection'>('temporary');
@@ -659,16 +657,6 @@ const ScriptsSidebarComponent = () => {
     }, [folderInspection?.hasVenv, folderRuntimePreset]);
 
     // Initial data fetching is centralized in page.tsx
-
-    // Initialize sync override based on global setting when opening dialog
-    useEffect(() => {
-        if (isCreateScriptOpen) {
-            setSyncToGistOverride(settings['gist_sync_enabled'] === 'true');
-            setNewScriptName('');
-            setNewScriptDescription('');
-            setIsCreatingScript(false);
-        }
-    }, [isCreateScriptOpen, settings]);
 
     const toggleCollection = (id: string) => {
         setExpandedCollections(prev => ({ ...prev, [id]: !prev[id] }));
@@ -927,29 +915,28 @@ const ScriptsSidebarComponent = () => {
         }
     };
 
-    const handleCreateScriptSubmit = async () => {
-        if (!newScriptName.trim() || isCreatingScript) return;
+    const handleCreateScriptSubmit = async (values: { name: string; description: string; collectionId: string | null; syncToGist: boolean }) => {
+        if (!values.name.trim() || isCreatingScript) return;
 
         setIsCreatingScript(true);
         try {
-            const { finalName, content, language } = inferScriptDraft(newScriptName, parentCollectionId);
+            const { finalName, content, language } = inferScriptDraft(values.name, values.collectionId);
 
             const result = await dispatch(createScript({
                 name: finalName,
-                description: newScriptDescription.trim() || undefined,
-                syncToGist: syncToGistOverride,
+                description: values.description.trim() || undefined,
+                syncToGist: values.syncToGist,
                 content,
                 language,
-                collectionId: parentCollectionId,
+                collectionId: values.collectionId,
             }));
 
             if (createScript.fulfilled.match(result)) {
-                if (parentCollectionId) {
-                    setExpandedCollections(prev => ({ ...prev, [parentCollectionId]: true }));
+                if (values.collectionId) {
+                    const createdInCollectionId = values.collectionId;
+                    setExpandedCollections(prev => ({ ...prev, [createdInCollectionId]: true }));
                 }
                 setIsCreateScriptOpen(false);
-                setNewScriptName('');
-                setNewScriptDescription('');
             }
         } finally {
             setIsCreatingScript(false);
@@ -1645,76 +1632,15 @@ const ScriptsSidebarComponent = () => {
                 }
 
                 {/* Create new script dialog */}
-                <Dialog open={isCreateScriptOpen} onOpenChange={(open) => !isCreatingScript && setIsCreateScriptOpen(open)}>
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle>Create New Script</DialogTitle>
-                            <DialogDescription>
-                                {parentCollectionId && collections.find((collection) => collection.id === parentCollectionId)?.folder_path
-                                    ? 'Enter details for your new script. It will be created inside the linked folder for this collection.'
-                                    : 'Enter details for your new script. It will be saved to your local scripts folder.'}
-                            </DialogDescription>
-                        </DialogHeader>
-                        <div className="flex flex-col gap-4 py-4">
-                            <div className="flex flex-col gap-2">
-                                <Label htmlFor="name" className="text-left">
-                                    Script Name
-                                </Label>
-                                <Input
-                                    id="name"
-                                    placeholder="myscript.py"
-                                    value={newScriptName}
-                                    onChange={(e) => setNewScriptName(e.target.value)}
-                                    autoFocus
-                                    disabled={isCreatingScript}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleCreateScriptSubmit()}
-                                />
-                            </div>
-                            <div className="flex flex-col gap-2">
-                                <Label htmlFor="description" className="text-left">
-                                    Description <span className="text-slate-400 font-normal">(optional)</span>
-                                </Label>
-                                <Input
-                                    id="description"
-                                    placeholder="What does this script do?"
-                                    value={newScriptDescription}
-                                    onChange={(e) => setNewScriptDescription(e.target.value)}
-                                    disabled={isCreatingScript}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleCreateScriptSubmit()}
-                                />
-                            </div>
-                            <div className="flex items-center space-x-2">
-                                <Checkbox
-                                    id="syncToGist"
-                                    checked={syncToGistOverride}
-                                    onCheckedChange={(checked) => setSyncToGistOverride(!!checked)}
-                                    disabled={isCreatingScript}
-                                />
-                                <label
-                                    htmlFor="syncToGist"
-                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                                >
-                                    Sync to GitHub Gist
-                                </label>
-                            </div>
-                        </div>
-                        <DialogFooter>
-                            <Button variant="secondary" onClick={() => setIsCreateScriptOpen(false)} disabled={isCreatingScript}>
-                                Cancel
-                            </Button>
-                            <Button onClick={handleCreateScriptSubmit} disabled={!newScriptName.trim() || isCreatingScript}>
-                                {isCreatingScript ? (
-                                    <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        Creating...
-                                    </>
-                                ) : (
-                                    'Create Script'
-                                )}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+                <CreateScriptDialog
+                    open={isCreateScriptOpen}
+                    parentCollectionId={parentCollectionId}
+                    parentHasFolderPath={Boolean(parentCollectionId && collections.find((collection) => collection.id === parentCollectionId)?.folder_path)}
+                    defaultSyncToGist={settings['gist_sync_enabled'] === 'true'}
+                    submitting={isCreatingScript}
+                    onOpenChange={setIsCreateScriptOpen}
+                    onCreate={handleCreateScriptSubmit}
+                />
 
                 <Dialog open={isOpenFolderDialogOpen} onOpenChange={(open) => !isOpeningFolder && setIsOpenFolderDialogOpen(open)}>
                     <DialogContent className="sm:max-w-lg">
