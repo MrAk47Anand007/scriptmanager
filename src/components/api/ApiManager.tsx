@@ -3,6 +3,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchApiCollections, fetchApiRequests, fetchApiHistory, fetchApiEnvironments, fetchApiGlobals, fetchApiCollectionRuns, newRequest, setActiveRequest, closeActiveRequestEditor } from '@/features/api/apiSlice'
+import {
+  selectApiActiveRequestId,
+  selectApiActiveRequest,
+  selectApiCollections,
+  selectApiRequests,
+  selectApiHistory,
+  selectApiCollectionRuns,
+  selectApiEnvironments,
+  selectApiIsLoading,
+  selectApiIsRunningCollection,
+  selectApiError,
+} from '@/features/api/selectors'
 import { ApiSidebar } from './ApiSidebar'
 import { ApiRequestEditor } from './ApiRequestEditor'
 import { ApiResponseViewer } from './ApiResponseViewer'
@@ -20,7 +32,16 @@ type RequestTab = {
 
 export function ApiManager() {
   const dispatch = useAppDispatch()
-  const { activeRequestId, activeRequest, collections, requests, history, collectionRuns, environments, isLoading, isRunningCollection, error } = useAppSelector(s => s.api)
+  const activeRequestId = useAppSelector(selectApiActiveRequestId)
+  const activeRequest = useAppSelector(selectApiActiveRequest)
+  const collections = useAppSelector(selectApiCollections)
+  const requests = useAppSelector(selectApiRequests)
+  const history = useAppSelector(selectApiHistory)
+  const collectionRuns = useAppSelector(selectApiCollectionRuns)
+  const environments = useAppSelector(selectApiEnvironments)
+  const isLoading = useAppSelector(selectApiIsLoading)
+  const isRunningCollection = useAppSelector(selectApiIsRunningCollection)
+  const error = useAppSelector(selectApiError)
   const [openTabs, setOpenTabs] = useState<RequestTab[]>([])
 
   useEffect(() => {

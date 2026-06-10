@@ -8,6 +8,12 @@ import {
     appendRemoteExecOutput, clearRemoteExecOutput, setRemoteExecStatus,
     clearApprovalState,
 } from '@/features/ops/opsSlice'
+import {
+    selectSelectedProfileId, selectServerProfiles, selectRemoteExecStatus,
+    selectRemoteExecOutput, selectConnectionTestResult, selectCurrentRemoteExecId,
+    selectRequiresApproval, selectPendingApprovalEnvironment,
+} from '@/features/ops/selectors'
+import { selectActiveScriptId, selectScriptItems } from '@/features/scripts/selectors'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Terminal, Wifi, Upload, Play, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle } from 'lucide-react'
@@ -30,17 +36,16 @@ const CHMOD_PRESETS = [
 
 export function RemoteExecutionPanel() {
     const dispatch = useAppDispatch()
-    const {
-        selectedProfileId,
-        serverProfiles,
-        remoteExecStatus,
-        remoteExecOutput,
-        connectionTestResult,
-        currentRemoteExecId,
-        requiresApproval,
-        pendingApprovalEnvironment,
-    } = useAppSelector(s => s.ops)
-    const { activeScriptId, items: scripts } = useAppSelector(s => s.scripts)
+    const selectedProfileId = useAppSelector(selectSelectedProfileId)
+    const serverProfiles = useAppSelector(selectServerProfiles)
+    const remoteExecStatus = useAppSelector(selectRemoteExecStatus)
+    const remoteExecOutput = useAppSelector(selectRemoteExecOutput)
+    const connectionTestResult = useAppSelector(selectConnectionTestResult)
+    const currentRemoteExecId = useAppSelector(selectCurrentRemoteExecId)
+    const requiresApproval = useAppSelector(selectRequiresApproval)
+    const pendingApprovalEnvironment = useAppSelector(selectPendingApprovalEnvironment)
+    const activeScriptId = useAppSelector(selectActiveScriptId)
+    const scripts = useAppSelector(selectScriptItems)
 
     const [isExpanded, setIsExpanded] = useState(true)
     const [remotePath, setRemotePath] = useState('/tmp/')

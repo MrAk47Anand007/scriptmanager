@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { fetchSettings, saveSettings } from '@/features/settings/settingsSlice';
+import { selectSettings, selectSettingsStatus, selectSettingsError } from '@/features/settings/selectors';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,7 +17,9 @@ import { useRouter } from 'next/navigation';
 
 export const SettingsManager = () => {
     const dispatch = useAppDispatch();
-    const { settings, status, error } = useAppSelector((state) => state.settings);
+    const settings = useAppSelector(selectSettings);
+    const status = useAppSelector(selectSettingsStatus);
+    const error = useAppSelector(selectSettingsError);
     const router = useRouter();
 
     const [githubToken, setGithubToken] = useState('');

@@ -14,6 +14,7 @@ import {
     selectTemplates, selectAllTags, selectScriptsStatus,
 } from '@/features/scripts/selectors';
 import { selectOpsProjects } from '@/features/ops/selectors';
+import { selectSettings } from '@/features/settings/selectors';
 import {
     createProject, deleteProject,
 } from '@/features/ops/opsSlice';
@@ -96,7 +97,7 @@ const RUNTIME_OPTIONS: Array<{ value: NonNullable<Collection['runtime_preset']>;
 ]
 
 const GistSyncStatus = () => {
-    const { settings } = useAppSelector((state) => state.settings);
+    const settings = useAppSelector(selectSettings);
     const isEnabled = settings['gist_sync_enabled'] === 'true';
 
     return (
@@ -581,7 +582,7 @@ const ScriptsSidebarComponent = () => {
     const [collectionToDelete, setCollectionToDelete] = useState<Collection | null>(null);
     const [isDeletingCollectionDialog, setIsDeletingCollectionDialog] = useState(false);
 
-    const { settings } = useAppSelector((state) => state.settings);
+    const settings = useAppSelector(selectSettings);
     const isModeActive = useAppSelector((state) => state.ops.isModeActive);
     const projects = useAppSelector(selectOpsProjects);
     const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});

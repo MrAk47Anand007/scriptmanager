@@ -27,6 +27,18 @@ import {
   type ApiCollectionRun,
 } from '@/features/api/apiSlice'
 import {
+  selectApiCollections,
+  selectApiRequests,
+  selectApiActiveRequestId,
+  selectApiHistory,
+  selectApiCollectionRuns,
+  selectApiActiveCollectionRun,
+  selectApiEnvironments,
+  selectApiActiveEnvironmentId,
+  selectApiGlobalVariables,
+  selectApiIsRunningCollection,
+} from '@/features/api/selectors'
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -435,18 +447,16 @@ const EnvironmentItem = memo(function EnvironmentItem({ environment, active, onE
 
 export function ApiSidebar() {
   const dispatch = useAppDispatch()
-  const {
-    collections,
-    requests,
-    activeRequestId,
-    history,
-    collectionRuns,
-    activeCollectionRun,
-    environments,
-    activeEnvironmentId,
-    globalVariables,
-    isRunningCollection,
-  } = useAppSelector(s => s.api)
+  const collections = useAppSelector(selectApiCollections)
+  const requests = useAppSelector(selectApiRequests)
+  const activeRequestId = useAppSelector(selectApiActiveRequestId)
+  const history = useAppSelector(selectApiHistory)
+  const collectionRuns = useAppSelector(selectApiCollectionRuns)
+  const activeCollectionRun = useAppSelector(selectApiActiveCollectionRun)
+  const environments = useAppSelector(selectApiEnvironments)
+  const activeEnvironmentId = useAppSelector(selectApiActiveEnvironmentId)
+  const globalVariables = useAppSelector(selectApiGlobalVariables)
+  const isRunningCollection = useAppSelector(selectApiIsRunningCollection)
   const [activeSection, setActiveSection] = useState<'requests' | 'history' | 'runs'>('requests')
   const [newCollectionName, setNewCollectionName] = useState('')
   const [showNewCollection, setShowNewCollection] = useState(false)

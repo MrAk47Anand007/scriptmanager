@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchAuditLog } from '@/features/ops/opsSlice'
+import { selectAuditLog, selectAuditLogTotal, selectAuditLogStatus, selectServerProfiles } from '@/features/ops/selectors'
+import { selectScriptItems } from '@/features/scripts/selectors'
 import { Button } from '@/components/ui/button'
 import { ClipboardList, ChevronDown, ChevronUp, RefreshCw, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -31,8 +33,11 @@ function formatRelative(isoString: string): string {
 
 export function AuditTrailPanel() {
     const dispatch = useAppDispatch()
-    const { auditLog, auditLogTotal, auditLogStatus, serverProfiles } = useAppSelector(s => s.ops)
-    const { items: scripts } = useAppSelector(s => s.scripts)
+    const auditLog = useAppSelector(selectAuditLog)
+    const auditLogTotal = useAppSelector(selectAuditLogTotal)
+    const auditLogStatus = useAppSelector(selectAuditLogStatus)
+    const serverProfiles = useAppSelector(selectServerProfiles)
+    const scripts = useAppSelector(selectScriptItems)
 
     const [isExpanded, setIsExpanded] = useState(true)
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())

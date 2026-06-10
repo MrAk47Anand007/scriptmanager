@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchVersions, fetchVersionContent } from '@/features/scripts/scriptsSlice'
 import type { ScriptVersionMeta } from '@/features/scripts/scriptsSlice'
+import { selectVersions, selectVersionsStatus } from '@/features/scripts/selectors'
 import { Button } from '@/components/ui/button'
 import { Loader2, History, ChevronDown, ChevronRight, RotateCcw, Eye } from 'lucide-react'
 
@@ -56,7 +57,8 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
     onRestore,
 }) => {
     const dispatch = useAppDispatch()
-    const { versions, versionsStatus } = useAppSelector(s => s.scripts)
+    const versions = useAppSelector(selectVersions)
+    const versionsStatus = useAppSelector(selectVersionsStatus)
 
     const [isOpen, setIsOpen] = useState(false)
     const [selectedVersion, setSelectedVersion] = useState<ScriptVersionMeta | null>(null)
