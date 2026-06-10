@@ -23,13 +23,14 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
     FileCode, Plus, Folder, MoreVertical, Trash2, ChevronRight, ChevronDown,
-    GripVertical, Search, LayoutTemplate, Copy, Loader2, Layers, FolderOpen, AlertTriangle,
+    GripVertical, Search, LayoutTemplate, Copy, Loader2, Layers, FolderOpen,
 } from 'lucide-react';
 import { QuickSwitcher } from './QuickSwitcher';
 import { CreateScriptDialog } from './sidebar/CreateScriptDialog';
 import { CreateCollectionDialog } from './sidebar/CreateCollectionDialog';
 import { OpenFolderDialog, type OpenFolderSubmitValues } from './sidebar/OpenFolderDialog';
 import { DeleteScriptDialog } from './sidebar/DeleteScriptDialog';
+import { DeleteCollectionDialog } from './sidebar/DeleteCollectionDialog';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
 import {
     DropdownMenu,
@@ -52,7 +53,6 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
     Select,
@@ -1086,7 +1086,6 @@ const ScriptsSidebarComponent = () => {
         [savedCollectionsByTreeKey]
     );
 
-    const isDeleteTemporaryWorkspace = Boolean(collectionToDelete?.is_temporary);
     const hasCollectionFolder = Boolean(collectionToDelete?.folder_path && !collectionToDelete?.is_temporary);
     const sidebarBusyText = useMemo(() => {
         if (isSubmittingCollection) return 'Creating collection...';
@@ -1672,73 +1671,12 @@ const ScriptsSidebarComponent = () => {
                     </DialogContent>
                 </Dialog>
 
-                <Dialog open={!!collectionToDelete} onOpenChange={(open) => !isDeletingCollectionDialog && !open && setCollectionToDelete(null)}>
-                    <DialogContent className="overflow-hidden border-white/10 bg-[#0b1020] p-0 text-slate-100 shadow-2xl sm:max-w-lg">
-                        <div className="border-b border-white/10 px-6 py-5">
-                            <DialogHeader className="space-y-3 text-left">
-                                <div className="flex items-start gap-3">
-                                    <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-2xl bg-red-500/10 text-red-300">
-                                        <AlertTriangle className="h-5 w-5" />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <DialogTitle className="text-lg text-white">Delete Collection</DialogTitle>
-                                        <DialogDescription className="text-sm text-slate-300">
-                                            {collectionToDelete?.name}
-                                        </DialogDescription>
-                                    </div>
-                                </div>
-                            </DialogHeader>
-                        </div>
-
-                        <div className="space-y-4 px-6 py-5">
-                            <p className="text-sm leading-6 text-slate-300">
-                                {isDeleteTemporaryWorkspace
-                                    ? 'This temporary workspace will be removed from ScriptManager along with its imported script entries.'
-                                    : hasCollectionFolder
-                                        ? 'This collection will be deleted. Managed workspace files will be removed from disk, while linked external folders stay untouched.'
-                                        : 'This collection will be deleted and its scripts will move back to Unsorted.'}
-                            </p>
-
-                            <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
-                                <div className="font-medium text-slate-100">This action cannot be automatically undone.</div>
-                                {isDeletingCollectionDialog && (
-                                    <div className="mt-3 flex items-center gap-2 text-slate-400">
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                        <span>{hasCollectionFolder ? 'Removing local workspace...' : 'Deleting collection...'}</span>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        <DialogFooter className="border-t border-white/10 px-6 py-4 sm:justify-end">
-                            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
-                                <Button
-                                    variant="outline"
-                                    className="border-white/10 bg-transparent text-slate-200 hover:bg-white/5 hover:text-white"
-                                    onClick={() => setCollectionToDelete(null)}
-                                    disabled={isDeletingCollectionDialog}
-                                >
-                                    Cancel
-                                </Button>
-                                <Button
-                                    variant="destructive"
-                                    className="min-w-36 bg-red-500 text-white hover:bg-red-400"
-                                    onClick={confirmDeleteCollection}
-                                    disabled={isDeletingCollectionDialog}
-                                >
-                                    {isDeletingCollectionDialog ? (
-                                        <>
-                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                            Deleting...
-                                        </>
-                                    ) : (
-                                        isDeleteTemporaryWorkspace ? 'Remove Workspace' : 'Delete Collection'
-                                    )}
-                                </Button>
-                            </div>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+                <DeleteCollectionDialog
+                    collection={collectionToDelete}
+                    deleting={isDeletingCollectionDialog}
+                    onOpenChange={(open) => !open && setCollectionToDelete(null)}
+                    onConfirm={confirmDeleteCollection}
+                />
 
                 {/* Delete Script Confirmation Dialog */}
                 <DeleteScriptDialog
