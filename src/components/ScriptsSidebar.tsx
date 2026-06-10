@@ -29,6 +29,7 @@ import { QuickSwitcher } from './QuickSwitcher';
 import { CreateScriptDialog } from './sidebar/CreateScriptDialog';
 import { CreateCollectionDialog } from './sidebar/CreateCollectionDialog';
 import { OpenFolderDialog, type OpenFolderSubmitValues } from './sidebar/OpenFolderDialog';
+import { DeleteScriptDialog } from './sidebar/DeleteScriptDialog';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
 import {
     DropdownMenu,
@@ -542,7 +543,6 @@ const ScriptsSidebarComponent = () => {
     // Delete confirmation dialog state
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
     const [scriptToDelete, setScriptToDelete] = useState<Script | null>(null);
-    const [deleteFromGist, setDeleteFromGist] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [collectionToDelete, setCollectionToDelete] = useState<Collection | null>(null);
     const [isDeletingCollectionDialog, setIsDeletingCollectionDialog] = useState(false);
@@ -624,11 +624,10 @@ const ScriptsSidebarComponent = () => {
 
     const handleDeleteScriptRequest = useCallback((script: Script) => {
         setScriptToDelete(script);
-        setDeleteFromGist(script.sync_to_gist || !!script.gist_id);
         setIsDeleteDialogOpen(true);
     }, []);
 
-    const confirmDeleteScript = async () => {
+    const confirmDeleteScript = async ({ deleteFromGist }: { deleteFromGist: boolean }) => {
         if (!scriptToDelete) return;
 
         setIsDeleting(true);
@@ -1742,59 +1741,13 @@ const ScriptsSidebarComponent = () => {
                 </Dialog>
 
                 {/* Delete Script Confirmation Dialog */}
-                <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle className="flex items-center gap-2 text-red-600">
-                                <Trash2 className="h-5 w-5" />
-                                Delete Script
-                            </DialogTitle>
-                            <DialogDescription>
-                                Are you sure you want to delete <span className="font-semibold text-slate-900 dark:text-slate-100">{scriptToDelete?.name}</span>? This action cannot be undone.
-                            </DialogDescription>
-                        </DialogHeader>
-
-                        {scriptToDelete?.gist_id && (
-                            <div className="flex items-center space-x-2 py-2">
-                                <Checkbox
-                                    id="deleteFromGist"
-                                    checked={deleteFromGist}
-                                    onCheckedChange={(checked) => setDeleteFromGist(!!checked)}
-                                />
-                                <Label
-                                    htmlFor="deleteFromGist"
-                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                                >
-                                    Also delete from GitHub Gist
-                                </Label>
-                            </div>
-                        )}
-
-                        <DialogFooter>
-                            <Button
-                                variant="secondary"
-                                onClick={() => setIsDeleteDialogOpen(false)}
-                                disabled={isDeleting}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                variant="destructive"
-                                onClick={confirmDeleteScript}
-                                disabled={isDeleting}
-                            >
-                                {isDeleting ? (
-                                    <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        Deleting...
-                                    </>
-                                ) : (
-                                    'Delete Script'
-                                )}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+                <DeleteScriptDialog
+                    open={isDeleteDialogOpen}
+                    script={scriptToDelete}
+                    deleting={isDeleting}
+                    onOpenChange={setIsDeleteDialogOpen}
+                    onConfirm={confirmDeleteScript}
+                />
             </DndContext >
         </>
     );
