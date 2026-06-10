@@ -1489,7 +1489,7 @@ const ScriptsSidebarComponent = () => {
                     open={isDeleteDialogOpen}
                     script={scriptToDelete}
                     deleting={isDeleting}
-                    onOpenChange={setIsDeleteDialogOpen}
+                    onOpenChange={(open) => !isDeleting && setIsDeleteDialogOpen(open)}
                     onConfirm={confirmDeleteScript}
                 />
             </DndContext >

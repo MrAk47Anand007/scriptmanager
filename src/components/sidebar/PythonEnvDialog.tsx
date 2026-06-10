@@ -65,7 +65,7 @@ export function PythonEnvDialog({
                     setPythonEnvError(error instanceof Error ? error.message : 'Failed to inspect collection workspace');
                 }
             } finally {
-                if (!cancelled) onLoadingChange(false);
+                onLoadingChange(false);
             }
         })();
 
