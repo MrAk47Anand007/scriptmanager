@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setActiveScript } from '@/features/scripts/scriptsSlice'
 import type { Script } from '@/features/scripts/scriptsSlice'
+import { selectScriptItems, selectCollections } from '@/features/scripts/selectors'
 import { FileCode, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -27,7 +28,8 @@ interface QuickSwitcherProps {
 
 export const QuickSwitcher = ({ open, onClose }: QuickSwitcherProps) => {
     const dispatch = useAppDispatch()
-    const { items: scripts, collections } = useAppSelector((state) => state.scripts)
+    const scripts = useAppSelector(selectScriptItems)
+    const collections = useAppSelector(selectCollections)
     const [query, setQuery] = useState('')
     const [cursor, setCursor] = useState(0)
     const inputRef = useRef<HTMLInputElement>(null)

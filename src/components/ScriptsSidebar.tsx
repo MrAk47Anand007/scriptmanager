@@ -10,6 +10,11 @@ import {
 } from '@/features/scripts/scriptsSlice';
 import type { Script, Collection, ScriptTemplate } from '@/features/scripts/scriptsSlice';
 import {
+    selectScriptItems, selectCollections, selectActiveScriptId,
+    selectTemplates, selectAllTags, selectScriptsStatus,
+} from '@/features/scripts/selectors';
+import { selectOpsProjects } from '@/features/ops/selectors';
+import {
     createProject, deleteProject,
 } from '@/features/ops/opsSlice';
 import { Button } from '@/components/ui/button';
@@ -502,15 +507,14 @@ const DroppableProject = ({
 const ScriptsSidebarComponent = () => {
     const dispatch = useAppDispatch();
     const store = useAppStore();
-    const {
-        items: scripts,
-        collections,
-        activeScriptId,
-        // Removed activeScriptContent to prevent re-renders on keystroke
-        templates,
-        allTags,
-        status,
-    } = useAppSelector((state) => state.scripts);
+    // Narrow per-field subscriptions — avoids re-rendering the whole sidebar on
+    // unrelated slice updates (e.g. appendBuildOutput firing per output chunk)
+    const scripts = useAppSelector(selectScriptItems);
+    const collections = useAppSelector(selectCollections);
+    const activeScriptId = useAppSelector(selectActiveScriptId);
+    const templates = useAppSelector(selectTemplates);
+    const allTags = useAppSelector(selectAllTags);
+    const status = useAppSelector(selectScriptsStatus);
     const [expandedCollections, setExpandedCollections] = useState<Record<string, boolean>>({});
     const [isCreatingCollection, setIsCreatingCollection] = useState(false);
     const [isSubmittingCollection, setIsSubmittingCollection] = useState(false);
@@ -579,7 +583,7 @@ const ScriptsSidebarComponent = () => {
 
     const { settings } = useAppSelector((state) => state.settings);
     const isModeActive = useAppSelector((state) => state.ops.isModeActive);
-    const { projects } = useAppSelector((state) => state.ops);
+    const projects = useAppSelector(selectOpsProjects);
     const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
     const [isCreatingProject, setIsCreatingProject] = useState(false);
     const [newProjectName, setNewProjectName] = useState('');

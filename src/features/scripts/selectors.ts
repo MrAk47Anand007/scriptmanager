@@ -19,6 +19,7 @@ export const selectVersionsStatus = (state: RootState) => state.scripts.versions
 export const selectTemplates = (state: RootState) => state.scripts.templates
 export const selectTemplatesStatus = (state: RootState) => state.scripts.templatesStatus
 export const selectEnvVarsStatus = (state: RootState) => state.scripts.envVarsStatus
+export const selectScriptsStatus = (state: RootState) => state.scripts.status
 
 // Memoized derived selector — only recalculates when items or activeScriptId changes
 // This prevents the auto-save effect and language-sync effect from re-running on every script update
