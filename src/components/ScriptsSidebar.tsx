@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { QuickSwitcher } from './QuickSwitcher';
 import { CreateScriptDialog } from './sidebar/CreateScriptDialog';
+import { CreateCollectionDialog } from './sidebar/CreateCollectionDialog';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
 import {
     DropdownMenu,
@@ -521,9 +522,6 @@ const ScriptsSidebarComponent = () => {
     const [isCreatingCollection, setIsCreatingCollection] = useState(false);
     const [isSubmittingCollection, setIsSubmittingCollection] = useState(false);
     const [pendingCollectionDeleteId, setPendingCollectionDeleteId] = useState<string | null>(null);
-    const [newCollectionName, setNewCollectionName] = useState('');
-    const [newCollectionRuntimePreset, setNewCollectionRuntimePreset] = useState<NonNullable<Collection['runtime_preset']>>('general');
-    const [newCollectionPythonTools, setNewCollectionPythonTools] = useState(false);
     const [parentProjectId, setParentProjectId] = useState<string | null>(null);
     const [parentCreationCollectionId, setParentCreationCollectionId] = useState<string | null>(null);
     const [activeDragScript, setActiveDragScript] = useState<Script | null>(null);
@@ -642,12 +640,6 @@ const ScriptsSidebarComponent = () => {
     }, []);
 
     useEffect(() => {
-        if (newCollectionRuntimePreset === 'python') {
-            setNewCollectionPythonTools(true);
-        }
-    }, [newCollectionRuntimePreset]);
-
-    useEffect(() => {
         if (folderRuntimePreset === 'python') {
             setFolderPythonTools(true);
             if (!folderInspection?.hasVenv) {
@@ -699,16 +691,10 @@ const ScriptsSidebarComponent = () => {
     const openCreateCollectionDialog = (projectId?: string | null, parentId?: string | null) => {
         setParentProjectId(projectId ?? null);
         setParentCreationCollectionId(parentId ?? null);
-        setNewCollectionName('');
-        setNewCollectionRuntimePreset('general');
-        setNewCollectionPythonTools(false);
         setIsCreatingCollection(true);
     };
 
     const resetCollectionCreationState = () => {
-        setNewCollectionName('');
-        setNewCollectionRuntimePreset('general');
-        setNewCollectionPythonTools(false);
         setParentProjectId(null);
         setParentCreationCollectionId(null);
         setIsCreatingCollection(false);
@@ -947,16 +933,16 @@ const ScriptsSidebarComponent = () => {
         openCreateScriptDialog(collectionId);
     };
 
-    const handleCreateCollection = async () => {
-        if (!newCollectionName.trim() || isSubmittingCollection) return;
+    const handleCreateCollection = async (values: { name: string; runtimePreset: NonNullable<Collection['runtime_preset']>; pythonTools: boolean }) => {
+        if (!values.name.trim() || isSubmittingCollection) return;
         setIsSubmittingCollection(true);
         try {
             const createdCollection = await dispatch(createCollection({
-                name: newCollectionName.trim(),
+                name: values.name.trim(),
                 projectId: parentProjectId,
                 parentId: parentCreationCollectionId,
-                runtimePreset: newCollectionRuntimePreset,
-                pythonToolchainEnabled: newCollectionRuntimePreset === 'python' ? true : newCollectionPythonTools,
+                runtimePreset: values.runtimePreset,
+                pythonToolchainEnabled: values.runtimePreset === 'python' ? true : values.pythonTools,
             })).unwrap();
             if (parentCreationCollectionId) {
                 setExpandedCollections(prev => ({ ...prev, [parentCreationCollectionId]: true }));
@@ -1363,60 +1349,14 @@ const ScriptsSidebarComponent = () => {
                         )}
                     </div>
 
-                    {isCreatingCollection && (
-                        <div className="p-2 border-b bg-blue-50 dark:bg-blue-900/20 dark:border-slate-800">
-                            <Input
-                                autoFocus
-                                placeholder="Collection Name"
-                                value={newCollectionName}
-                                onChange={(e) => setNewCollectionName(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleCreateCollection()}
-                                className="h-7 text-xs mb-2 bg-white dark:bg-slate-950 dark:border-slate-700"
-                                disabled={isSubmittingCollection}
-                            />
-                            {hasDesktopFolderPicker && (
-                                <>
-                                    <Select
-                                        value={newCollectionRuntimePreset}
-                                        onValueChange={(value: NonNullable<Collection['runtime_preset']>) => setNewCollectionRuntimePreset(value)}
-                                        disabled={isSubmittingCollection}
-                                    >
-                                        <SelectTrigger className="h-7 text-xs mb-2 bg-white dark:bg-slate-950 dark:border-slate-700">
-                                            <SelectValue placeholder="Primary runtime" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {RUNTIME_OPTIONS.map((option) => (
-                                                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <div className="mb-2 flex items-start space-x-2 rounded-md border border-blue-200/70 bg-white/70 px-2 py-2 dark:border-slate-700 dark:bg-slate-950/70">
-                                        <Checkbox
-                                            id="collection-python-tools"
-                                            checked={newCollectionPythonTools}
-                                            onCheckedChange={(checked) => setNewCollectionPythonTools(Boolean(checked))}
-                                            disabled={newCollectionRuntimePreset === 'python' || isSubmittingCollection}
-                                        />
-                                        <div className="space-y-1">
-                                            <Label htmlFor="collection-python-tools" className="text-xs font-medium">
-                                                Enable Python tools
-                                            </Label>
-                                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                                                Create and use a collection-level <code>.venv</code> for Python scripts inside this workspace.
-                                            </p>
-                                        </div>
-                                    </div>
-                                </>
-                            )}
-                            <div className="flex gap-2">
-                                <Button size="sm" className="h-6 text-xs flex-1" onClick={handleCreateCollection} disabled={isSubmittingCollection || !newCollectionName.trim()}>
-                                    {isSubmittingCollection ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
-                                    {isSubmittingCollection ? 'Creating...' : 'Create'}
-                                </Button>
-                                <Button size="sm" variant="ghost" className="h-6 text-xs flex-1" onClick={resetCollectionCreationState} disabled={isSubmittingCollection}>Cancel</Button>
-                            </div>
-                        </div>
-                    )}
+                    <CreateCollectionDialog
+                        key={`${parentProjectId ?? ''}:${parentCreationCollectionId ?? ''}`}
+                        open={isCreatingCollection}
+                        hasDesktopFolderPicker={hasDesktopFolderPicker}
+                        submitting={isSubmittingCollection}
+                        onCancel={resetCollectionCreationState}
+                        onCreate={handleCreateCollection}
+                    />
 
                     {isModeActive && isCreatingProject && (
                         <div className="p-2 border-b bg-amber-50 dark:bg-amber-900/20 dark:border-slate-800">
