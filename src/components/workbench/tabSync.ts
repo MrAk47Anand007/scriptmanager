@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { openTab, closeTab, setTabDirty, renameTab } from '@/features/workbench/workbenchSlice'
+import { openTab, closeTab, setTabDirty, renameTab, type EditorTab } from '@/features/workbench/workbenchSlice'
 import { selectTabs, selectActiveTabId } from '@/features/workbench/selectors'
 import { setActiveScript } from '@/features/scripts/scriptsSlice'
 import { selectActiveScriptId, selectScriptItems, selectScriptsStatus } from '@/features/scripts/selectors'
@@ -19,6 +19,60 @@ export const apiTabId = (id: string) => `api:${id}`
  */
 export const API_DRAFT_ENTITY_ID = '__draft__'
 export const API_DRAFT_TAB_ID = apiTabId(API_DRAFT_ENTITY_ID)
+
+/**
+ * Close a tab with dirty confirm, keeping feature selection consistent so the
+ * open-tab effects in useTabSync don't resurrect the closed tab. Shared by
+ * EditorTabs (close button / middle-click) and the Ctrl+W shortcut.
+ */
+export function useRequestCloseTab() {
+  const dispatch = useAppDispatch()
+  const tabs = useAppSelector(selectTabs)
+  const activeTabId = useAppSelector(selectActiveTabId)
+  const activeScriptId = useAppSelector(selectActiveScriptId)
+  const activeRequestId = useAppSelector(selectApiActiveRequestId)
+
+  return useCallback((tab: EditorTab) => {
+    if (tab.dirty && !window.confirm('Discard unsaved changes?')) return
+
+    const idx = tabs.findIndex((t) => t.id === tab.id)
+    if (idx === -1) return
+    const remaining = tabs.filter((t) => t.id !== tab.id)
+    const wasActive = activeTabId === tab.id
+    // Mirror of closeTab reducer's neighbor pick
+    const nextActive = wasActive
+      ? remaining[Math.min(idx, remaining.length - 1)] ?? null
+      : remaining.find((t) => t.id === activeTabId) ?? null
+
+    dispatch(closeTab(tab.id))
+
+    // Closing the draft pseudo-tab discards the draft itself — otherwise the
+    // draft-lifecycle effect in useTabSync would immediately reopen the tab.
+    if (tab.id === API_DRAFT_TAB_ID) {
+      dispatch(closeActiveRequestEditor())
+    }
+
+    // Sync feature slices with the surviving active tab
+    if (tab.kind === 'script' && tab.entityId === activeScriptId) {
+      dispatch(setActiveScript(nextActive?.kind === 'script' ? nextActive.entityId : null))
+    }
+    if (tab.kind === 'api' && tab.entityId === activeRequestId) {
+      if (nextActive?.kind === 'api') {
+        dispatch(setActiveRequest(nextActive.entityId))
+      } else {
+        dispatch(closeActiveRequestEditor())
+      }
+    }
+    // Activate the neighbor's entity when the closed tab was active
+    if (wasActive && nextActive) {
+      if (nextActive.kind === 'script' && nextActive.entityId !== activeScriptId) {
+        dispatch(setActiveScript(nextActive.entityId))
+      } else if (nextActive.kind === 'api' && nextActive.entityId !== activeRequestId) {
+        dispatch(setActiveRequest(nextActive.entityId))
+      }
+    }
+  }, [dispatch, tabs, activeTabId, activeScriptId, activeRequestId])
+}
 
 /**
  * Keeps workbench tabs in sync with the scripts/api feature slices:

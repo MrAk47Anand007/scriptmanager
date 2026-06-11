@@ -289,6 +289,16 @@ export function ApiRequestEditor() {
   }
 
   const handleSend = async () => { await dispatch(sendApiRequest(draft)) }
+
+  // Ctrl+Enter "Send Active Request" from WorkbenchShell — ref keeps the
+  // listener stable while handleSend captures a fresh draft every render.
+  const handleSendRef = useRef(handleSend)
+  handleSendRef.current = handleSend
+  useEffect(() => {
+    const onSendActiveRequest = () => { void handleSendRef.current() }
+    window.addEventListener('scriptmanager:send-active-request', onSendActiveRequest)
+    return () => window.removeEventListener('scriptmanager:send-active-request', onSendActiveRequest)
+  }, [])
   const handleSave = async () => { await dispatch(saveApiRequest(draft)) }
   const handleCopyUrl = () => {
     navigator.clipboard.writeText(draft.url).then(() => {

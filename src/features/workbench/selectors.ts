@@ -7,3 +7,4 @@ export const selectDockVisible = (state: RootState) => state.workbench.dockVisib
 export const selectActiveDockTab = (state: RootState) => state.workbench.activeDockTab
 export const selectTabs = (state: RootState) => state.workbench.tabs
 export const selectActiveTabId = (state: RootState) => state.workbench.activeTabId
+export const selectPaletteOpen = (state: RootState) => state.workbench.paletteOpen

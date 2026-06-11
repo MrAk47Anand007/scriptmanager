@@ -18,6 +18,7 @@ interface WorkbenchState {
   activeDockTab: DockTabId
   tabs: EditorTab[]
   activeTabId: string | null
+  paletteOpen: boolean
 }
 
 const initialState: WorkbenchState = {
@@ -27,6 +28,7 @@ const initialState: WorkbenchState = {
   activeDockTab: 'terminal',
   tabs: [],
   activeTabId: null,
+  paletteOpen: false,
 }
 
 const workbenchSlice = createSlice({
@@ -43,6 +45,7 @@ const workbenchSlice = createSlice({
     },
     toggleDock(state) { state.dockVisible = !state.dockVisible },
     setDockVisible(state, action: PayloadAction<boolean>) { state.dockVisible = action.payload },
+    setPaletteOpen(state, action: PayloadAction<boolean>) { state.paletteOpen = action.payload },
     setActiveDockTab(state, action: PayloadAction<DockTabId>) {
       state.activeDockTab = action.payload
       state.dockVisible = true
@@ -74,7 +77,7 @@ const workbenchSlice = createSlice({
 })
 
 export const {
-  setActiveActivity, toggleDock, setDockVisible, setActiveDockTab,
+  setActiveActivity, toggleDock, setDockVisible, setActiveDockTab, setPaletteOpen,
   openTab, closeTab, setActiveTab, setTabDirty, renameTab,
 } = workbenchSlice.actions
 export default workbenchSlice.reducer

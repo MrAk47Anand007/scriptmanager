@@ -926,6 +926,17 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
         await executeRun({});
     };
 
+    // Command palette / Ctrl+Enter "Run Active Script" — mirrors the
+    // 'scriptmanager:open-terminal' event pattern. Ref keeps the listener
+    // stable while handleRun is recreated every render.
+    const handleRunRef = useRef(handleRun);
+    handleRunRef.current = handleRun;
+    useEffect(() => {
+        const onRunActiveScript = () => { void handleRunRef.current(); };
+        window.addEventListener('scriptmanager:run-active-script', onRunActiveScript);
+        return () => window.removeEventListener('scriptmanager:run-active-script', onRunActiveScript);
+    }, []);
+
     const executeRunInTerminal = async (paramValues: Record<string, string>) => {
         if (!activeScriptId) return;
 

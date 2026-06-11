@@ -2,7 +2,7 @@
 
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import {
-  closeTab, setActiveTab,
+  setActiveTab,
   type EditorTab,
 } from '@/features/workbench/workbenchSlice'
 import { selectTabs, selectActiveTabId } from '@/features/workbench/selectors'
@@ -10,7 +10,7 @@ import { setActiveScript } from '@/features/scripts/scriptsSlice'
 import { selectActiveScriptId } from '@/features/scripts/selectors'
 import { setActiveRequest, closeActiveRequestEditor } from '@/features/api/apiSlice'
 import { selectApiActiveRequestId } from '@/features/api/selectors'
-import { API_DRAFT_TAB_ID } from './tabSync'
+import { API_DRAFT_TAB_ID, useRequestCloseTab } from './tabSync'
 import { FileCode2, Globe, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -45,47 +45,9 @@ export function EditorTabs() {
     }
   }
 
-  // Close with dirty confirm; keep feature selection consistent so the
-  // open-tab effects in useTabSync don't resurrect the closed tab.
-  const requestCloseTab = (tab: EditorTab) => {
-    if (tab.dirty && !window.confirm('Discard unsaved changes?')) return
-
-    const idx = tabs.findIndex((t) => t.id === tab.id)
-    const remaining = tabs.filter((t) => t.id !== tab.id)
-    const wasActive = activeTabId === tab.id
-    // Mirror of closeTab reducer's neighbor pick
-    const nextActive = wasActive
-      ? remaining[Math.min(idx, remaining.length - 1)] ?? null
-      : remaining.find((t) => t.id === activeTabId) ?? null
-
-    dispatch(closeTab(tab.id))
-
-    // Closing the draft pseudo-tab discards the draft itself — otherwise the
-    // draft-lifecycle effect in useTabSync would immediately reopen the tab.
-    if (tab.id === API_DRAFT_TAB_ID) {
-      dispatch(closeActiveRequestEditor())
-    }
-
-    // Sync feature slices with the surviving active tab
-    if (tab.kind === 'script' && tab.entityId === activeScriptId) {
-      dispatch(setActiveScript(nextActive?.kind === 'script' ? nextActive.entityId : null))
-    }
-    if (tab.kind === 'api' && tab.entityId === activeRequestId) {
-      if (nextActive?.kind === 'api') {
-        dispatch(setActiveRequest(nextActive.entityId))
-      } else {
-        dispatch(closeActiveRequestEditor())
-      }
-    }
-    // Activate the neighbor's entity when the closed tab was active
-    if (wasActive && nextActive) {
-      if (nextActive.kind === 'script' && nextActive.entityId !== activeScriptId) {
-        dispatch(setActiveScript(nextActive.entityId))
-      } else if (nextActive.kind === 'api' && nextActive.entityId !== activeRequestId) {
-        dispatch(setActiveRequest(nextActive.entityId))
-      }
-    }
-  }
+  // Close with dirty confirm + feature-slice sync — shared with the Ctrl+W
+  // shortcut in WorkbenchShell (see useRequestCloseTab in tabSync.ts).
+  const requestCloseTab = useRequestCloseTab()
 
   if (tabs.length === 0) return null
 
