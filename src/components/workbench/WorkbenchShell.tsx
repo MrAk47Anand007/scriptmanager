@@ -18,7 +18,9 @@ export function WorkbenchShell({ activityBar, sidePanel, dock, children }: {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return
-      if (e.ctrlKey && e.key === '`') {
+      // Match e.code too so the shortcut works on keyboard layouts where
+      // the backquote key produces a different character.
+      if (e.ctrlKey && (e.key === '`' || e.code === 'Backquote')) {
         e.preventDefault()
         dispatch(toggleDock())
       }

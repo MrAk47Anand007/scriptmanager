@@ -43,6 +43,7 @@ export function BottomDock() {
   const isModeActive = useAppSelector(selectIsModeActive)
   const [height, setHeight] = useState(DEFAULT_HEIGHT)
   const [auditMounted, setAuditMounted] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null)
 
   useEffect(() => {
@@ -58,7 +59,10 @@ export function BottomDock() {
     if (visible && activeTab === 'audit') setAuditMounted(true)
   }, [activeTab, visible])
 
+  // Window listeners only attached while a drag is in progress (mirrors SidePanel)
   useEffect(() => {
+    if (!isDragging) return
+
     const handlePointerMove = (event: PointerEvent) => {
       const drag = dragRef.current
       if (!drag) return
@@ -67,6 +71,7 @@ export function BottomDock() {
     const handlePointerUp = () => {
       if (!dragRef.current) return
       dragRef.current = null
+      setIsDragging(false)
       document.body.style.userSelect = ''
       document.body.style.cursor = ''
       setHeight((current) => {
@@ -80,10 +85,11 @@ export function BottomDock() {
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [])
+  }, [isDragging])
 
   const startResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     dragRef.current = { startY: event.clientY, startHeight: height }
+    setIsDragging(true)
     document.body.style.userSelect = 'none'
     document.body.style.cursor = 'row-resize'
     event.preventDefault()

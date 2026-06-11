@@ -46,6 +46,7 @@ import { ActivityBar } from '@/components/workbench/ActivityBar'
 import { SidePanel } from '@/components/workbench/SidePanel'
 import { selectActiveActivity, selectTabs, selectActiveTabId } from '@/features/workbench/selectors'
 import { EditorTabs } from '@/components/workbench/EditorTabs'
+import { useTabSync } from '@/components/workbench/tabSync'
 import { BottomDock } from '@/components/workbench/BottomDock'
 
 const ScriptsManager = dynamic(
@@ -105,6 +106,9 @@ export default function Home() {
   const activeActivity = useAppSelector(selectActiveActivity)
   const tabs = useAppSelector(selectTabs)
   const activeTabId = useAppSelector(selectActiveTabId)
+  // Tab ↔ feature-slice sync must run here (always mounted) — EditorTabs
+  // unmounts while the settings activity is active.
+  useTabSync()
   // The visible editor follows the ACTIVE TAB's kind — the activity only drives the side
   // panel. Settings activity takes the full area; no tabs → scripts empty state.
   const activeEditorKind = tabs.find((t) => t.id === activeTabId)?.kind ?? 'script'

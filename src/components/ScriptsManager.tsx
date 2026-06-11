@@ -462,6 +462,9 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
         dispatch(setActiveDockTab('terminal'));
     }, [dispatch]);
 
+    // Mount-order invariant: BottomDock (statically imported by page.tsx) renders
+    // these pane containers before this dynamically-imported component resolves,
+    // so a one-shot getElementById lookup on mount is safe — no retry needed.
     useEffect(() => {
         const terminal = document.getElementById(DOCK_PANE_IDS.terminal);
         const output = document.getElementById(DOCK_PANE_IDS.output);
@@ -1160,7 +1163,7 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
     }, []);
 
     return (
-        <div className="flex h-screen bg-white dark:bg-slate-950 overflow-hidden">
+        <div className="flex h-full bg-white dark:bg-slate-950 overflow-hidden">
             {/* ── Left Sidebar (skipped when hosted in the workbench SidePanel) ── */}
             {!hideSidebar && (
                 <div className="w-[250px] flex-shrink-0 border-r dark:border-slate-800">
