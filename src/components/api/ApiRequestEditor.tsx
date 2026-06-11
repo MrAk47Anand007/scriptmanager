@@ -4,6 +4,15 @@ import { useState, useEffect, useCallback, useDeferredValue, useMemo, useRef } f
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { saveApiRequest, saveApiEnvironment, saveApiGlobals, sendApiRequest, setActiveEnvironment } from '@/features/api/apiSlice'
 import type { ApiRequestDraft, KeyValueRow } from '@/features/api/apiSlice'
+import {
+  selectApiActiveRequest,
+  selectApiIsSending,
+  selectApiError,
+  selectApiEnvironments,
+  selectApiActiveEnvironmentId,
+  selectApiGlobalVariables,
+  selectApiCollections,
+} from '@/features/api/selectors'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -186,7 +195,13 @@ function PillToggle<T extends string>({ options, value, onChange, className }: P
 
 export function ApiRequestEditor() {
   const dispatch = useAppDispatch()
-  const { activeRequest, isSending, error, environments, activeEnvironmentId, globalVariables, collections } = useAppSelector(s => s.api)
+  const activeRequest = useAppSelector(selectApiActiveRequest)
+  const isSending = useAppSelector(selectApiIsSending)
+  const error = useAppSelector(selectApiError)
+  const environments = useAppSelector(selectApiEnvironments)
+  const activeEnvironmentId = useAppSelector(selectApiActiveEnvironmentId)
+  const globalVariables = useAppSelector(selectApiGlobalVariables)
+  const collections = useAppSelector(selectApiCollections)
   const { resolvedTheme } = useTheme()
   const [editingName, setEditingName] = useState(false)
   const [activeTab, setActiveTab] = useState<'params' | 'headers' | 'body' | 'auth' | 'variables' | 'pre-request' | 'post-request'>('params')

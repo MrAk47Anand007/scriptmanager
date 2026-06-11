@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { useAppSelector } from '@/store/hooks'
+import { selectApiResponse, selectApiHistory, selectApiActiveRequestId } from '@/features/api/selectors'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { StatusBadge } from './StatusBadge'
@@ -45,7 +46,9 @@ function formatSize(bytes: number): string {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function ApiResponseViewer() {
-  const { response, history, activeRequestId } = useAppSelector(s => s.api)
+  const response = useAppSelector(selectApiResponse)
+  const history = useAppSelector(selectApiHistory)
+  const activeRequestId = useAppSelector(selectApiActiveRequestId)
   const { resolvedTheme } = useTheme()
   const [activeTab, setActiveTab] = useState<'body' | 'headers' | 'tests' | 'console' | 'output' | 'history'>('body')
   const [rawMode, setRawMode] = useState(false)

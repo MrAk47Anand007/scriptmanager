@@ -16,6 +16,8 @@ import {
     selectBuilds, selectSaveStatus, selectSchedule, selectContentStatus, selectRunStatus,
     selectAllTags, selectEnvVars, selectAutoSaveEnabled, selectActiveScript, selectVersionsStatus,
 } from '@/features/scripts/selectors';
+import { selectSettings } from '@/features/settings/selectors';
+import { selectIsModeActive } from '@/features/ops/selectors';
 import dynamic from 'next/dynamic';
 
 const TerminalComponent = dynamic(() => import('./TerminalComponent').then(mod => mod.TerminalComponent), {
@@ -407,8 +409,8 @@ export const ScriptsManager = () => {
     const autoSaveEnabled = useAppSelector(selectAutoSaveEnabled);
     const activeScript = useAppSelector(selectActiveScript);
     const versionsStatus = useAppSelector(selectVersionsStatus);
-    const { settings } = useAppSelector((state) => state.settings);
-    const isModeActive = useAppSelector((state) => state.ops.isModeActive);
+    const settings = useAppSelector(selectSettings);
+    const isModeActive = useAppSelector(selectIsModeActive);
     const { resolvedTheme } = useTheme();
     const isDesktopRuntime = useMemo(() => typeof window !== 'undefined' && hasDesktopScriptsRuntime(), []);
     const consoleRef = useRef<HTMLDivElement>(null);

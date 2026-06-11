@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo, startTransition } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchScripts, fetchCollections, fetchTemplates, fetchAllTags, setAutoSaveEnabled } from '@/features/scripts/scriptsSlice'
 import { fetchSettings } from '@/features/settings/settingsSlice'
+import { selectIsModeActive } from '@/features/ops/selectors'
 import { hasDesktopScriptsRuntime, listDesktopCollections, listDesktopScripts } from '@/lib/scriptsRuntimeClient'
 
 /** Single round-trip to hydrate scripts + collections + settings on startup */
@@ -98,7 +99,7 @@ function scheduleIdleWork(callback: () => void, delay = 180) {
 export default function Home() {
   const dispatch = useAppDispatch()
   const autoSaveEnabled = useAppSelector((state) => state.scripts.autoSaveEnabled)
-  const isOpsModeActive = useAppSelector((state) => state.ops.isModeActive)
+  const isOpsModeActive = useAppSelector(selectIsModeActive)
   const [isDesktopShell, setIsDesktopShell] = useState(false)
   const [activeTab, setActiveTab] = useState<'scripts' | 'settings' | 'api'>('scripts')
   const [isBootstrapping, setIsBootstrapping] = useState(true)

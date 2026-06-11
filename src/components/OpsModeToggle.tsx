@@ -2,6 +2,7 @@
 
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { toggleOpsMode } from '@/features/ops/opsSlice'
+import { selectIsModeActive } from '@/features/ops/selectors'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { Server } from 'lucide-react'
@@ -9,7 +10,7 @@ import { cn } from '@/lib/utils'
 
 export function OpsModeToggle() {
     const dispatch = useAppDispatch()
-    const isModeActive = useAppSelector((state) => state.ops.isModeActive)
+    const isModeActive = useAppSelector(selectIsModeActive)
 
     const handleToggle = (enabled: boolean) => {
         dispatch(toggleOpsMode())
