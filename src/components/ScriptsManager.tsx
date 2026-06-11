@@ -393,7 +393,12 @@ const VersionHistorySection = memo(function VersionHistorySection({
 
 
 
-export const ScriptsManager = () => {
+interface ScriptsManagerProps {
+    /** When hosted in the workbench shell, the sidebar lives in the shared SidePanel. */
+    hideSidebar?: boolean;
+}
+
+export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}) => {
     const dispatch = useAppDispatch();
     const scripts = useAppSelector(selectScriptItems, shallowEqual);
     const collections = useAppSelector(selectCollections, shallowEqual);
@@ -1183,10 +1188,12 @@ export const ScriptsManager = () => {
 
     return (
         <div className="flex h-screen bg-white dark:bg-slate-950 overflow-hidden">
-            {/* ── Left Sidebar ── */}
-            <div className="w-[250px] flex-shrink-0 border-r dark:border-slate-800">
-                <ScriptsSidebar />
-            </div>
+            {/* ── Left Sidebar (skipped when hosted in the workbench SidePanel) ── */}
+            {!hideSidebar && (
+                <div className="w-[250px] flex-shrink-0 border-r dark:border-slate-800">
+                    <ScriptsSidebar />
+                </div>
+            )}
 
             {/* ── Main Editor Area ── */}
             <div className="flex-1 min-w-0 flex flex-col relative h-full">

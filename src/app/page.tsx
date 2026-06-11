@@ -43,6 +43,7 @@ import { setOpsMode, fetchProjects, fetchServerProfiles } from '@/features/ops/o
 import { fetchApiCollections, fetchApiRequests } from '@/features/api/apiSlice'
 import { WorkbenchShell } from '@/components/workbench/WorkbenchShell'
 import { ActivityBar } from '@/components/workbench/ActivityBar'
+import { SidePanel } from '@/components/workbench/SidePanel'
 import { selectActiveActivity } from '@/features/workbench/selectors'
 
 const ScriptsManager = dynamic(
@@ -222,7 +223,7 @@ export default function Home() {
   return (
     <WorkbenchShell
       activityBar={<ActivityBar />}
-      sidePanel={null}
+      sidePanel={<SidePanel />}
       dock={null}
     >
       <div className="flex h-full flex-col">
@@ -234,12 +235,12 @@ export default function Home() {
         <main className="relative flex-1 overflow-hidden">
           {mountedTabs.scripts && (
             <div className={scriptsPanelClassName}>
-              {isBootstrapping ? <SectionSkeleton label="Preparing scripts workspace" /> : <ScriptsManager />}
+              {isBootstrapping ? <SectionSkeleton label="Preparing scripts workspace" /> : <ScriptsManager hideSidebar />}
             </div>
           )}
           {mountedTabs.api && (
             <div className={apiPanelClassName}>
-              <ApiManager />
+              <ApiManager hideSidebar />
             </div>
           )}
           {mountedTabs.settings && (
