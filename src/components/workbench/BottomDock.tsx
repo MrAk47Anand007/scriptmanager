@@ -59,6 +59,16 @@ export function BottomDock() {
     if (visible && activeTab === 'audit') setAuditMounted(true)
   }, [activeTab, visible])
 
+  // The Audit tab only exists while ops mode is on — if it goes away while
+  // active, fall back to Terminal so the dock isn't left on a missing tab.
+  // setActiveDockTab force-opens the dock, so restore hidden state after.
+  useEffect(() => {
+    if (!isModeActive && activeTab === 'audit') {
+      dispatch(setActiveDockTab('terminal'))
+      if (!visible) dispatch(setDockVisible(false))
+    }
+  }, [isModeActive, activeTab, visible, dispatch])
+
   // Window listeners only attached while a drag is in progress (mirrors SidePanel)
   useEffect(() => {
     if (!isDragging) return

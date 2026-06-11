@@ -4,8 +4,9 @@ import { useEffect, useRef } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { openTab, closeTab, setTabDirty, renameTab } from '@/features/workbench/workbenchSlice'
 import { selectTabs, selectActiveTabId } from '@/features/workbench/selectors'
+import { setActiveScript } from '@/features/scripts/scriptsSlice'
 import { selectActiveScriptId, selectScriptItems, selectScriptsStatus } from '@/features/scripts/selectors'
-import { closeActiveRequestEditor } from '@/features/api/apiSlice'
+import { closeActiveRequestEditor, setActiveRequest } from '@/features/api/apiSlice'
 import { selectApiActiveRequestId, selectApiRequests, selectApiIsLoading } from '@/features/api/selectors'
 
 export const scriptTabId = (id: string) => `script:${id}`
@@ -69,9 +70,11 @@ export function useTabSync() {
     if (activeRequestIdRef.current) dispatch(closeActiveRequestEditor())
   }, [activeScriptId, scriptItems, dispatch])
 
-  // (b) api selection → open/focus tab; mirror of (a). The script selection is
-  // cleared by the tab-activation handler (setActiveScript(null)) — clearing it
-  // here as well via the ref keeps the slices exclusive regardless of entry point.
+  // (b) api selection → open/focus tab; mirror of (a). Also clears the script
+  // selection so the slices stay mutually exclusive regardless of entry point
+  // (sidebar click, tab click, or QuickSwitcher) — a stale script selection
+  // would make re-selecting that script a Redux no-op and the tab would never
+  // refocus.
   useEffect(() => {
     if (!activeRequestId) return
     const id = apiTabId(activeRequestId)
@@ -80,6 +83,7 @@ export function useTabSync() {
       const title = requests.find((r) => r.id === activeRequestId)?.name ?? 'Request'
       dispatch(openTab({ id, kind: 'api', entityId: activeRequestId, title }))
     }
+    if (activeScriptIdRef.current) dispatch(setActiveScript(null))
   }, [activeRequestId, requests, dispatch])
 
   // (c) dirty sync — scripts only (apiSlice has no saved-vs-draft dirty flag; skipped)
@@ -120,4 +124,20 @@ export function useTabSync() {
       if (gone) dispatch(closeTab(tab.id))
     }
   }, [tabs, scriptItems, scriptsStatus, requests, apiIsLoading, dispatch])
+
+  // (f) reconcile feature selection with the active tab. Covers tab activations
+  // that don't go through EditorTabs' click handler — e.g. the zombie sweep
+  // closing the active tab makes the reducer activate a neighbor, but nothing
+  // else would tell the scripts/api slice to show that neighbor's editor.
+  // Loop-safe: effects (a)/(b) no-op when the selected entity's tab is already
+  // the active tab.
+  useEffect(() => {
+    const active = tabs.find((t) => t.id === activeTabId)
+    if (!active) return
+    if (active.kind === 'script' && activeScriptIdRef.current !== active.entityId) {
+      dispatch(setActiveScript(active.entityId))
+    } else if (active.kind === 'api' && activeRequestIdRef.current !== active.entityId) {
+      dispatch(setActiveRequest(active.entityId))
+    }
+  }, [activeTabId, tabs, dispatch])
 }
