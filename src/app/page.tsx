@@ -41,8 +41,9 @@ async function loadBootstrap(dispatch: ReturnType<typeof import('@/store/hooks')
 }
 import { setOpsMode, fetchProjects, fetchServerProfiles } from '@/features/ops/opsSlice'
 import { fetchApiCollections, fetchApiRequests } from '@/features/api/apiSlice'
-import { Settings, Code2, Globe, SquareTerminal } from 'lucide-react'
 import { WorkbenchShell } from '@/components/workbench/WorkbenchShell'
+import { ActivityBar } from '@/components/workbench/ActivityBar'
+import { selectActiveActivity } from '@/features/workbench/selectors'
 
 const ScriptsManager = dynamic(
   () => import('@/components/ScriptsManager').then((mod) => mod.ScriptsManager),
@@ -95,50 +96,13 @@ function scheduleIdleWork(callback: () => void, delay = 180) {
 
 type TabId = 'scripts' | 'settings' | 'api'
 
-/** Temporary vertical nav rail — replaced by the real ActivityBar in Task 4 */
-function ActivityBarPlaceholder({ activeTab, onSelectTab, isDesktopShell }: {
-  activeTab: TabId
-  onSelectTab: (tab: TabId) => void
-  isDesktopShell: boolean
-}) {
-  const itemClass = (active: boolean) =>
-    `flex h-12 w-12 items-center justify-center transition-colors ${active
-      ? 'text-slate-900 dark:text-slate-100 border-l-2 border-accent-brand'
-      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 border-l-2 border-transparent'
-    }`
-
-  return (
-    <div className="flex h-full flex-col items-stretch">
-      <button title="Scripts" className={itemClass(activeTab === 'scripts')} onClick={() => onSelectTab('scripts')}>
-        <Code2 className="h-5 w-5" />
-      </button>
-      <button title="API" className={itemClass(activeTab === 'api')} onClick={() => onSelectTab('api')}>
-        <Globe className="h-5 w-5" />
-      </button>
-      <button title="Settings" className={itemClass(activeTab === 'settings')} onClick={() => onSelectTab('settings')}>
-        <Settings className="h-5 w-5" />
-      </button>
-      {isDesktopShell && (
-        <button
-          title="Terminal"
-          className={itemClass(false)}
-          onClick={() => {
-            onSelectTab('scripts')
-            window.dispatchEvent(new CustomEvent('scriptmanager:open-terminal'))
-          }}
-        >
-          <SquareTerminal className="h-5 w-5" />
-        </button>
-      )}
-    </div>
-  )
-}
-
 export default function Home() {
   const dispatch = useAppDispatch()
   const isOpsModeActive = useAppSelector(selectIsModeActive)
-  const [isDesktopShell, setIsDesktopShell] = useState(false)
-  const [activeTab, setActiveTab] = useState<TabId>('scripts')
+  const activeActivity = useAppSelector(selectActiveActivity)
+  // Page panels remain scripts/api/settings; ops panels live inside ScriptsManager today,
+  // so the 'ops' activity maps to the scripts panel.
+  const activeTab: TabId = activeActivity === 'ops' ? 'scripts' : activeActivity
   const [isBootstrapping, setIsBootstrapping] = useState(true)
   const [mountedTabs, setMountedTabs] = useState<Record<TabId, boolean>>({
     scripts: true,
@@ -148,7 +112,6 @@ export default function Home() {
 
   useEffect(() => {
     const desktop = typeof window !== 'undefined' && Boolean(window.__ELECTRON__)
-    setIsDesktopShell(desktop)
     if (typeof document !== 'undefined') {
       if (desktop) {
         document.body.dataset.electron = 'true'
@@ -258,13 +221,7 @@ export default function Home() {
 
   return (
     <WorkbenchShell
-      activityBar={
-        <ActivityBarPlaceholder
-          activeTab={activeTab}
-          onSelectTab={setActiveTab}
-          isDesktopShell={isDesktopShell}
-        />
-      }
+      activityBar={<ActivityBar />}
       sidePanel={null}
       dock={null}
     >
