@@ -10,6 +10,7 @@ import { setActiveScript } from '@/features/scripts/scriptsSlice'
 import { selectActiveScriptId } from '@/features/scripts/selectors'
 import { setActiveRequest, closeActiveRequestEditor } from '@/features/api/apiSlice'
 import { selectApiActiveRequestId } from '@/features/api/selectors'
+import { API_DRAFT_TAB_ID } from './tabSync'
 import { FileCode2, Globe, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -31,7 +32,13 @@ export function EditorTabs() {
     if (activeTabId !== tab.id) dispatch(setActiveTab(tab.id))
     if (tab.kind === 'script') {
       if (tab.entityId !== activeScriptId) dispatch(setActiveScript(tab.entityId))
+      // Saved api selections are cleared; the unsaved DRAFT is preserved so its
+      // pseudo-tab stays switchable (its state lives in apiSlice.activeRequest).
       if (activeRequestId) dispatch(closeActiveRequestEditor())
+    } else if (tab.id === API_DRAFT_TAB_ID) {
+      // The draft's editor state is already in apiSlice.activeRequest — only
+      // the script selection needs clearing so the api editor takes the area.
+      if (activeScriptId) dispatch(setActiveScript(null))
     } else {
       if (tab.entityId !== activeRequestId) dispatch(setActiveRequest(tab.entityId))
       if (activeScriptId) dispatch(setActiveScript(null))
@@ -52,6 +59,12 @@ export function EditorTabs() {
       : remaining.find((t) => t.id === activeTabId) ?? null
 
     dispatch(closeTab(tab.id))
+
+    // Closing the draft pseudo-tab discards the draft itself — otherwise the
+    // draft-lifecycle effect in useTabSync would immediately reopen the tab.
+    if (tab.id === API_DRAFT_TAB_ID) {
+      dispatch(closeActiveRequestEditor())
+    }
 
     // Sync feature slices with the surviving active tab
     if (tab.kind === 'script' && tab.entityId === activeScriptId) {

@@ -13,9 +13,17 @@ export const scriptTabId = (id: string) => `script:${id}`
 export const apiTabId = (id: string) => `api:${id}`
 
 /**
+ * The one UNSAVED api request draft (apiSlice.newRequest) gets a pseudo-tab so
+ * it behaves like Postman's "Untitled Request": visible, switchable, always
+ * dirty-dotted, converted into a real tab on first save.
+ */
+export const API_DRAFT_ENTITY_ID = '__draft__'
+export const API_DRAFT_TAB_ID = apiTabId(API_DRAFT_ENTITY_ID)
+
+/**
  * Keeps workbench tabs in sync with the scripts/api feature slices:
- * - sidebar selection opens/focuses a tab (and enforces mutual exclusion
- *   between the script and api selections)
+ * - sidebar selection opens/focuses a tab
+ * - unsaved api drafts appear as an "Untitled Request" pseudo-tab
  * - dirty + rename state mirrored into tabs
  * - tabs whose entity was deleted are closed
  *
@@ -33,8 +41,13 @@ export function useTabSync() {
   const activeRequestId = useAppSelector(selectApiActiveRequestId)
   const requests = useAppSelector(selectApiRequests)
   const apiIsLoading = useAppSelector(selectApiIsLoading)
-  // True for saved requests AND unsaved drafts (newRequest() — id is null).
-  const apiEditorOpen = useAppSelector((state) => state.api.activeRequest !== null)
+  // An unsaved draft is an open api editor with no persisted id.
+  const hasApiDraft = useAppSelector(
+    (state) => state.api.activeRequest !== null && state.api.activeRequestId === null
+  )
+  const draftName = useAppSelector((state) =>
+    state.api.activeRequestId === null ? state.api.activeRequest?.name ?? '' : ''
+  )
   // Same dirty detection ScriptTree's UnsavedIndicator uses: editor buffer vs saved content
   const scriptDirty = useAppSelector((state) => {
     const id = state.scripts.activeScriptId
@@ -55,14 +68,13 @@ export function useTabSync() {
   activeScriptIdRef.current = activeScriptId
   const activeRequestIdRef = useRef(activeRequestId)
   activeRequestIdRef.current = activeRequestId
-  const apiEditorOpenRef = useRef(apiEditorOpen)
-  apiEditorOpenRef.current = apiEditorOpen
 
   // (a) script selection → open/focus tab. Compares against the ACTIVE TAB
   // (not a "previous selection" ref) so re-selecting the same entity still
-  // refocuses its tab. Also clears the api selection — the script and api
-  // slices must never both claim an active editor (see issue with stale
-  // selection short-circuiting tab focus).
+  // refocuses its tab. Clears a SAVED api selection (a stale id would make
+  // re-selecting that request a Redux no-op and its tab would never refocus);
+  // unsaved DRAFTS are deliberately preserved — their pseudo-tab keeps them
+  // reachable, Postman-style.
   useEffect(() => {
     if (!activeScriptId) return
     const id = scriptTabId(activeScriptId)
@@ -71,17 +83,10 @@ export function useTabSync() {
       const title = scriptItems.find((s) => s.id === activeScriptId)?.name ?? 'Script'
       dispatch(openTab({ id, kind: 'script', entityId: activeScriptId, title }))
     }
-    // Close any open api editor — including unsaved DRAFTS (activeRequestId is
-    // null for those, so checking only the id would leave the draft trumping
-    // the editor-kind resolution in page.tsx forever.
-    if (apiEditorOpenRef.current) dispatch(closeActiveRequestEditor())
+    if (activeRequestIdRef.current) dispatch(closeActiveRequestEditor())
   }, [activeScriptId, scriptItems, dispatch])
 
-  // (b) api selection → open/focus tab; mirror of (a). Also clears the script
-  // selection so the slices stay mutually exclusive regardless of entry point
-  // (sidebar click, tab click, or QuickSwitcher) — a stale script selection
-  // would make re-selecting that script a Redux no-op and the tab would never
-  // refocus.
+  // (b) api selection → open/focus tab; mirror of (a).
   useEffect(() => {
     if (!activeRequestId) return
     const id = apiTabId(activeRequestId)
@@ -93,7 +98,30 @@ export function useTabSync() {
     if (activeScriptIdRef.current) dispatch(setActiveScript(null))
   }, [activeRequestId, requests, dispatch])
 
-  // (c) dirty sync — scripts only (apiSlice has no saved-vs-draft dirty flag; skipped)
+  // (b2) draft lifecycle: newRequest() → open the pseudo-tab (always dirty);
+  // saving or discarding the draft (hasApiDraft false) → close it. Saving also
+  // sets activeRequestId, so (b) opens the real tab in the same pass.
+  useEffect(() => {
+    const exists = tabsRef.current.some((t) => t.id === API_DRAFT_TAB_ID)
+    if (hasApiDraft) {
+      const title = draftName.trim() || 'Untitled Request'
+      if (!exists || activeTabIdRef.current !== API_DRAFT_TAB_ID) {
+        dispatch(openTab({ id: API_DRAFT_TAB_ID, kind: 'api', entityId: API_DRAFT_ENTITY_ID, title }))
+        dispatch(setTabDirty({ id: API_DRAFT_TAB_ID, dirty: true }))
+      } else {
+        const tab = tabsRef.current.find((t) => t.id === API_DRAFT_TAB_ID)
+        if (tab && tab.title !== title) dispatch(renameTab({ id: API_DRAFT_TAB_ID, title }))
+      }
+      if (activeScriptIdRef.current && activeTabIdRef.current === API_DRAFT_TAB_ID) {
+        dispatch(setActiveScript(null))
+      }
+    } else if (exists) {
+      dispatch(closeTab(API_DRAFT_TAB_ID))
+    }
+  }, [hasApiDraft, draftName, dispatch])
+
+  // (c) dirty sync — scripts only (apiSlice has no saved-vs-draft dirty flag;
+  // the draft pseudo-tab is permanently dirty instead)
   useEffect(() => {
     if (!activeScriptId) return
     const id = scriptTabId(activeScriptId)
@@ -103,9 +131,10 @@ export function useTabSync() {
     }
   }, [scriptDirty, activeScriptId, tabs, dispatch])
 
-  // (d) rename sync
+  // (d) rename sync (draft tab handled in (b2))
   useEffect(() => {
     for (const tab of tabsRef.current) {
+      if (tab.id === API_DRAFT_TAB_ID) continue
       const name = tab.kind === 'script'
         ? scriptItems.find((s) => s.id === tab.entityId)?.name
         : requests.find((r) => r.id === tab.entityId)?.name
@@ -122,9 +151,11 @@ export function useTabSync() {
   if (requests.length > 0) apiEverLoadedRef.current = true
 
   // (e) zombie sweep — close tabs whose entity was deleted. Guarded on load
-  // status so it never fires while the lists are still empty/loading.
+  // status so it never fires while the lists are still empty/loading. The
+  // draft pseudo-tab has no persisted entity and is managed by (b2) instead.
   useEffect(() => {
     for (const tab of tabs) {
+      if (tab.id === API_DRAFT_TAB_ID) continue
       const gone = tab.kind === 'script'
         ? scriptsStatus === 'succeeded' && !scriptItems.some((s) => s.id === tab.entityId)
         : apiEverLoadedRef.current && !apiIsLoading && !requests.some((r) => r.id === tab.entityId)
@@ -137,10 +168,11 @@ export function useTabSync() {
   // closing the active tab makes the reducer activate a neighbor, but nothing
   // else would tell the scripts/api slice to show that neighbor's editor.
   // Loop-safe: effects (a)/(b) no-op when the selected entity's tab is already
-  // the active tab.
+  // the active tab. The draft pseudo-tab needs no dispatch — its state already
+  // lives in apiSlice.activeRequest.
   useEffect(() => {
     const active = tabs.find((t) => t.id === activeTabId)
-    if (!active) return
+    if (!active || active.id === API_DRAFT_TAB_ID) return
     if (active.kind === 'script' && activeScriptIdRef.current !== active.entityId) {
       dispatch(setActiveScript(active.entityId))
     } else if (active.kind === 'api' && activeRequestIdRef.current !== active.entityId) {
