@@ -669,16 +669,32 @@ const scriptsSlice = createSlice({
                 state.schedule.status = 'idle'
             })
             .addCase(saveSchedule.fulfilled, (state, action) => {
-                state.schedule.cron = action.payload.schedule_cron || ''
-                state.schedule.enabled = action.payload.schedule_enabled
-                state.schedule.nextRun = action.payload.next_run_time
-                state.schedule.status = 'saved'
+                // Saves can also come from the Schedules dashboard for a
+                // non-active script — only sync the editor state for the active one.
+                if (action.meta.arg.scriptId === state.activeScriptId) {
+                    state.schedule.cron = action.payload.schedule_cron || ''
+                    state.schedule.enabled = action.payload.schedule_enabled
+                    state.schedule.nextRun = action.payload.next_run_time
+                    state.schedule.status = 'saved'
+                }
+                const savedItem = state.items.find(s => s.id === action.meta.arg.scriptId)
+                if (savedItem) {
+                    savedItem.schedule_cron = action.payload.schedule_cron || undefined
+                    savedItem.schedule_enabled = action.payload.schedule_enabled
+                }
             })
-            .addCase(deleteSchedule.fulfilled, (state) => {
-                state.schedule.cron = ''
-                state.schedule.enabled = false
-                state.schedule.nextRun = null
-                state.schedule.status = 'idle'
+            .addCase(deleteSchedule.fulfilled, (state, action) => {
+                if (action.meta.arg === state.activeScriptId) {
+                    state.schedule.cron = ''
+                    state.schedule.enabled = false
+                    state.schedule.nextRun = null
+                    state.schedule.status = 'idle'
+                }
+                const clearedItem = state.items.find(s => s.id === action.meta.arg)
+                if (clearedItem) {
+                    clearedItem.schedule_cron = undefined
+                    clearedItem.schedule_enabled = false
+                }
             })
             .addCase(fetchCollections.fulfilled, (state, action) => {
                 state.collections = action.payload

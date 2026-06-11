@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Code2, Globe, Server, Settings, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { CalendarClock, Code2, Globe, Server, Settings, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setActiveActivity, type ActivityId } from '@/features/workbench/workbenchSlice'
 import { selectActiveActivity } from '@/features/workbench/selectors'
@@ -98,6 +98,12 @@ export function ActivityBar() {
           }}
         />
       )}
+      <ActivityButton
+        icon={CalendarClock}
+        title="Schedules"
+        active={activeActivity === 'schedules'}
+        onClick={() => select('schedules')}
+      />
       <div className="flex-1" />
       <ActivityButton
         icon={Settings}

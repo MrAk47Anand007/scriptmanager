@@ -63,6 +63,13 @@ const ApiManager = dynamic(
   }
 )
 
+const SchedulesView = dynamic(
+  () => import('@/components/SchedulesView').then((mod) => mod.SchedulesView),
+  {
+    loading: () => <SectionSkeleton label="Loading schedules" />,
+  }
+)
+
 const SettingsManager = dynamic(
   () => import('@/components/SettingsManager').then((mod) => mod.SettingsManager),
   {
@@ -98,7 +105,7 @@ function scheduleIdleWork(callback: () => void, delay = 180) {
   return () => globalThis.clearTimeout(timeoutId)
 }
 
-type TabId = 'scripts' | 'settings' | 'api'
+type TabId = 'scripts' | 'settings' | 'api' | 'schedules'
 
 export default function Home() {
   const dispatch = useAppDispatch()
@@ -116,12 +123,15 @@ export default function Home() {
     tabs.find((t) => t.id === activeTabId)?.kind ?? (activeActivity === 'api' ? 'api' : 'script')
   const activeTab: TabId = activeActivity === 'settings'
     ? 'settings'
-    : activeEditorKind === 'api' ? 'api' : 'scripts'
+    : activeActivity === 'schedules'
+      ? 'schedules'
+      : activeEditorKind === 'api' ? 'api' : 'scripts'
   const [isBootstrapping, setIsBootstrapping] = useState(true)
   const [mountedTabs, setMountedTabs] = useState<Record<TabId, boolean>>({
     scripts: true,
     settings: false,
     api: false,
+    schedules: false,
   })
 
   useEffect(() => {
@@ -233,6 +243,12 @@ export default function Home() {
       : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
     [activeTab]
   )
+  const schedulesPanelClassName = useMemo(
+    () => activeTab === 'schedules'
+      ? 'absolute inset-0 opacity-100 z-10'
+      : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
+    [activeTab]
+  )
   const settingsPanelClassName = useMemo(
     () => activeTab === 'settings'
       ? 'absolute inset-0 overflow-y-auto bg-white dark:bg-slate-950 opacity-100 z-10'
@@ -252,7 +268,7 @@ export default function Home() {
             <div className="h-full w-full animate-pulse bg-gradient-to-r from-blue-500 via-blue-300 to-blue-500" />
           </div>
         )}
-        {activeTab !== 'settings' && <EditorTabs />}
+        {activeTab !== 'settings' && activeTab !== 'schedules' && <EditorTabs />}
         <main className="relative flex-1 overflow-hidden">
           {mountedTabs.scripts && (
             <div className={scriptsPanelClassName}>
@@ -262,6 +278,11 @@ export default function Home() {
           {mountedTabs.api && (
             <div className={apiPanelClassName}>
               <ApiManager hideSidebar />
+            </div>
+          )}
+          {mountedTabs.schedules && (
+            <div className={schedulesPanelClassName}>
+              <SchedulesView />
             </div>
           )}
           {mountedTabs.settings && (

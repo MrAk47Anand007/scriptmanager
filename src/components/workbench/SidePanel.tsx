@@ -85,8 +85,8 @@ export function SidePanel() {
     event.preventDefault()
   }, [])
 
-  // Settings has no sidebar — the panel collapses to width 0 there too.
-  const collapsed = !sidePanelVisible || activeActivity === 'settings'
+  // Settings and Schedules have no sidebar — the panel collapses to width 0 there too.
+  const collapsed = !sidePanelVisible || activeActivity === 'settings' || activeActivity === 'schedules'
   const scriptsActive = activeActivity === 'scripts' || activeActivity === 'ops'
   const apiActive = activeActivity === 'api'
 

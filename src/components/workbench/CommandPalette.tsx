@@ -91,6 +91,10 @@ export function CommandPalette() {
       run: () => dispatch(setActiveActivity('api')),
     },
     {
+      id: 'cmd:go-schedules', group: 'Commands', label: 'Go to Schedules',
+      run: () => dispatch(setActiveActivity('schedules')),
+    },
+    {
       id: 'cmd:go-settings', group: 'Commands', label: 'Go to Settings',
       run: () => dispatch(setActiveActivity('settings')),
     },
