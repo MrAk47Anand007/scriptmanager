@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Code2, Globe, Server, Settings, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setActiveActivity, type ActivityId } from '@/features/workbench/workbenchSlice'
@@ -52,7 +53,11 @@ export function ActivityBar() {
   const isOpsModeActive = useAppSelector(selectIsModeActive)
   const runStatus = useAppSelector(selectRunStatus)
   const requiresApproval = useAppSelector(selectRequiresApproval)
-  const desktop = isDesktop()
+  const [desktop, setDesktop] = useState(false)
+
+  useEffect(() => {
+    setDesktop(isDesktop())
+  }, [])
 
   const select = (id: ActivityId) => dispatch(setActiveActivity(id))
 
@@ -85,7 +90,10 @@ export function ActivityBar() {
           icon={SquareTerminal}
           title="Terminal"
           onClick={() => {
-            select('scripts')
+            // Guard: setActiveActivity toggles sidePanelVisible when already on scripts.
+            if (activeActivity !== 'scripts') {
+              select('scripts')
+            }
             window.dispatchEvent(new CustomEvent('scriptmanager:open-terminal'))
           }}
         />

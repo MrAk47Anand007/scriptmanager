@@ -10,10 +10,13 @@ import { OpsModeToggle } from '@/components/OpsModeToggle'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { isDesktop } from '@/lib/runtime'
+import { setActiveActivity } from '@/features/workbench/workbenchSlice'
+import { selectActiveActivity } from '@/features/workbench/selectors'
 
 export function TitleBar() {
   const dispatch = useAppDispatch()
   const autoSaveEnabled = useAppSelector(selectAutoSaveEnabled)
+  const activeActivity = useAppSelector(selectActiveActivity)
   const [isDesktopShell, setIsDesktopShell] = useState(false)
 
   useEffect(() => {
@@ -26,9 +29,18 @@ export function TitleBar() {
   }
 
   const openCommandPalette = () => {
+    // QuickSwitcher lives inside ScriptsSidebar, which is hidden when another
+    // activity is active — switch to scripts first so the palette is visible.
+    // Guard: setActiveActivity toggles sidePanelVisible when already on scripts.
+    if (activeActivity !== 'scripts') {
+      dispatch(setActiveActivity('scripts'))
+    }
     // QuickSwitcher is opened by the Ctrl+P keydown listener in ScriptsSidebar —
     // re-dispatch the same event so we don't duplicate open-state plumbing.
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }))
+    // Defer a frame so the scripts panel mounts/paints before the event fires.
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }))
+    })
   }
 
   return (
