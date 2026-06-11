@@ -26,6 +26,7 @@ declare global {
       revealPath: (targetPath: string) => Promise<boolean>
       copyText: (value: string) => Promise<boolean>
       readClipboardText: () => Promise<string>
+      setNotificationsEnabled?: (enabled: boolean) => Promise<boolean>
       runtime?: {
         listScripts: () => Promise<unknown[]>
         listCollections: () => Promise<unknown[]>

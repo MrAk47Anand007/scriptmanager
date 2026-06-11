@@ -30,6 +30,12 @@ export function WorkbenchShell({ activityBar, sidePanel, dock, children }: {
     }
   }, [resolvedTheme])
 
+  // Re-apply the stored desktop-notification preference to the main process on startup
+  useEffect(() => {
+    const enabled = localStorage.getItem('scriptManager_notifications') !== 'false'
+    void window.scriptManagerDesktop?.setNotificationsEnabled?.(enabled)
+  }, [])
+
   // Global workbench shortcuts (skip if something else already handled it):
   //   Ctrl+`        toggle bottom dock
   //   Ctrl+P/Ctrl+K open command palette

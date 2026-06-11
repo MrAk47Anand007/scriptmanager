@@ -1,10 +1,17 @@
-import { app, BrowserWindow, session, ipcMain, dialog, OpenDialogOptions, shell, clipboard, Menu, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, session, ipcMain, dialog, OpenDialogOptions, shell, clipboard, Menu, Tray, nativeImage, type MenuItemConstructorOptions } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
 import path from 'path'
 import http from 'http'
 import crypto from 'crypto'
 import fs from 'fs'
-import { attachDesktopRuntime, initDesktopRuntimeIpc } from './desktopRuntime'
+import {
+  attachDesktopRuntime,
+  initDesktopRuntimeIpc,
+  getLastRunScriptId,
+  runScriptForWindow,
+  setDesktopNotificationsEnabled,
+  setLastRunScriptListener,
+} from './desktopRuntime'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
 // In production (packaged), Electron spawns the standalone server itself.
@@ -19,6 +26,11 @@ const DESKTOP_SECRET = process.env.DESKTOP_AUTH_SECRET ?? crypto.randomBytes(32)
 let serverProcess: ChildProcess | null = null
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+
+// 16x16 terracotta rounded square, embedded so the tray works without bundled assets.
+const TRAY_ICON_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMklEQVR4nGNgQAM3y8P/48Po6onWiNcgUjVjGEKRAeRqhhsyasCwMGDgUyJVMhMl2RkAMMtRX3YNtqYAAAAASUVORK5CYII='
 
 type WindowState = {
   width: number
@@ -624,11 +636,70 @@ async function createWindow() {
   })
 }
 
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function buildTrayMenu() {
+  const lastRunScriptId = getLastRunScriptId()
+  return Menu.buildFromTemplate([
+    {
+      label: 'Show ScriptManager',
+      click: showMainWindow,
+    },
+    { type: 'separator' },
+    {
+      label: 'Run Last Script',
+      enabled: lastRunScriptId !== null,
+      click: () => {
+        const scriptId = getLastRunScriptId()
+        if (!scriptId || !mainWindow || mainWindow.isDestroyed()) {
+          return
+        }
+        void runScriptForWindow(mainWindow, scriptId).catch((error) => {
+          console.error('[Electron] Tray run-last-script failed:', error)
+        })
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => app.quit(),
+    },
+  ])
+}
+
+function createTray() {
+  if (tray) {
+    return
+  }
+  const icon = nativeImage.createFromDataURL(TRAY_ICON_DATA_URL)
+  tray = new Tray(icon)
+  tray.setToolTip('ScriptManager')
+  tray.setContextMenu(buildTrayMenu())
+  tray.on('click', showMainWindow)
+  setLastRunScriptListener(() => {
+    tray?.setContextMenu(buildTrayMenu())
+  })
+}
+
 app.whenReady().then(() => {
   ensureDesktopProcessEnv()
   initDesktopRuntimeIpc()
   createApplicationMenu()
-  return createWindow()
+  return createWindow().then(() => createTray())
+})
+
+ipcMain.handle('scriptmanager:set-notifications-enabled', (_event, enabled: boolean) => {
+  setDesktopNotificationsEnabled(enabled !== false)
+  return true
 })
 
 ipcMain.handle('scriptmanager:select-folder', async () => {
@@ -697,4 +768,6 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   serverProcess?.kill()
+  tray?.destroy()
+  tray = null
 })

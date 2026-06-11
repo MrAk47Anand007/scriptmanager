@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
   revealPath: (targetPath: string) => ipcRenderer.invoke('scriptmanager:reveal-path', targetPath) as Promise<boolean>,
   copyText: (value: string) => ipcRenderer.invoke('scriptmanager:copy-text', value) as Promise<boolean>,
   readClipboardText: () => ipcRenderer.invoke('scriptmanager:read-text') as Promise<string>,
+  setNotificationsEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke('scriptmanager:set-notifications-enabled', enabled) as Promise<boolean>,
   runtime: {
     listScripts: () => ipcRenderer.invoke('scriptmanager:runtime:list-scripts') as Promise<unknown[]>,
     listCollections: () => ipcRenderer.invoke('scriptmanager:runtime:list-collections') as Promise<unknown[]>,
