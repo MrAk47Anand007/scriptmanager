@@ -1430,6 +1430,9 @@ async function saveLocalScript(payload: SaveScriptPayload): Promise<ScriptDto> {
   }
 
   const filePath = resolveScriptPath(script)
+  // The script's folder may not exist yet (fresh checkout, moved workspace,
+  // or a DB row pointing at a deleted directory) — recreate it before writing.
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
   fs.writeFileSync(filePath, payload.content, 'utf8')
   await createVersionSnapshot(script.id, payload.content)
 
@@ -1501,6 +1504,7 @@ async function duplicateLocalScript(scriptId: string): Promise<ScriptDto> {
     throw new Error('A file with the duplicate name already exists')
   }
 
+  fs.mkdirSync(path.dirname(newPath), { recursive: true })
   fs.writeFileSync(newPath, content, 'utf8')
   const isManagedCollection = await isManagedCollectionWorkspace(original.collection?.folderPath)
 

@@ -109,9 +109,17 @@ export default function Home() {
   // Tab ↔ feature-slice sync must run here (always mounted) — EditorTabs
   // unmounts while the settings activity is active.
   useTabSync()
-  // The visible editor follows the ACTIVE TAB's kind — the activity only drives the side
-  // panel. Settings activity takes the full area; no tabs → scripts empty state.
-  const activeEditorKind = tabs.find((t) => t.id === activeTabId)?.kind ?? 'script'
+  // The visible editor follows, in priority order:
+  // 1. an unsaved api request DRAFT (newRequest() has no tab until first save —
+  //    without this it would be invisible behind the scripts editor),
+  // 2. the ACTIVE TAB's kind,
+  // 3. the activity (api activity with no tabs shows the api empty state).
+  const hasApiDraft = useAppSelector(
+    (state) => state.api.activeRequest !== null && state.api.activeRequestId === null
+  )
+  const activeEditorKind = hasApiDraft
+    ? 'api'
+    : tabs.find((t) => t.id === activeTabId)?.kind ?? (activeActivity === 'api' ? 'api' : 'script')
   const activeTab: TabId = activeActivity === 'settings'
     ? 'settings'
     : activeEditorKind === 'api' ? 'api' : 'scripts'

@@ -33,6 +33,8 @@ export function useTabSync() {
   const activeRequestId = useAppSelector(selectApiActiveRequestId)
   const requests = useAppSelector(selectApiRequests)
   const apiIsLoading = useAppSelector(selectApiIsLoading)
+  // True for saved requests AND unsaved drafts (newRequest() — id is null).
+  const apiEditorOpen = useAppSelector((state) => state.api.activeRequest !== null)
   // Same dirty detection ScriptTree's UnsavedIndicator uses: editor buffer vs saved content
   const scriptDirty = useAppSelector((state) => {
     const id = state.scripts.activeScriptId
@@ -53,6 +55,8 @@ export function useTabSync() {
   activeScriptIdRef.current = activeScriptId
   const activeRequestIdRef = useRef(activeRequestId)
   activeRequestIdRef.current = activeRequestId
+  const apiEditorOpenRef = useRef(apiEditorOpen)
+  apiEditorOpenRef.current = apiEditorOpen
 
   // (a) script selection → open/focus tab. Compares against the ACTIVE TAB
   // (not a "previous selection" ref) so re-selecting the same entity still
@@ -67,7 +71,10 @@ export function useTabSync() {
       const title = scriptItems.find((s) => s.id === activeScriptId)?.name ?? 'Script'
       dispatch(openTab({ id, kind: 'script', entityId: activeScriptId, title }))
     }
-    if (activeRequestIdRef.current) dispatch(closeActiveRequestEditor())
+    // Close any open api editor — including unsaved DRAFTS (activeRequestId is
+    // null for those, so checking only the id would leave the draft trumping
+    // the editor-kind resolution in page.tsx forever.
+    if (apiEditorOpenRef.current) dispatch(closeActiveRequestEditor())
   }, [activeScriptId, scriptItems, dispatch])
 
   // (b) api selection → open/focus tab; mirror of (a). Also clears the script
