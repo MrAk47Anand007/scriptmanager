@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 
 const AuditTrailPanel = dynamic(() => import('../AuditTrailPanel').then((mod) => mod.AuditTrailPanel), {
   ssr: false,
-  loading: () => <div className="p-3 text-[10px] text-slate-400">Loading audit trail...</div>,
+  loading: () => <div className="p-3 text-[10px] text-muted-foreground">Loading audit trail...</div>,
 })
 
 const DOCK_HEIGHT_KEY = 'wb_dock_height'
@@ -108,7 +108,7 @@ export function BottomDock() {
         onPointerDown={startResize}
         title="Resize panel"
       >
-        <div className="h-0.5 w-12 rounded-full bg-transparent transition-colors group-hover:bg-blue-500" />
+        <div className="wb-transition h-0.5 w-12 rounded-full bg-transparent group-hover:bg-accent-brand" />
       </div>
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-wb-border px-2 text-xs">
         {tabs.map((tab) => (
@@ -117,9 +117,9 @@ export function BottomDock() {
             type="button"
             onClick={() => dispatch(setActiveDockTab(tab.id))}
             className={cn(
-              'rounded px-2 py-1 uppercase tracking-wide text-[10px] transition-colors',
+              'wb-transition rounded px-2 py-1 uppercase tracking-wide text-[10px]',
               activeTab === tab.id
-                ? 'text-foreground border-b-2 border-blue-500 rounded-b-none'
+                ? 'text-foreground border-b-2 border-accent-brand rounded-b-none'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
@@ -129,7 +129,7 @@ export function BottomDock() {
         <div className="flex-1" />
         <button
           type="button"
-          className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+          className="wb-transition rounded p-1 text-muted-foreground hover:text-foreground"
           onClick={() => dispatch(setDockVisible(false))}
           title="Close panel"
         >

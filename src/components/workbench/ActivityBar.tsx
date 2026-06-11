@@ -30,8 +30,8 @@ function ActivityButton({
       onClick={onClick}
       className={`wb-transition relative flex h-12 w-12 items-center justify-center ${
         active
-          ? 'text-slate-900 dark:text-slate-100'
-          : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+          ? 'text-foreground'
+          : 'text-muted-foreground hover:text-foreground'
       }`}
     >
       {active && (

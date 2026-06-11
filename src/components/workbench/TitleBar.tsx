@@ -50,26 +50,26 @@ export function TitleBar() {
       }`}
     >
       <div className="desktop-no-drag mr-2 flex min-w-0 items-center gap-2">
-        <Code2 className="h-5 w-5 text-blue-600 dark:text-blue-500" />
-        <span className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">ScriptManager</span>
+        <Code2 className="h-5 w-5 text-accent-brand" />
+        <span className="truncate text-sm font-semibold text-foreground">ScriptManager</span>
       </div>
 
       <div className="flex flex-1 justify-center">
         <button
           type="button"
           onClick={openCommandPalette}
-          className="desktop-no-drag flex h-6 w-full max-w-md items-center gap-2 rounded-md border border-wb-border bg-background/60 px-3 text-xs text-slate-500 transition-colors hover:bg-background dark:text-slate-400"
+          className="wb-transition desktop-no-drag flex h-6 w-full max-w-md items-center gap-2 rounded-md border border-wb-border bg-background/60 px-3 text-xs text-muted-foreground hover:bg-background hover:text-foreground"
           title="Go to script (Ctrl+P)"
         >
           <Search className="h-3 w-3 shrink-0" />
           <span className="truncate">Go to script…</span>
-          <span className="ml-auto shrink-0 text-[10px] text-slate-400 dark:text-slate-500">Ctrl+P</span>
+          <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/70">Ctrl+P</span>
         </button>
       </div>
 
       <div className={`desktop-no-drag flex items-center ${isDesktopShell ? 'gap-3' : 'gap-4'} min-w-0`}>
         <div className="flex items-center gap-2" title="Auto-save changes">
-          <Label htmlFor="auto-save-toggle" className="cursor-pointer text-xs text-slate-600 dark:text-slate-400">AutoSave</Label>
+          <Label htmlFor="auto-save-toggle" className="cursor-pointer text-xs text-muted-foreground">AutoSave</Label>
           <Switch
             id="auto-save-toggle"
             checked={autoSaveEnabled}

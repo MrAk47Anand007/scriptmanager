@@ -95,7 +95,9 @@ export function SidePanel() {
       <div
         className={cn(
           'h-full overflow-hidden bg-wb-sidepanel border-r border-wb-border',
-          !isDragging && 'transition-[width] duration-[130ms] ease-out'
+          // Arbitrary-property syntax avoids the Tailwind `duration-[130ms]`
+          // ambiguity warning while keeping the 130ms width collapse.
+          !isDragging && '[transition:width_130ms_ease-out]'
         )}
         style={{ width: collapsed ? 0 : width }}
         aria-hidden={collapsed}
@@ -115,7 +117,7 @@ export function SidePanel() {
         <div
           role="separator"
           aria-orientation="vertical"
-          className="h-full w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors"
+          className="wb-transition h-full w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-accent-brand/40 active:bg-accent-brand/60"
           onPointerDown={startDrag}
         />
       )}

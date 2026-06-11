@@ -3,6 +3,7 @@
 import { useEffect, type ReactNode } from 'react'
 import { TitleBar } from './TitleBar'
 import { StatusBar } from './StatusBar'
+import { Toaster } from '@/components/ui/toast'
 import { useAppDispatch } from '@/store/hooks'
 import { toggleDock } from '@/features/workbench/workbenchSlice'
 
@@ -41,6 +42,7 @@ export function WorkbenchShell({ activityBar, sidePanel, dock, children }: {
         </div>
       </div>
       <StatusBar />
+      <Toaster />
     </div>
   )
 }

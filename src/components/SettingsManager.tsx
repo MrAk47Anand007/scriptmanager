@@ -5,6 +5,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { fetchSettings, saveSettings } from '@/features/settings/settingsSlice';
 import { selectSettings, selectSettingsStatus, selectSettingsError } from '@/features/settings/selectors';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui/toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -104,6 +105,7 @@ export const SettingsManager = () => {
             setTimeout(() => setSaveMessage(''), 3000);
         } catch (err) {
             console.error(err);
+            toast.error('Failed to save settings');
         } finally {
             setIsSaving(false);
         }

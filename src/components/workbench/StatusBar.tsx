@@ -24,13 +24,13 @@ export function StatusBar() {
   const save = SAVE_LABELS[saveStatus] ?? SAVE_LABELS.idle
 
   return (
-    <footer className="flex h-6 shrink-0 items-center gap-3 border-t border-wb-border bg-wb-statusbar px-3 text-[11px] text-slate-600 dark:text-slate-300">
+    <footer className="flex h-6 shrink-0 items-center gap-3 border-t border-wb-border bg-wb-statusbar px-3 text-[11px] text-muted-foreground">
       <span className="rounded-sm bg-background/40 px-1.5 py-px font-medium">
         {isDesktopShell ? 'Desktop' : 'Web'}
       </span>
       <div className="ml-auto flex items-center gap-3">
         {save.label && <span className={save.className}>{save.label}</span>}
-        <span className={runStatus === 'running' ? 'text-running' : 'text-slate-500 dark:text-slate-400'}>
+        <span className={runStatus === 'running' ? 'text-running' : 'text-muted-foreground'}>
           {runStatus === 'running' ? 'Running…' : 'Ready'}
         </span>
       </div>

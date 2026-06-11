@@ -19,6 +19,7 @@ import {
     createProject, deleteProject,
 } from '@/features/ops/opsSlice';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui/toast';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
@@ -211,11 +212,12 @@ const ScriptsSidebarComponent = () => {
 
         setIsDeleting(true);
         try {
-            await dispatch(deleteScript({ id: scriptToDelete.id, deleteGist: deleteFromGist }));
+            await dispatch(deleteScript({ id: scriptToDelete.id, deleteGist: deleteFromGist })).unwrap();
             setIsDeleteDialogOpen(false);
             setScriptToDelete(null);
         } catch (error) {
             console.error('Failed to delete script:', error);
+            toast.error(`Failed to delete "${scriptToDelete.name}"`);
         } finally {
             setIsDeleting(false);
         }
