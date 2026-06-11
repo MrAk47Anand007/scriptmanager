@@ -58,6 +58,9 @@ import { MethodBadge } from './MethodBadge'
 import { VariableEditorDialog } from './VariableEditorDialog'
 import { CollectionRunDialog } from './CollectionRunDialog'
 import { parseVariableRows } from '@/lib/apiRequestMaterialization'
+import { buildCurl } from '@/lib/curlExport'
+import { copyDesktopClipboardText } from '@/lib/scriptsRuntimeClient'
+import { toast } from '@/components/ui/toast'
 import {
   buildNativeApiExport,
   buildPostmanCollectionExport,
@@ -156,6 +159,15 @@ const RequestItem = memo(function RequestItem({ request, active, collections, in
     await dispatch(saveApiRequest(draft))
   }
 
+  const handleCopyAsCurl = async () => {
+    try {
+      await copyDesktopClipboardText(buildCurl(parseDraft(request)))
+      toast.success('Copied as cURL')
+    } catch {
+      toast.error('Failed to copy to clipboard')
+    }
+  }
+
   const handleMoveToCollection = async (collectionId: string | null) => {
     await dispatch(saveApiRequest({ ...parseDraft(request), collectionId }))
   }
@@ -196,6 +208,9 @@ const RequestItem = memo(function RequestItem({ request, active, collections, in
         <DropdownMenuContent align="end" className="w-44" onClick={(e) => e.stopPropagation()}>
           <DropdownMenuItem className="text-xs" onClick={handleDuplicate}>
             Duplicate
+          </DropdownMenuItem>
+          <DropdownMenuItem className="text-xs" onClick={handleCopyAsCurl}>
+            Copy as cURL
           </DropdownMenuItem>
           {collections.length > 0 && (
             <>

@@ -21,12 +21,15 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { KeyValueTable } from './KeyValueTable'
 import { MethodBadge } from './MethodBadge'
 import { VariableInspector } from './VariableInspector'
-import { Loader2, Save, Play, Copy, Lock, FlaskConical, AlertTriangle, Upload, Cookie, Shield } from 'lucide-react'
+import { Loader2, Save, Play, Copy, ClipboardCopy, Lock, FlaskConical, AlertTriangle, Upload, Cookie, Shield } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import dynamic from 'next/dynamic'
 import { useTheme } from 'next-themes'
 import { materializeApiRequest, parseVariableRows, type ApiResponseMappingRow } from '@/lib/apiRequestMaterialization'
 import { analyzeCurlCommand } from '@/lib/curlImport'
+import { buildCurl } from '@/lib/curlExport'
+import { copyDesktopClipboardText } from '@/lib/scriptsRuntimeClient'
+import { toast } from '@/components/ui/toast'
 import { EditorSkeleton } from '@/components/ui/EditorSkeleton'
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react').then(m => m.Editor), {
@@ -307,6 +310,15 @@ export function ApiRequestEditor() {
     })
   }
 
+  const handleCopyAsCurl = async () => {
+    try {
+      await copyDesktopClipboardText(buildCurl(draft))
+      toast.success('Copied as cURL')
+    } catch {
+      toast.error('Failed to copy to clipboard')
+    }
+  }
+
   const editorTheme = resolvedTheme === 'dark' ? 'vs-dark' : 'light'
   const activeParamCount = draft.queryParams.filter(p => p.enabled && p.key).length
   const activeHeaderCount = draft.headers.filter(h => h.enabled && h.key).length
@@ -406,6 +418,15 @@ export function ApiRequestEditor() {
             className="h-7 w-7 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
           >
             <Copy className={cn('h-3.5 w-3.5', copied && 'text-green-500')} />
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleCopyAsCurl}
+            title="Copy request as cURL command"
+            className="h-7 px-2.5 text-xs gap-1 border-slate-200 dark:border-slate-700"
+          >
+            <ClipboardCopy className="h-3 w-3" />
+            Copy as cURL
           </Button>
           <Button
             variant="outline"
