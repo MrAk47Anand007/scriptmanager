@@ -255,7 +255,7 @@ export default function Home() {
       <div className="flex h-full flex-col">
         {isBootstrapping && (
           <div className="h-0.5 shrink-0 overflow-hidden bg-slate-200 dark:bg-slate-800">
-            <div className="h-full w-full animate-pulse bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500" />
+            <div className="h-full w-full animate-pulse bg-gradient-to-r from-blue-500 via-blue-300 to-blue-500" />
           </div>
         )}
         {activeTab !== 'settings' && <EditorTabs />}

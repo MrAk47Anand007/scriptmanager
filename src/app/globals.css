@@ -31,7 +31,7 @@
     --chart-5: 27 87% 67%;
     --font-ui: var(--font-ui-sans), "Segoe UI", sans-serif;
     --font-headline: var(--font-headline), "Iowan Old Style", "Palatino Linotype", serif;
-    --accent-brand: 217 91% 60%;
+    --accent-brand: 15 63% 55%;
     --wb-titlebar: 0 0% 98%;
     --wb-activitybar: 0 0% 96%;
     --wb-sidepanel: 0 0% 97.5%;
@@ -43,39 +43,41 @@
   }
 
   .dark {
-    --background: 240 6% 7%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
+    /* Claude Code-style warm charcoal palette (#1f1e1d / #262624 family) */
+    --background: 50 4% 11%;
+    --foreground: 50 6% 93%;
+    --card: 50 4% 13%;
+    --card-foreground: 50 6% 93%;
+    --popover: 50 4% 12%;
+    --popover-foreground: 50 6% 93%;
+    --primary: 50 6% 93%;
+    --primary-foreground: 50 4% 11%;
+    --secondary: 45 4% 17%;
+    --secondary-foreground: 50 6% 93%;
+    --muted: 45 4% 17%;
+    --muted-foreground: 45 4% 62%;
+    --accent: 45 4% 17%;
+    --accent-foreground: 50 6% 93%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 5% 16%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
+    --border: 45 5% 19%;
+    --input: 45 4% 18%;
+    --ring: 15 63% 60%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
-    --accent-brand: 217 91% 60%;
-    --wb-titlebar: 240 6% 9%;
-    --wb-activitybar: 240 6% 8%;
-    --wb-sidepanel: 240 6% 8.5%;
-    --wb-statusbar: 217 91% 22%;
-    --wb-border: 240 5% 14%;
-    --success: 142 71% 45%;
+    /* Claude terracotta accent (#d97757) */
+    --accent-brand: 15 63% 60%;
+    --wb-titlebar: 50 5% 8.5%;
+    --wb-activitybar: 50 5% 8%;
+    --wb-sidepanel: 50 4% 9.5%;
+    --wb-statusbar: 50 5% 8.5%;
+    --wb-border: 45 5% 16%;
+    --success: 142 55% 45%;
     --warning: 38 92% 50%;
-    --running: 217 91% 60%;
+    --running: 15 63% 60%;
   }
 }
 

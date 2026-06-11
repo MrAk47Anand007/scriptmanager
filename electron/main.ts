@@ -105,7 +105,7 @@ function createSplashWindow() {
     maximizable: false,
     fullscreenable: false,
     show: true,
-    backgroundColor: '#030014',
+    backgroundColor: '#1d1c1b',
     alwaysOnTop: true,
     webPreferences: {
       sandbox: false,
@@ -121,14 +121,14 @@ function createSplashWindow() {
       <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
       <style>
         :root {
-          --bg: #030014;
+          --bg: #1d1c1b;
           --glass: rgba(255, 255, 255, 0.03);
           --glass-border: rgba(255, 255, 255, 0.08); /* slight border */
-          --accent-1: #8b5cf6; /* purple */
-          --accent-2: #3b82f6; /* blue */
-          --accent-3: #ec4899; /* pink */
-          --text: #f8fafc;
-          --text-muted: #94a3b8;
+          --accent-1: #d97757; /* terracotta */
+          --accent-2: #e69373; /* light terracotta */
+          --accent-3: #c45f3f; /* deep terracotta */
+          --text: #f5f5f4;
+          --text-muted: #a8a29e;
         }
 
         * { box-sizing: border-box; }
@@ -574,14 +574,14 @@ async function createWindow() {
     minHeight: 600,
     title: 'ScriptManager',
     show: false,
-    backgroundColor: '#0a0a0c',
+    backgroundColor: '#1d1c1b',
     autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     titleBarOverlay: process.platform === 'darwin'
       ? false
       : {
-          color: '#0a0a0c',
-          symbolColor: '#ffffff',
+          color: '#161514',
+          symbolColor: '#e8e6e3',
           height: 44,
         },
     webPreferences: {
