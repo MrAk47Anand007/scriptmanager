@@ -46,6 +46,7 @@ import { ActivityBar } from '@/components/workbench/ActivityBar'
 import { SidePanel } from '@/components/workbench/SidePanel'
 import { selectActiveActivity, selectTabs, selectActiveTabId } from '@/features/workbench/selectors'
 import { EditorTabs } from '@/components/workbench/EditorTabs'
+import { BottomDock } from '@/components/workbench/BottomDock'
 
 const ScriptsManager = dynamic(
   () => import('@/components/ScriptsManager').then((mod) => mod.ScriptsManager),
@@ -237,7 +238,7 @@ export default function Home() {
     <WorkbenchShell
       activityBar={<ActivityBar />}
       sidePanel={<SidePanel />}
-      dock={null}
+      dock={<BottomDock />}
     >
       <div className="flex h-full flex-col">
         {isBootstrapping && (

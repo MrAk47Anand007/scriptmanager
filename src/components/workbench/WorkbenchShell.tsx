@@ -1,8 +1,10 @@
 'use client'
 
-import { type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { TitleBar } from './TitleBar'
 import { StatusBar } from './StatusBar'
+import { useAppDispatch } from '@/store/hooks'
+import { toggleDock } from '@/features/workbench/workbenchSlice'
 
 export function WorkbenchShell({ activityBar, sidePanel, dock, children }: {
   activityBar: ReactNode
@@ -10,6 +12,21 @@ export function WorkbenchShell({ activityBar, sidePanel, dock, children }: {
   dock: ReactNode | null
   children: ReactNode
 }) {
+  const dispatch = useAppDispatch()
+
+  // Ctrl+` toggles the bottom dock (skip if something else already handled it)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return
+      if (e.ctrlKey && e.key === '`') {
+        e.preventDefault()
+        dispatch(toggleDock())
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [dispatch])
+
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <TitleBar />
