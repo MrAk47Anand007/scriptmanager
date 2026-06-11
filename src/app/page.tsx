@@ -44,7 +44,8 @@ import { fetchApiCollections, fetchApiRequests } from '@/features/api/apiSlice'
 import { WorkbenchShell } from '@/components/workbench/WorkbenchShell'
 import { ActivityBar } from '@/components/workbench/ActivityBar'
 import { SidePanel } from '@/components/workbench/SidePanel'
-import { selectActiveActivity } from '@/features/workbench/selectors'
+import { selectActiveActivity, selectTabs, selectActiveTabId } from '@/features/workbench/selectors'
+import { EditorTabs } from '@/components/workbench/EditorTabs'
 
 const ScriptsManager = dynamic(
   () => import('@/components/ScriptsManager').then((mod) => mod.ScriptsManager),
@@ -101,9 +102,14 @@ export default function Home() {
   const dispatch = useAppDispatch()
   const isOpsModeActive = useAppSelector(selectIsModeActive)
   const activeActivity = useAppSelector(selectActiveActivity)
-  // Page panels remain scripts/api/settings; ops panels live inside ScriptsManager today,
-  // so the 'ops' activity maps to the scripts panel.
-  const activeTab: TabId = activeActivity === 'ops' ? 'scripts' : activeActivity
+  const tabs = useAppSelector(selectTabs)
+  const activeTabId = useAppSelector(selectActiveTabId)
+  // The visible editor follows the ACTIVE TAB's kind — the activity only drives the side
+  // panel. Settings activity takes the full area; no tabs → scripts empty state.
+  const activeEditorKind = tabs.find((t) => t.id === activeTabId)?.kind ?? 'script'
+  const activeTab: TabId = activeActivity === 'settings'
+    ? 'settings'
+    : activeEditorKind === 'api' ? 'api' : 'scripts'
   const [isBootstrapping, setIsBootstrapping] = useState(true)
   const [mountedTabs, setMountedTabs] = useState<Record<TabId, boolean>>({
     scripts: true,
@@ -171,6 +177,13 @@ export default function Home() {
     setMountedTabs((current) => current[nextActiveTab] ? current : { ...current, [nextActiveTab]: true })
   }, [activeTab])
 
+  // Mount the API workspace as soon as the api activity is selected so its
+  // sidebar data loads even before an api tab is opened.
+  useEffect(() => {
+    if (activeActivity !== 'api') return
+    setMountedTabs((current) => current.api ? current : { ...current, api: true })
+  }, [activeActivity])
+
   useEffect(() => {
     if (!mountedTabs.api) {
       return
@@ -232,6 +245,7 @@ export default function Home() {
             <div className="h-full w-full animate-pulse bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500" />
           </div>
         )}
+        {activeTab !== 'settings' && <EditorTabs />}
         <main className="relative flex-1 overflow-hidden">
           {mountedTabs.scripts && (
             <div className={scriptsPanelClassName}>

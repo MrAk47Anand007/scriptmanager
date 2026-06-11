@@ -204,7 +204,8 @@ export function ApiManager({ hideSidebar = false }: ApiManagerProps = {}) {
         <ResizablePanel defaultSize={hideSidebar ? 100 : 75} minSize={40}>
           {activeRequestId || activeRequest ? (
             <div className="flex h-full flex-col overflow-hidden">
-              {openTabs.length > 0 && (
+              {/* Internal request tab strip — superseded by workbench EditorTabs in shell mode */}
+              {!hideSidebar && openTabs.length > 0 && (
                 <div className="flex items-center gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/30 px-2 py-1.5 shrink-0">
                   {openTabs.map((tab) => {
                     const active = tab.requestId ? tab.requestId === activeRequestId : !activeRequestId && Boolean(activeRequest)
