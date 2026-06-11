@@ -645,6 +645,24 @@ ipcMain.handle('scriptmanager:select-folder', async () => {
   return result.filePaths[0]
 })
 
+// Window-control overlay colors can't be set via CSS — the renderer reports
+// theme changes so the native overlay matches light/dark.
+ipcMain.handle('scriptmanager:set-titlebar-theme', (_event, theme: 'light' | 'dark') => {
+  if (process.platform === 'darwin' || !mainWindow || mainWindow.isDestroyed()) {
+    return false
+  }
+  try {
+    mainWindow.setTitleBarOverlay({
+      color: theme === 'dark' ? '#161514' : '#efede7',
+      symbolColor: theme === 'dark' ? '#e8e6e3' : '#3a3835',
+      height: 44,
+    })
+    return true
+  } catch {
+    return false
+  }
+})
+
 ipcMain.handle('scriptmanager:reveal-path', async (_event, targetPath: string) => {
   if (!targetPath) {
     return false

@@ -4,25 +4,26 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
+    /* Warm paper light theme matching the stone/terracotta dark palette */
+    --background: 50 23% 97%;
+    --foreground: 45 8% 13%;
+    --card: 50 23% 98%;
+    --card-foreground: 45 8% 13%;
+    --popover: 50 23% 98%;
+    --popover-foreground: 45 8% 13%;
+    --primary: 45 8% 15%;
+    --primary-foreground: 50 23% 97%;
+    --secondary: 48 12% 92%;
+    --secondary-foreground: 45 8% 15%;
+    --muted: 48 12% 92%;
+    --muted-foreground: 45 5% 42%;
+    --accent: 48 12% 92%;
+    --accent-foreground: 45 8% 15%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
+    --border: 45 10% 86%;
+    --input: 45 10% 86%;
+    --ring: 15 63% 55%;
     --radius: 0.5rem;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
@@ -32,14 +33,14 @@
     --font-ui: var(--font-ui-sans), "Segoe UI", sans-serif;
     --font-headline: var(--font-headline), "Iowan Old Style", "Palatino Linotype", serif;
     --accent-brand: 15 63% 55%;
-    --wb-titlebar: 0 0% 98%;
-    --wb-activitybar: 0 0% 96%;
-    --wb-sidepanel: 0 0% 97.5%;
-    --wb-statusbar: 0 0% 96%;
-    --wb-border: 0 0% 89%;
-    --success: 142 71% 45%;
-    --warning: 38 92% 50%;
-    --running: 217 91% 60%;
+    --wb-titlebar: 48 18% 94%;
+    --wb-activitybar: 48 14% 91%;
+    --wb-sidepanel: 49 18% 95%;
+    --wb-statusbar: 48 18% 94%;
+    --wb-border: 45 10% 85%;
+    --success: 142 60% 38%;
+    --warning: 35 90% 44%;
+    --running: 15 63% 50%;
   }
 
   .dark {

@@ -22,6 +22,7 @@ declare global {
     __ELECTRON__?: boolean
     scriptManagerDesktop?: {
       selectFolder: () => Promise<string | null>
+      setTitleBarTheme?: (theme: 'light' | 'dark') => Promise<boolean>
       revealPath: (targetPath: string) => Promise<boolean>
       copyText: (value: string) => Promise<boolean>
       readClipboardText: () => Promise<string>

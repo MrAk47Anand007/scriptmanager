@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, type ReactNode } from 'react'
+import { useTheme } from 'next-themes'
 import { TitleBar } from './TitleBar'
 import { StatusBar } from './StatusBar'
 import { Toaster } from '@/components/ui/toast'
@@ -14,6 +15,14 @@ export function WorkbenchShell({ activityBar, sidePanel, dock, children }: {
   children: ReactNode
 }) {
   const dispatch = useAppDispatch()
+  const { resolvedTheme } = useTheme()
+
+  // Keep the native Windows window-control overlay in sync with the app theme
+  useEffect(() => {
+    if (resolvedTheme === 'light' || resolvedTheme === 'dark') {
+      void window.scriptManagerDesktop?.setTitleBarTheme?.(resolvedTheme)
+    }
+  }, [resolvedTheme])
 
   // Ctrl+` toggles the bottom dock (skip if something else already handled it)
   useEffect(() => {
