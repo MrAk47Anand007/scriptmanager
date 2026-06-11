@@ -31,10 +31,19 @@
     --chart-5: 27 87% 67%;
     --font-ui: var(--font-ui-sans), "Segoe UI", sans-serif;
     --font-headline: var(--font-headline), "Iowan Old Style", "Palatino Linotype", serif;
+    --accent-brand: 217 91% 60%;
+    --wb-titlebar: 0 0% 98%;
+    --wb-activitybar: 0 0% 96%;
+    --wb-sidepanel: 0 0% 97.5%;
+    --wb-statusbar: 0 0% 96%;
+    --wb-border: 0 0% 89%;
+    --success: 142 71% 45%;
+    --warning: 38 92% 50%;
+    --running: 217 91% 60%;
   }
 
   .dark {
-    --background: 0 0% 3.9%;
+    --background: 240 6% 7%;
     --foreground: 0 0% 98%;
     --card: 0 0% 3.9%;
     --card-foreground: 0 0% 98%;
@@ -50,7 +59,7 @@
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
+    --border: 240 5% 16%;
     --input: 0 0% 14.9%;
     --ring: 0 0% 83.1%;
     --chart-1: 220 70% 50%;
@@ -58,6 +67,15 @@
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
+    --accent-brand: 217 91% 60%;
+    --wb-titlebar: 240 6% 9%;
+    --wb-activitybar: 240 6% 8%;
+    --wb-sidepanel: 240 6% 8.5%;
+    --wb-statusbar: 217 91% 22%;
+    --wb-border: 240 5% 14%;
+    --success: 142 71% 45%;
+    --warning: 38 92% 50%;
+    --running: 217 91% 60%;
   }
 }
 
@@ -161,4 +179,9 @@
   .desktop-no-drag * {
     -webkit-app-region: no-drag;
   }
+}
+
+@layer utilities {
+  .font-logs { font-variant-numeric: tabular-nums; font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; }
+  .wb-transition { transition: background-color 130ms ease-out, color 130ms ease-out, opacity 130ms ease-out; }
 }

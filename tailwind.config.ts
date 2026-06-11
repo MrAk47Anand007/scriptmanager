@@ -49,6 +49,17 @@ const config: Config = {
   			border: 'hsl(var(--border))',
   			input: 'hsl(var(--input))',
   			ring: 'hsl(var(--ring))',
+  			'accent-brand': 'hsl(var(--accent-brand))',
+  			success: 'hsl(var(--success))',
+  			warning: 'hsl(var(--warning))',
+  			running: 'hsl(var(--running))',
+  			wb: {
+  				titlebar: 'hsl(var(--wb-titlebar))',
+  				activitybar: 'hsl(var(--wb-activitybar))',
+  				sidepanel: 'hsl(var(--wb-sidepanel))',
+  				statusbar: 'hsl(var(--wb-statusbar))',
+  				border: 'hsl(var(--wb-border))'
+  			},
   			chart: {
   				'1': 'hsl(var(--chart-1))',
   				'2': 'hsl(var(--chart-2))',
