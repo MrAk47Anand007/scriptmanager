@@ -3,9 +3,12 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('__ELECTRON__', true)
 contextBridge.exposeInMainWorld('scriptManagerDesktop', {
   selectFolder: () => ipcRenderer.invoke('scriptmanager:select-folder') as Promise<string | null>,
+  setTitleBarTheme: (theme: 'light' | 'dark') => ipcRenderer.invoke('scriptmanager:set-titlebar-theme', theme) as Promise<boolean>,
   revealPath: (targetPath: string) => ipcRenderer.invoke('scriptmanager:reveal-path', targetPath) as Promise<boolean>,
   copyText: (value: string) => ipcRenderer.invoke('scriptmanager:copy-text', value) as Promise<boolean>,
   readClipboardText: () => ipcRenderer.invoke('scriptmanager:read-text') as Promise<string>,
+  setNotificationsEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke('scriptmanager:set-notifications-enabled', enabled) as Promise<boolean>,
   runtime: {
     listScripts: () => ipcRenderer.invoke('scriptmanager:runtime:list-scripts') as Promise<unknown[]>,
     listCollections: () => ipcRenderer.invoke('scriptmanager:runtime:list-collections') as Promise<unknown[]>,

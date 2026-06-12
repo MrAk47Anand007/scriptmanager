@@ -1,10 +1,17 @@
-import { app, BrowserWindow, session, ipcMain, dialog, OpenDialogOptions, shell, clipboard, Menu, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, session, ipcMain, dialog, OpenDialogOptions, shell, clipboard, Menu, Tray, nativeImage, type MenuItemConstructorOptions } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
 import path from 'path'
 import http from 'http'
 import crypto from 'crypto'
 import fs from 'fs'
-import { attachDesktopRuntime, initDesktopRuntimeIpc } from './desktopRuntime'
+import {
+  attachDesktopRuntime,
+  initDesktopRuntimeIpc,
+  getLastRunScriptId,
+  runScriptForWindow,
+  setDesktopNotificationsEnabled,
+  setLastRunScriptListener,
+} from './desktopRuntime'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
 // In production (packaged), Electron spawns the standalone server itself.
@@ -19,6 +26,11 @@ const DESKTOP_SECRET = process.env.DESKTOP_AUTH_SECRET ?? crypto.randomBytes(32)
 let serverProcess: ChildProcess | null = null
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+
+// 16x16 terracotta rounded square, embedded so the tray works without bundled assets.
+const TRAY_ICON_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMklEQVR4nGNgQAM3y8P/48Po6onWiNcgUjVjGEKRAeRqhhsyasCwMGDgUyJVMhMl2RkAMMtRX3YNtqYAAAAASUVORK5CYII='
 
 type WindowState = {
   width: number
@@ -105,7 +117,7 @@ function createSplashWindow() {
     maximizable: false,
     fullscreenable: false,
     show: true,
-    backgroundColor: '#030014',
+    backgroundColor: '#1d1c1b',
     alwaysOnTop: true,
     webPreferences: {
       sandbox: false,
@@ -121,14 +133,14 @@ function createSplashWindow() {
       <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
       <style>
         :root {
-          --bg: #030014;
+          --bg: #1d1c1b;
           --glass: rgba(255, 255, 255, 0.03);
           --glass-border: rgba(255, 255, 255, 0.08); /* slight border */
-          --accent-1: #8b5cf6; /* purple */
-          --accent-2: #3b82f6; /* blue */
-          --accent-3: #ec4899; /* pink */
-          --text: #f8fafc;
-          --text-muted: #94a3b8;
+          --accent-1: #d97757; /* terracotta */
+          --accent-2: #e69373; /* light terracotta */
+          --accent-3: #c45f3f; /* deep terracotta */
+          --text: #f5f5f4;
+          --text-muted: #a8a29e;
         }
 
         * { box-sizing: border-box; }
@@ -574,14 +586,14 @@ async function createWindow() {
     minHeight: 600,
     title: 'ScriptManager',
     show: false,
-    backgroundColor: '#0a0a0c',
+    backgroundColor: '#1d1c1b',
     autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     titleBarOverlay: process.platform === 'darwin'
       ? false
       : {
-          color: '#0a0a0c',
-          symbolColor: '#ffffff',
+          color: '#161514',
+          symbolColor: '#e8e6e3',
           height: 44,
         },
     webPreferences: {
@@ -624,11 +636,70 @@ async function createWindow() {
   })
 }
 
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function buildTrayMenu() {
+  const lastRunScriptId = getLastRunScriptId()
+  return Menu.buildFromTemplate([
+    {
+      label: 'Show ScriptManager',
+      click: showMainWindow,
+    },
+    { type: 'separator' },
+    {
+      label: 'Run Last Script',
+      enabled: lastRunScriptId !== null,
+      click: () => {
+        const scriptId = getLastRunScriptId()
+        if (!scriptId || !mainWindow || mainWindow.isDestroyed()) {
+          return
+        }
+        void runScriptForWindow(mainWindow, scriptId).catch((error) => {
+          console.error('[Electron] Tray run-last-script failed:', error)
+        })
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => app.quit(),
+    },
+  ])
+}
+
+function createTray() {
+  if (tray) {
+    return
+  }
+  const icon = nativeImage.createFromDataURL(TRAY_ICON_DATA_URL)
+  tray = new Tray(icon)
+  tray.setToolTip('ScriptManager')
+  tray.setContextMenu(buildTrayMenu())
+  tray.on('click', showMainWindow)
+  setLastRunScriptListener(() => {
+    tray?.setContextMenu(buildTrayMenu())
+  })
+}
+
 app.whenReady().then(() => {
   ensureDesktopProcessEnv()
   initDesktopRuntimeIpc()
   createApplicationMenu()
-  return createWindow()
+  return createWindow().then(() => createTray())
+})
+
+ipcMain.handle('scriptmanager:set-notifications-enabled', (_event, enabled: boolean) => {
+  setDesktopNotificationsEnabled(enabled !== false)
+  return true
 })
 
 ipcMain.handle('scriptmanager:select-folder', async () => {
@@ -643,6 +714,24 @@ ipcMain.handle('scriptmanager:select-folder', async () => {
   }
 
   return result.filePaths[0]
+})
+
+// Window-control overlay colors can't be set via CSS — the renderer reports
+// theme changes so the native overlay matches light/dark.
+ipcMain.handle('scriptmanager:set-titlebar-theme', (_event, theme: 'light' | 'dark') => {
+  if (process.platform === 'darwin' || !mainWindow || mainWindow.isDestroyed()) {
+    return false
+  }
+  try {
+    mainWindow.setTitleBarOverlay({
+      color: theme === 'dark' ? '#161514' : '#efede7',
+      symbolColor: theme === 'dark' ? '#e8e6e3' : '#3a3835',
+      height: 44,
+    })
+    return true
+  } catch {
+    return false
+  }
 })
 
 ipcMain.handle('scriptmanager:reveal-path', async (_event, targetPath: string) => {
@@ -679,4 +768,6 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   serverProcess?.kill()
+  tray?.destroy()
+  tray = null
 })

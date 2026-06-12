@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, Notification, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { PrismaClient } from '@prisma/client'
 import * as pty from 'node-pty'
 import { spawn } from 'child_process'
@@ -1430,6 +1430,9 @@ async function saveLocalScript(payload: SaveScriptPayload): Promise<ScriptDto> {
   }
 
   const filePath = resolveScriptPath(script)
+  // The script's folder may not exist yet (fresh checkout, moved workspace,
+  // or a DB row pointing at a deleted directory) — recreate it before writing.
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
   fs.writeFileSync(filePath, payload.content, 'utf8')
   await createVersionSnapshot(script.id, payload.content)
 
@@ -1501,6 +1504,7 @@ async function duplicateLocalScript(scriptId: string): Promise<ScriptDto> {
     throw new Error('A file with the duplicate name already exists')
   }
 
+  fs.mkdirSync(path.dirname(newPath), { recursive: true })
   fs.writeFileSync(newPath, content, 'utf8')
   const isManagedCollection = await isManagedCollectionWorkspace(original.collection?.folderPath)
 
@@ -1694,6 +1698,65 @@ async function openLocalFolder(payload: OpenFolderPayload) {
   }
 }
 
+// --- Native build notifications + last-run tracking (used by the tray in main.ts) ---
+
+let notificationsEnabled = true
+let lastRunScriptId: string | null = null
+let lastRunScriptListener: ((scriptId: string) => void) | null = null
+
+export function setDesktopNotificationsEnabled(enabled: boolean) {
+  notificationsEnabled = enabled
+}
+
+export function getLastRunScriptId(): string | null {
+  return lastRunScriptId
+}
+
+export function setLastRunScriptListener(listener: ((scriptId: string) => void) | null) {
+  lastRunScriptListener = listener
+}
+
+export function runScriptForWindow(window: BrowserWindow, scriptId: string) {
+  return startLocalRun(window, { scriptId })
+}
+
+function recordLastRunScript(scriptId: string) {
+  lastRunScriptId = scriptId
+  lastRunScriptListener?.(scriptId)
+}
+
+function notifyBuildResult(
+  window: BrowserWindow,
+  options: { success: boolean; scriptName: string; durationMs?: number; detail?: string },
+) {
+  if (!notificationsEnabled || !Notification.isSupported()) {
+    return
+  }
+  if (window.isDestroyed() || window.isFocused()) {
+    return
+  }
+
+  const parts = [options.scriptName]
+  if (typeof options.durationMs === 'number') {
+    parts.push(`${(options.durationMs / 1000).toFixed(1)}s`)
+  }
+  if (options.detail) {
+    parts.push(options.detail)
+  }
+
+  const notification = new Notification({
+    title: options.success ? 'Script succeeded' : 'Script failed',
+    body: parts.join(' · '),
+  })
+  notification.on('click', () => {
+    if (window.isDestroyed()) return
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+  })
+  notification.show()
+}
+
 function resolveInterpreter(language: string, interpreter: string | null | undefined, scriptPath: string): [string, string[]] {
   switch (language) {
     case 'python':
@@ -1729,6 +1792,8 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
     throw new Error('Script not found')
   }
 
+  recordLastRunScript(script.id)
+  const runStartedAt = Date.now()
   const buildId = payload.buildId?.trim() || crypto.randomUUID()
   const logFile = getBuildLogPath(script.filename, buildId)
   const scriptPath = resolveScriptPath(script)
@@ -1761,6 +1826,7 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
     })
     sendBuildEvent(window.webContents, { type: 'error', buildId, message })
     sendBuildEvent(window.webContents, { type: 'done', buildId, status: 'failure', exitCode: 1 })
+    notifyBuildResult(window, { success: false, scriptName: script.name, detail: 'script file not found' })
     return { buildId, status: 'failed' as const }
   }
 
@@ -1831,6 +1897,12 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
     }).catch(() => undefined)
     sendBuildEvent(window.webContents, { type: 'error', buildId, message: error.message })
     sendBuildEvent(window.webContents, { type: 'done', buildId, status: 'failure', exitCode: -1 })
+    notifyBuildResult(window, {
+      success: false,
+      scriptName: script.name,
+      durationMs: Date.now() - runStartedAt,
+      detail: error.message,
+    })
   })
 
   child.on('close', async (code) => {
@@ -1852,6 +1924,12 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
       data: { lastRun: new Date() },
     }).catch(() => undefined)
     sendBuildEvent(window.webContents, { type: 'done', buildId, status, exitCode })
+    notifyBuildResult(window, {
+      success: status === 'success',
+      scriptName: script.name,
+      durationMs: Date.now() - runStartedAt,
+      detail: status === 'timeout' ? 'timed out' : undefined,
+    })
   })
 
   return { buildId, status: 'started' as const }

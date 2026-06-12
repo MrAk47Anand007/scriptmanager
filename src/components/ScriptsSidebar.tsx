@@ -14,17 +14,18 @@ import {
     selectTemplates, selectAllTags, selectScriptsStatus,
 } from '@/features/scripts/selectors';
 import { selectOpsProjects, selectIsModeActive } from '@/features/ops/selectors';
+import { setPaletteOpen } from '@/features/workbench/workbenchSlice';
 import { selectSettings } from '@/features/settings/selectors';
 import {
     createProject, deleteProject,
 } from '@/features/ops/opsSlice';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui/toast';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
     FileCode, Plus, Folder, Search, LayoutTemplate, Loader2, Layers, FolderOpen,
 } from 'lucide-react';
-import { QuickSwitcher } from './QuickSwitcher';
 import { CreateScriptDialog } from './sidebar/CreateScriptDialog';
 import { CreateCollectionDialog } from './sidebar/CreateCollectionDialog';
 import { OpenFolderDialog, type OpenFolderSubmitValues } from './sidebar/OpenFolderDialog';
@@ -108,7 +109,6 @@ const ScriptsSidebarComponent = () => {
     // Search + filter state
     const [searchQuery, setSearchQuery] = useState('');
     const deferredSearchQuery = useDeferredValue(searchQuery);
-    const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
     const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
 
     // Template picker state
@@ -161,19 +161,6 @@ const ScriptsSidebarComponent = () => {
         }
     }, [dispatch]);
 
-    // Ctrl+P / Cmd+P global shortcut
-    const handleKeyDown = useCallback((e: KeyboardEvent) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
-            e.preventDefault();
-            setQuickSwitcherOpen(true);
-        }
-    }, []);
-
-    useEffect(() => {
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [handleKeyDown]);
-
     useEffect(() => {
         setHasDesktopFolderPicker(Boolean(window.scriptManagerDesktop?.selectFolder));
 
@@ -211,11 +198,12 @@ const ScriptsSidebarComponent = () => {
 
         setIsDeleting(true);
         try {
-            await dispatch(deleteScript({ id: scriptToDelete.id, deleteGist: deleteFromGist }));
+            await dispatch(deleteScript({ id: scriptToDelete.id, deleteGist: deleteFromGist })).unwrap();
             setIsDeleteDialogOpen(false);
             setScriptToDelete(null);
         } catch (error) {
             console.error('Failed to delete script:', error);
+            toast.error(`Failed to delete "${scriptToDelete.name}"`);
         } finally {
             setIsDeleting(false);
         }
@@ -225,6 +213,13 @@ const ScriptsSidebarComponent = () => {
         setParentCollectionId(collectionId || null);
         setIsCreateScriptOpen(true);
     }, []);
+
+    // Command palette "New Script" — mirrors the 'scriptmanager:open-terminal' event pattern
+    useEffect(() => {
+        const handleNewScript = () => openCreateScriptDialog();
+        window.addEventListener('scriptmanager:new-script', handleNewScript);
+        return () => window.removeEventListener('scriptmanager:new-script', handleNewScript);
+    }, [openCreateScriptDialog]);
 
     const openCreateCollectionDialog = useCallback((projectId?: string | null, parentId?: string | null) => {
         setParentProjectId(projectId ?? null);
@@ -689,7 +684,6 @@ const ScriptsSidebarComponent = () => {
 
     return (
         <>
-            <QuickSwitcher open={quickSwitcherOpen} onClose={() => setQuickSwitcherOpen(false)} />
             <TemplatePickerDialog
                 open={isTemplatePickerOpen}
                 templates={templates}
@@ -705,7 +699,7 @@ const ScriptsSidebarComponent = () => {
                                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={openFolderDialog} title="Open local folder">
                                     <FolderOpen className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setQuickSwitcherOpen(true)}>
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => dispatch(setPaletteOpen(true))} title="Command palette (Ctrl+P)">
                                     <Search className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                                 </Button>
                                 <DropdownMenu>

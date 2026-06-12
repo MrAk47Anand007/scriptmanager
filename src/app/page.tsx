@@ -41,11 +41,13 @@ async function loadBootstrap(dispatch: ReturnType<typeof import('@/store/hooks')
 }
 import { setOpsMode, fetchProjects, fetchServerProfiles } from '@/features/ops/opsSlice'
 import { fetchApiCollections, fetchApiRequests } from '@/features/api/apiSlice'
-import { Settings, Code2, Globe, SquareTerminal } from 'lucide-react'
-import { ModeToggle } from '@/components/ModeToggle'
-import { OpsModeToggle } from '@/components/OpsModeToggle'
-import { Switch } from '@/components/ui/switch'
-import { Label } from '@/components/ui/label'
+import { WorkbenchShell } from '@/components/workbench/WorkbenchShell'
+import { ActivityBar } from '@/components/workbench/ActivityBar'
+import { SidePanel } from '@/components/workbench/SidePanel'
+import { selectActiveActivity, selectTabs, selectActiveTabId } from '@/features/workbench/selectors'
+import { EditorTabs } from '@/components/workbench/EditorTabs'
+import { useTabSync } from '@/components/workbench/tabSync'
+import { BottomDock } from '@/components/workbench/BottomDock'
 
 const ScriptsManager = dynamic(
   () => import('@/components/ScriptsManager').then((mod) => mod.ScriptsManager),
@@ -61,10 +63,24 @@ const ApiManager = dynamic(
   }
 )
 
+const SchedulesView = dynamic(
+  () => import('@/components/SchedulesView').then((mod) => mod.SchedulesView),
+  {
+    loading: () => <SectionSkeleton label="Loading schedules" />,
+  }
+)
+
 const SettingsManager = dynamic(
   () => import('@/components/SettingsManager').then((mod) => mod.SettingsManager),
   {
     loading: () => <SectionSkeleton label="Loading settings" />,
+  }
+)
+
+const OpsView = dynamic(
+  () => import('@/components/OpsView').then((mod) => mod.OpsView),
+  {
+    loading: () => <SectionSkeleton label="Loading ops console" />,
   }
 )
 
@@ -96,22 +112,40 @@ function scheduleIdleWork(callback: () => void, delay = 180) {
   return () => globalThis.clearTimeout(timeoutId)
 }
 
+type TabId = 'scripts' | 'settings' | 'api' | 'schedules' | 'ops'
+
 export default function Home() {
   const dispatch = useAppDispatch()
-  const autoSaveEnabled = useAppSelector((state) => state.scripts.autoSaveEnabled)
   const isOpsModeActive = useAppSelector(selectIsModeActive)
-  const [isDesktopShell, setIsDesktopShell] = useState(false)
-  const [activeTab, setActiveTab] = useState<'scripts' | 'settings' | 'api'>('scripts')
+  const activeActivity = useAppSelector(selectActiveActivity)
+  const tabs = useAppSelector(selectTabs)
+  const activeTabId = useAppSelector(selectActiveTabId)
+  // Tab ↔ feature-slice sync must run here (always mounted) — EditorTabs
+  // unmounts while the settings activity is active.
+  useTabSync()
+  // The visible editor follows the ACTIVE TAB's kind (unsaved api drafts get a
+  // pseudo-tab via useTabSync, so they're covered); with no tabs, the activity
+  // decides (api activity shows the api empty state).
+  const activeEditorKind =
+    tabs.find((t) => t.id === activeTabId)?.kind ?? (activeActivity === 'api' ? 'api' : 'script')
+  const activeTab: TabId = activeActivity === 'settings'
+    ? 'settings'
+    : activeActivity === 'schedules'
+      ? 'schedules'
+      : activeActivity === 'ops'
+        ? 'ops'
+        : activeEditorKind === 'api' ? 'api' : 'scripts'
   const [isBootstrapping, setIsBootstrapping] = useState(true)
-  const [mountedTabs, setMountedTabs] = useState<Record<'scripts' | 'settings' | 'api', boolean>>({
+  const [mountedTabs, setMountedTabs] = useState<Record<TabId, boolean>>({
     scripts: true,
     settings: false,
     api: false,
+    schedules: false,
+    ops: false,
   })
 
   useEffect(() => {
     const desktop = typeof window !== 'undefined' && Boolean(window.__ELECTRON__)
-    setIsDesktopShell(desktop)
     if (typeof document !== 'undefined') {
       if (desktop) {
         document.body.dataset.electron = 'true'
@@ -170,6 +204,13 @@ export default function Home() {
     setMountedTabs((current) => current[nextActiveTab] ? current : { ...current, [nextActiveTab]: true })
   }, [activeTab])
 
+  // Mount the API workspace as soon as the api activity is selected so its
+  // sidebar data loads even before an api tab is opened.
+  useEffect(() => {
+    if (activeActivity !== 'api') return
+    setMountedTabs((current) => current.api ? current : { ...current, api: true })
+  }, [activeActivity])
+
   useEffect(() => {
     if (!mountedTabs.api) {
       return
@@ -200,11 +241,6 @@ export default function Home() {
     return cancelOpsBoot
   }, [activeTab, dispatch, isOpsModeActive])
 
-  const toggleAutoSave = (enabled: boolean) => {
-    dispatch(setAutoSaveEnabled(enabled))
-    localStorage.setItem('scriptManager_autoSave', String(enabled))
-  }
-
   const scriptsPanelClassName = useMemo(
     () => activeTab === 'scripts'
       ? 'absolute inset-0 opacity-100 z-10'
@@ -217,6 +253,18 @@ export default function Home() {
       : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
     [activeTab]
   )
+  const schedulesPanelClassName = useMemo(
+    () => activeTab === 'schedules'
+      ? 'absolute inset-0 opacity-100 z-10'
+      : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
+    [activeTab]
+  )
+  const opsPanelClassName = useMemo(
+    () => activeTab === 'ops'
+      ? 'absolute inset-0 opacity-100 z-10'
+      : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
+    [activeTab]
+  )
   const settingsPanelClassName = useMemo(
     () => activeTab === 'settings'
       ? 'absolute inset-0 overflow-y-auto bg-white dark:bg-slate-950 opacity-100 z-10'
@@ -225,94 +273,46 @@ export default function Home() {
   )
 
   return (
-    <div className="flex flex-col h-screen">
-      {/* Top nav */}
-      <header className={`desktop-titlebar border-b bg-white dark:bg-slate-950/95 dark:border-slate-800 px-4 ${isDesktopShell ? 'h-11 pr-40' : 'h-10'} flex items-center gap-4 shrink-0`}>
-        <div className="desktop-no-drag flex items-center gap-2 mr-4 min-w-0">
-          <Code2 className="h-5 w-5 text-blue-600 dark:text-blue-500" />
-          <span className="font-semibold text-sm text-slate-800 dark:text-slate-200 truncate">ScriptManager</span>
-        </div>
-        <nav className="desktop-no-drag flex gap-1">
-          <button
-            onClick={() => setActiveTab('scripts')}
-            className={`px-3 py-1.5 text-xs rounded-md transition-colors ${activeTab === 'scripts'
-              ? 'bg-slate-100 dark:bg-slate-800/90 text-slate-900 dark:text-slate-100 font-medium shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900/80'
-              }`}
-          >
-            Scripts
-          </button>
-          <button
-            onClick={() => setActiveTab('api')}
-            className={`px-3 py-1.5 text-xs rounded-md transition-colors flex items-center gap-1.5 ${activeTab === 'api'
-              ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900'
-              }`}
-          >
-            <Globe className="h-3 w-3" />
-            API
-          </button>
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`px-3 py-1.5 text-xs rounded-md transition-colors flex items-center gap-1.5 ${activeTab === 'settings'
-              ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900'
-              }`}
-          >
-            <Settings className="h-3 w-3" />
-            Settings
-          </button>
-          {isDesktopShell && (
-            <button
-              onClick={() => {
-                setActiveTab('scripts')
-                window.dispatchEvent(new CustomEvent('scriptmanager:open-terminal'))
-              }}
-              className="px-3 py-1.5 text-xs rounded-md transition-colors flex items-center gap-1.5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900"
-            >
-              <SquareTerminal className="h-3 w-3" />
-              Terminal
-            </button>
+    <WorkbenchShell
+      activityBar={<ActivityBar />}
+      sidePanel={<SidePanel />}
+      dock={<BottomDock />}
+    >
+      <div className="flex h-full flex-col">
+        {isBootstrapping && (
+          <div className="h-0.5 shrink-0 overflow-hidden bg-slate-200 dark:bg-slate-800">
+            <div className="h-full w-full animate-pulse bg-gradient-to-r from-blue-500 via-blue-300 to-blue-500" />
+          </div>
+        )}
+        {activeTab !== 'settings' && activeTab !== 'schedules' && activeTab !== 'ops' && <EditorTabs />}
+        <main className="relative flex-1 overflow-hidden">
+          {mountedTabs.scripts && (
+            <div className={scriptsPanelClassName}>
+              {isBootstrapping ? <SectionSkeleton label="Preparing scripts workspace" /> : <ScriptsManager hideSidebar />}
+            </div>
           )}
-        </nav>
-        <div className={`desktop-no-drag ml-auto flex items-center ${isDesktopShell ? 'gap-3' : 'gap-4'} min-w-0`}>
-          <div className="flex items-center gap-2" title="Auto-save changes">
-            <Label htmlFor="auto-save-toggle" className="text-xs text-slate-600 dark:text-slate-400 cursor-pointer">AutoSave</Label>
-            <Switch
-              id="auto-save-toggle"
-              checked={autoSaveEnabled}
-              onCheckedChange={toggleAutoSave}
-              className="h-4 w-7"
-            />
-          </div>
-          <OpsModeToggle />
-          <ModeToggle />
-        </div>
-      </header>
-      {isBootstrapping && (
-        <div className="h-0.5 overflow-hidden bg-slate-200 dark:bg-slate-800 shrink-0">
-          <div className="h-full w-full animate-pulse bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500" />
-        </div>
-      )}
-
-      <main className="flex-1 overflow-hidden relative">
-        {mountedTabs.scripts && (
-          <div className={scriptsPanelClassName}>
-            {isBootstrapping ? <SectionSkeleton label="Preparing scripts workspace" /> : <ScriptsManager />}
-          </div>
-        )}
-        {mountedTabs.api && (
-          <div className={apiPanelClassName}>
-            <ApiManager />
-          </div>
-        )}
-        {mountedTabs.settings && (
-          <div className={settingsPanelClassName}>
-            <SettingsManager />
-          </div>
-        )}
-      </main>
-    </div>
+          {mountedTabs.api && (
+            <div className={apiPanelClassName}>
+              <ApiManager hideSidebar />
+            </div>
+          )}
+          {mountedTabs.schedules && (
+            <div className={schedulesPanelClassName}>
+              <SchedulesView />
+            </div>
+          )}
+          {mountedTabs.ops && (
+            <div className={opsPanelClassName}>
+              <OpsView />
+            </div>
+          )}
+          {mountedTabs.settings && (
+            <div className={settingsPanelClassName}>
+              <SettingsManager />
+            </div>
+          )}
+        </main>
+      </div>
+    </WorkbenchShell>
   )
 }
-

@@ -30,7 +30,12 @@ type RequestTab = {
   draft: boolean
 }
 
-export function ApiManager() {
+interface ApiManagerProps {
+  /** When hosted in the workbench shell, the sidebar lives in the shared SidePanel. */
+  hideSidebar?: boolean
+}
+
+export function ApiManager({ hideSidebar = false }: ApiManagerProps = {}) {
   const dispatch = useAppDispatch()
   const activeRequestId = useAppSelector(selectApiActiveRequestId)
   const activeRequest = useAppSelector(selectApiActiveRequest)
@@ -181,21 +186,26 @@ export function ApiManager() {
     <div className="flex h-full w-full overflow-hidden">
       <ResizablePanelGroup orientation="horizontal" className="h-full">
 
-        {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-        <ResizablePanel defaultSize={25} minSize={18} maxSize={42}>
-          <div className="h-full overflow-hidden">
-            <ApiSidebar />
-          </div>
-        </ResizablePanel>
+        {/* ── Sidebar (skipped when hosted in the workbench SidePanel) ──── */}
+        {!hideSidebar && (
+          <>
+            <ResizablePanel defaultSize={25} minSize={18} maxSize={42}>
+              <div className="h-full overflow-hidden">
+                <ApiSidebar />
+              </div>
+            </ResizablePanel>
 
-        {/* Horizontal drag handle — separates sidebar from main content */}
-        <ResizableHandle withHandle orientation="horizontal" />
+            {/* Horizontal drag handle — separates sidebar from main content */}
+            <ResizableHandle withHandle orientation="horizontal" />
+          </>
+        )}
 
         {/* ── Main content ─────────────────────────────────────────────────── */}
-        <ResizablePanel defaultSize={75} minSize={40}>
+        <ResizablePanel defaultSize={hideSidebar ? 100 : 75} minSize={40}>
           {activeRequestId || activeRequest ? (
             <div className="flex h-full flex-col overflow-hidden">
-              {openTabs.length > 0 && (
+              {/* Internal request tab strip — superseded by workbench EditorTabs in shell mode */}
+              {!hideSidebar && openTabs.length > 0 && (
                 <div className="flex items-center gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/30 px-2 py-1.5 shrink-0">
                   {openTabs.map((tab) => {
                     const active = tab.requestId ? tab.requestId === activeRequestId : !activeRequestId && Boolean(activeRequest)

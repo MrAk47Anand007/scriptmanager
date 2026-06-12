@@ -5,15 +5,17 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { fetchSettings, saveSettings } from '@/features/settings/settingsSlice';
 import { selectSettings, selectSettingsStatus, selectSettingsError } from '@/features/settings/selectors';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui/toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Loader2, Save, Github, FolderIcon, Download, Upload, Package, Lock, LogOut } from 'lucide-react';
+import { Loader2, Save, Github, FolderIcon, Download, Upload, Package, Lock, LogOut, Bell } from 'lucide-react';
 import { useRef } from 'react';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
+import { isDesktop } from '@/lib/runtime';
 
 export const SettingsManager = () => {
     const dispatch = useAppDispatch();
@@ -41,6 +43,23 @@ export const SettingsManager = () => {
     const [apiTokenMessage, setApiTokenMessage] = useState('');
     const [apiTokenError, setApiTokenError] = useState('');
     const [isApiTokenLoading, setIsApiTokenLoading] = useState(false);
+
+    // Desktop notifications (renderer-local preference, mirrored to the main process)
+    const [showDesktopSettings, setShowDesktopSettings] = useState(false);
+    const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+
+    useEffect(() => {
+        // Hydration-safe: only decide desktop-ness on the client.
+        if (!isDesktop()) return;
+        setShowDesktopSettings(true);
+        setNotificationsEnabled(localStorage.getItem('scriptManager_notifications') !== 'false');
+    }, []);
+
+    const handleNotificationsToggle = (enabled: boolean) => {
+        setNotificationsEnabled(enabled);
+        localStorage.setItem('scriptManager_notifications', String(enabled));
+        void window.scriptManagerDesktop?.setNotificationsEnabled?.(enabled);
+    };
 
     // Import/Export state
     const [importStatus, setImportStatus] = useState<string>('');
@@ -104,6 +123,7 @@ export const SettingsManager = () => {
             setTimeout(() => setSaveMessage(''), 3000);
         } catch (err) {
             console.error(err);
+            toast.error('Failed to save settings');
         } finally {
             setIsSaving(false);
         }
@@ -287,6 +307,32 @@ export const SettingsManager = () => {
                     </div>
                 </CardContent>
             </Card>
+
+            {showDesktopSettings && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2"><Bell className="h-5 w-5" /> Desktop</CardTitle>
+                        <CardDescription>
+                            Preferences for the ScriptManager desktop app.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="flex items-center justify-between space-x-2">
+                            <div className="space-y-0.5">
+                                <Label htmlFor="desktop_notifications">Desktop notifications</Label>
+                                <p className="text-xs text-slate-500">
+                                    Show a native notification when a script finishes while the window is in the background.
+                                </p>
+                            </div>
+                            <Switch
+                                id="desktop_notifications"
+                                checked={notificationsEnabled}
+                                onCheckedChange={handleNotificationsToggle}
+                            />
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
 
             <Card>
                 <CardHeader>

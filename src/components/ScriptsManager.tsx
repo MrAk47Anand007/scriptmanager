@@ -1,6 +1,7 @@
 'use client'
 
 import { memo, useEffect, useRef, useState, useCallback, useDeferredValue, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import type { Monaco } from '@monaco-editor/react';
 import { v4 as uuidv4 } from 'uuid';
 import { EditorSkeleton } from '@/components/ui/EditorSkeleton';
@@ -17,25 +18,14 @@ import {
     selectAllTags, selectEnvVars, selectAutoSaveEnabled, selectActiveScript, selectVersionsStatus,
 } from '@/features/scripts/selectors';
 import { selectSettings } from '@/features/settings/selectors';
-import { selectIsModeActive } from '@/features/ops/selectors';
 import dynamic from 'next/dynamic';
 
 const TerminalComponent = dynamic(() => import('./TerminalComponent').then(mod => mod.TerminalComponent), {
     ssr: false,
     loading: () => <div className="h-64 bg-slate-950 flex items-center justify-center border-t border-slate-700"><Loader2 className="h-6 w-6 animate-spin text-slate-500" /></div>
 });
-const ServerProfilesPanel = dynamic(() => import('./ServerProfilesPanel').then(mod => mod.ServerProfilesPanel), {
-    ssr: false,
-    loading: () => <div className="border-b dark:border-slate-700 p-3 text-[10px] text-slate-400">Loading server profiles...</div>,
-});
-const RemoteExecutionPanel = dynamic(() => import('./RemoteExecutionPanel').then(mod => mod.RemoteExecutionPanel), {
-    ssr: false,
-    loading: () => <div className="border-b dark:border-slate-700 p-3 text-[10px] text-slate-400">Loading remote execution...</div>,
-});
-const AuditTrailPanel = dynamic(() => import('./AuditTrailPanel').then(mod => mod.AuditTrailPanel), {
-    ssr: false,
-    loading: () => <div className="border-b dark:border-slate-700 p-3 text-[10px] text-slate-400">Loading audit trail...</div>,
-});
+import { DOCK_PANE_IDS } from '@/components/workbench/BottomDock';
+import { setActiveDockTab } from '@/features/workbench/workbenchSlice';
 import {
     fetchScriptContent, saveScript, runScript, fetchBuilds, fetchBuildOutput,
     clearBuildOutput,
@@ -107,7 +97,7 @@ const ConsoleOutputSection = memo(function ConsoleOutputSection({
     onOpenTerminal: () => void
 }) {
     return (
-        <div className="flex-none flex flex-col h-[250px] min-h-[200px] border-b">
+        <div className="flex h-full flex-col">
             <div className="px-3 py-2 border-b bg-amber-50 dark:bg-slate-950 text-xs font-semibold text-amber-900/80 dark:text-slate-400 uppercase flex items-center gap-2 overflow-hidden">
                 <div className="flex items-center gap-2 flex-1 min-w-0">
                     <Terminal className="h-3 w-3 shrink-0" />
@@ -151,7 +141,7 @@ const BuildHistorySection = memo(function BuildHistorySection({
     onBuildClick: (buildId: string) => void
 }) {
     return (
-        <div className="h-1/3 flex flex-col border-b dark:border-slate-800 min-h-[150px]">
+        <div className="flex h-full flex-col">
             <div className="px-3 py-2 border-b dark:border-slate-800 bg-slate-100 dark:bg-slate-900 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 overflow-hidden">
                 <Clock className="h-3 w-3 shrink-0" />
                 <span className="truncate flex-1 min-w-0">Build History</span>
@@ -393,7 +383,12 @@ const VersionHistorySection = memo(function VersionHistorySection({
 
 
 
-export const ScriptsManager = () => {
+interface ScriptsManagerProps {
+    /** When hosted in the workbench shell, the sidebar lives in the shared SidePanel. */
+    hideSidebar?: boolean;
+}
+
+export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}) => {
     const dispatch = useAppDispatch();
     const scripts = useAppSelector(selectScriptItems, shallowEqual);
     const collections = useAppSelector(selectCollections, shallowEqual);
@@ -410,7 +405,6 @@ export const ScriptsManager = () => {
     const activeScript = useAppSelector(selectActiveScript);
     const versionsStatus = useAppSelector(selectVersionsStatus);
     const settings = useAppSelector(selectSettings);
-    const isModeActive = useAppSelector(selectIsModeActive);
     const { resolvedTheme } = useTheme();
     const isDesktopRuntime = useMemo(() => typeof window !== 'undefined' && hasDesktopScriptsRuntime(), []);
     const consoleRef = useRef<HTMLDivElement>(null);
@@ -430,7 +424,8 @@ export const ScriptsManager = () => {
     const [isTerminalOpen, setIsTerminalOpen] = useState(false);
     const [isTerminalMinimized, setIsTerminalMinimized] = useState(false);
     const [pendingTerminalCommand, setPendingTerminalCommand] = useState<{ sessionId: string; command: string } | null>(null);
-    const [terminalHeight, setTerminalHeight] = useState(240);
+    // Dock pane portal targets (rendered by BottomDock in the workbench shell)
+    const [dockPaneEls, setDockPaneEls] = useState<{ terminal: HTMLElement; output: HTMLElement; builds: HTMLElement } | null>(null);
     const [activeTerminalSessionId, setActiveTerminalSessionId] = useState(DEFAULT_TERMINAL_SESSION_ID);
     const [scriptContent, setScriptContent] = useState('');
     const [buildOutput, setBuildOutput] = useState('');
@@ -451,10 +446,22 @@ export const ScriptsManager = () => {
     const [isRegeneratingWebhook, setIsRegeneratingWebhook] = useState(false);
     const [isLoadingBuildOutput, setIsLoadingBuildOutput] = useState(false);
     const [terminalLaunchStage, setTerminalLaunchStage] = useState<'saving' | 'preparing' | 'opening' | null>(null);
-    const resizeStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
     const openTerminalPanel = useCallback(() => {
         setIsTerminalOpen(true);
         setIsTerminalMinimized(false);
+        dispatch(setActiveDockTab('terminal'));
+    }, [dispatch]);
+
+    // Mount-order invariant: BottomDock (statically imported by page.tsx) renders
+    // these pane containers before this dynamically-imported component resolves,
+    // so a one-shot getElementById lookup on mount is safe — no retry needed.
+    useEffect(() => {
+        const terminal = document.getElementById(DOCK_PANE_IDS.terminal);
+        const output = document.getElementById(DOCK_PANE_IDS.output);
+        const builds = document.getElementById(DOCK_PANE_IDS.builds);
+        if (terminal && output && builds) {
+            setDockPaneEls({ terminal, output, builds });
+        }
     }, []);
 
     // Initial data fetching is centralized in page.tsx
@@ -854,6 +861,7 @@ export const ScriptsManager = () => {
         activeBuildSubscriptionRef.current = null;
         pendingBuildSubscriptionRef.current = null;
 
+        dispatch(setActiveDockTab('output'));
         setBuildOutput('[Starting run... waiting for live output]\n');
         buildOutputBufferRef.current = '';
         const buildId = uuidv4();
@@ -908,6 +916,17 @@ export const ScriptsManager = () => {
         await executeRun({});
     };
 
+    // Command palette / Ctrl+Enter "Run Active Script" — mirrors the
+    // 'scriptmanager:open-terminal' event pattern. Ref keeps the listener
+    // stable while handleRun is recreated every render.
+    const handleRunRef = useRef(handleRun);
+    handleRunRef.current = handleRun;
+    useEffect(() => {
+        const onRunActiveScript = () => { void handleRunRef.current(); };
+        window.addEventListener('scriptmanager:run-active-script', onRunActiveScript);
+        return () => window.removeEventListener('scriptmanager:run-active-script', onRunActiveScript);
+    }, []);
+
     const executeRunInTerminal = async (paramValues: Record<string, string>) => {
         if (!activeScriptId) return;
 
@@ -920,8 +939,7 @@ export const ScriptsManager = () => {
 
         setTerminalLaunchStage('preparing');
         setTerminalLaunchStage('opening');
-        setIsTerminalOpen(true);
-        setIsTerminalMinimized(false);
+        openTerminalPanel();
         if (isDesktopRuntime) {
             try {
                 await runScriptInDesktopTerminal(activeScriptId, paramValues, activeTerminalSessionId);
@@ -964,6 +982,7 @@ export const ScriptsManager = () => {
             if (fetchBuildOutput.fulfilled.match(result)) {
                 setBuildOutput(result.payload);
                 buildOutputBufferRef.current = '';
+                dispatch(setActiveDockTab('output'));
             }
         } finally {
             setIsLoadingBuildOutput(false);
@@ -1144,49 +1163,14 @@ export const ScriptsManager = () => {
         });
     }, []);
 
-    useEffect(() => {
-        const handlePointerMove = (event: PointerEvent) => {
-            const resizeState = resizeStateRef.current;
-            if (!resizeState) return;
-
-            const nextHeight = resizeState.startHeight + (resizeState.startY - event.clientY);
-            setTerminalHeight(Math.max(140, Math.min(520, nextHeight)));
-        };
-
-        const handlePointerUp = () => {
-            resizeStateRef.current = null;
-            document.body.style.userSelect = '';
-            document.body.style.cursor = '';
-        };
-
-        window.addEventListener('pointermove', handlePointerMove);
-        window.addEventListener('pointerup', handlePointerUp);
-
-        return () => {
-            window.removeEventListener('pointermove', handlePointerMove);
-            window.removeEventListener('pointerup', handlePointerUp);
-        };
-    }, []);
-
-    const startTerminalResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-        if (!isTerminalOpen || isTerminalMinimized) return;
-
-        resizeStateRef.current = {
-            startY: event.clientY,
-            startHeight: terminalHeight,
-        };
-
-        document.body.style.userSelect = 'none';
-        document.body.style.cursor = 'row-resize';
-        event.preventDefault();
-    }, [isTerminalMinimized, isTerminalOpen, terminalHeight]);
-
     return (
-        <div className="flex h-screen bg-white dark:bg-slate-950 overflow-hidden">
-            {/* ── Left Sidebar ── */}
-            <div className="w-[250px] flex-shrink-0 border-r dark:border-slate-800">
-                <ScriptsSidebar />
-            </div>
+        <div className="flex h-full bg-white dark:bg-slate-950 overflow-hidden">
+            {/* ── Left Sidebar (skipped when hosted in the workbench SidePanel) ── */}
+            {!hideSidebar && (
+                <div className="w-[250px] flex-shrink-0 border-r dark:border-slate-800">
+                    <ScriptsSidebar />
+                </div>
+            )}
 
             {/* ── Main Editor Area ── */}
             <div className="flex-1 min-w-0 flex flex-col relative h-full">
@@ -1372,34 +1356,6 @@ export const ScriptsManager = () => {
                                 </div>
                             )}
                         </div>
-                        {isTerminalOpen && (
-                            <>
-                                {!isTerminalMinimized && (
-                                    <div
-                                        className="group flex h-2 cursor-row-resize items-center justify-center border-t border-slate-700/70 bg-slate-900/85"
-                                        onPointerDown={startTerminalResize}
-                                        title="Resize terminal"
-                                    >
-                                        <div className="h-1 w-16 rounded-full bg-slate-600 transition-colors group-hover:bg-blue-500" />
-                                    </div>
-                                )}
-                                <div style={!isTerminalMinimized ? { height: `${terminalHeight}px` } : undefined} className={!isTerminalMinimized ? 'shrink-0' : ''}>
-                                    <TerminalComponent
-                                        className="h-full"
-                                        isVisible={true}
-                                        isMinimized={isTerminalMinimized}
-                                        toggleMinimize={() => setIsTerminalMinimized(!isTerminalMinimized)}
-                                        onClose={() => setIsTerminalOpen(false)}
-                                        pendingCommand={pendingTerminalCommand}
-                                        onActiveSessionChange={setActiveTerminalSessionId}
-                                        onCommandSent={() => {
-                                            setPendingTerminalCommand(null);
-                                            setTerminalLaunchStage(null);
-                                        }}
-                                    />
-                                </div>
-                            </>
-                        )}
                     </div>
                 </div>
             </div>
@@ -1407,21 +1363,6 @@ export const ScriptsManager = () => {
             {/* ── Right Panel ── */}
             <div className="w-[350px] flex-shrink-0 border-l dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex flex-col h-full overflow-hidden">
                 <div className="flex-1 overflow-y-auto overflow-x-hidden">
-                    {isModeActive && <ServerProfilesPanel />}
-                    {isModeActive && <RemoteExecutionPanel />}
-                    {isModeActive && <AuditTrailPanel />}
-                    {!isDesktopRuntime && (
-                        <ConsoleOutputSection
-                            consoleRef={consoleRef}
-                            buildOutput={buildOutput}
-                            runStatus={runStatus}
-                            terminalLaunchStage={terminalLaunchStage}
-                            isLoadingBuildOutput={isLoadingBuildOutput}
-                            isTerminalOpen={isTerminalOpen}
-                            isTerminalMinimized={isTerminalMinimized}
-                            onOpenTerminal={openTerminalPanel}
-                        />
-                    )}
                     {activeScriptId && (
                         <>
                             <ScriptInspectorSection
@@ -1459,12 +1400,63 @@ export const ScriptsManager = () => {
                             />
                         </>
                     )}
-
-                    {!isDesktopRuntime && (
-                        <BuildHistorySection builds={builds} onBuildClick={handleBuildClick} />
-                    )}
                 </div>
             </div>
+
+            {/* ── Bottom dock panes (portaled into the workbench BottomDock) ── */}
+            {dockPaneEls && createPortal(
+                isTerminalOpen ? (
+                    <TerminalComponent
+                        className="h-full"
+                        isVisible={true}
+                        isMinimized={isTerminalMinimized}
+                        toggleMinimize={() => setIsTerminalMinimized(!isTerminalMinimized)}
+                        onClose={() => setIsTerminalOpen(false)}
+                        pendingCommand={pendingTerminalCommand}
+                        onActiveSessionChange={setActiveTerminalSessionId}
+                        onCommandSent={() => {
+                            setPendingTerminalCommand(null);
+                            setTerminalLaunchStage(null);
+                        }}
+                    />
+                ) : (
+                    <div className="flex h-full items-center justify-center">
+                        <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={openTerminalPanel}>
+                            <Terminal className="h-3 w-3" /> Open Terminal
+                        </Button>
+                    </div>
+                ),
+                dockPaneEls.terminal
+            )}
+            {dockPaneEls && createPortal(
+                !isDesktopRuntime ? (
+                    <ConsoleOutputSection
+                        consoleRef={consoleRef}
+                        buildOutput={buildOutput}
+                        runStatus={runStatus}
+                        terminalLaunchStage={terminalLaunchStage}
+                        isLoadingBuildOutput={isLoadingBuildOutput}
+                        isTerminalOpen={isTerminalOpen}
+                        isTerminalMinimized={isTerminalMinimized}
+                        onOpenTerminal={openTerminalPanel}
+                    />
+                ) : (
+                    <div className="flex h-full items-center justify-center text-xs text-slate-500 italic">
+                        Desktop runs stream to the Terminal pane
+                    </div>
+                ),
+                dockPaneEls.output
+            )}
+            {dockPaneEls && createPortal(
+                !isDesktopRuntime ? (
+                    <BuildHistorySection builds={builds} onBuildClick={handleBuildClick} />
+                ) : (
+                    <div className="flex h-full items-center justify-center text-xs text-slate-500 italic">
+                        Build history is unavailable in desktop terminal mode
+                    </div>
+                ),
+                dockPaneEls.builds
+            )}
 
             {/* Run Inputs Dialog — shown when script has parameters */}
             <RunInputsDialog
