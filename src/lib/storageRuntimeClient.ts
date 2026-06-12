@@ -51,6 +51,25 @@ export async function deleteStorageProvider(id: string): Promise<{ id: string }>
   return response.json() as Promise<{ id: string }>
 }
 
+export type CollectionSyncResult = {
+  ok: boolean
+  pulled: number
+  pushed: number
+  conflicts: number
+  skipped: string[]
+  error?: string
+}
+
+export async function syncCollectionRemote(collectionId: string): Promise<CollectionSyncResult> {
+  if (hasDesktopStorageRuntime()) {
+    return window.scriptManagerDesktop!.runtime!.syncCollection!(collectionId) as Promise<CollectionSyncResult>
+  }
+
+  const response = await fetch(`/api/collections/${collectionId}/sync`, { method: 'POST' })
+  const data = await response.json().catch(() => ({ ok: false, pulled: 0, pushed: 0, conflicts: 0, skipped: [], error: 'Sync failed' }))
+  return data as CollectionSyncResult
+}
+
 export async function testStorageProvider(id: string): Promise<StorageProviderTestResult> {
   if (hasDesktopStorageRuntime()) {
     return window.scriptManagerDesktop!.runtime!.testStorageProvider!(id) as Promise<StorageProviderTestResult>

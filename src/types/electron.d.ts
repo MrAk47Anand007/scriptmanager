@@ -82,6 +82,7 @@ declare global {
         saveStorageProvider?: (payload: unknown) => Promise<unknown>
         deleteStorageProvider?: (id: string) => Promise<unknown>
         testStorageProvider?: (id: string) => Promise<unknown>
+        syncCollection?: (collectionId: string) => Promise<unknown>
         onTerminalEvent: (listener: (event: ScriptManagerDesktopTerminalEvent) => void) => () => void
         onBuildEvent: (listener: (event: ScriptManagerDesktopBuildEvent) => void) => () => void
         onRemoteExecEvent: (listener: (event: ScriptManagerDesktopRemoteExecEvent) => void) => () => void

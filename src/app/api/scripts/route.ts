@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { ensureScriptsDirExists, getScriptFilePath, getScriptResolvedFilePath } from '@/lib/scriptRunner'
+import { ensureScriptsDirExists, getScriptFilePath, getScriptResolvedFilePath, getScriptsRootDir } from '@/lib/scriptRunner'
+import { pushScript } from '@/lib/storage/syncService'
 import { syncScriptToGist } from '@/lib/gistService'
 import fs from 'fs'
 import path from 'path'
@@ -117,6 +118,13 @@ export async function POST(req: Request) {
       },
       include: { collection: true }
     })
+
+    if (content !== undefined) {
+      // Push-on-save: fire-and-forget upload for cloud-bound collections.
+      void getScriptsRootDir().then((root) => pushScript(prisma, script!.id, root)).then((result) => {
+        if (result?.error) console.warn(`[CloudSync] push after save failed: ${result.error}`)
+      })
+    }
   } else {
     // Create new script
     // Check if name already taken

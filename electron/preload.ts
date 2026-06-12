@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     saveStorageProvider: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-storage-provider', payload) as Promise<unknown>,
     deleteStorageProvider: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-storage-provider', id) as Promise<unknown>,
     testStorageProvider: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:test-storage-provider', id) as Promise<unknown>,
+    syncCollection: (collectionId: string) => ipcRenderer.invoke('scriptmanager:runtime:sync-collection', collectionId) as Promise<unknown>,
     onTerminalEvent: (listener: (event: unknown) => void) => {
       const wrapped = (_event: unknown, payload: unknown) => listener(payload)
       ipcRenderer.on('scriptmanager:runtime:terminal', wrapped)
