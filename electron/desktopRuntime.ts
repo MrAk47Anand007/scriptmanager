@@ -8,6 +8,13 @@ import os from 'os'
 import path from 'path'
 import { getDesktopWorkspaceLayout, ensureDesktopWorkspaceLayout, sanitizeWorkspaceName } from '../src/lib/workspaceLayout'
 import {
+  deleteStorageProvider as deleteDesktopStorageProvider,
+  listStorageProviders as listDesktopStorageProviders,
+  saveStorageProvider as saveDesktopStorageProvider,
+  testStorageProvider as testDesktopStorageProvider,
+  type SaveStorageProviderPayload,
+} from '../src/lib/storage/providerStore'
+import {
   clearApiHistory as clearDesktopApiHistory,
   deleteApiCollection as deleteDesktopApiCollection,
   deleteApiEnvironment as deleteDesktopApiEnvironment,
@@ -2167,6 +2174,22 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:list-audit-log', async (_event, payload) => {
     return listDesktopAuditLog(payload ?? undefined)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-storage-providers', async () => {
+    return listDesktopStorageProviders(prisma)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-storage-provider', async (_event, payload: SaveStorageProviderPayload) => {
+    return saveDesktopStorageProvider(prisma, payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:delete-storage-provider', async (_event, id: string) => {
+    return deleteDesktopStorageProvider(prisma, id)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:test-storage-provider', async (_event, id: string) => {
+    return testDesktopStorageProvider(prisma, id)
   })
 
   ipcMain.handle('scriptmanager:runtime:warm-terminal', async (event, payload?: { sessionId?: string }) => {

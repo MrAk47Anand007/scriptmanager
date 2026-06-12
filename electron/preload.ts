@@ -68,6 +68,10 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
       ipcRenderer.invoke('scriptmanager:runtime:approve-remote-execution', payload) as Promise<string>,
     rejectRemoteExecution: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:reject-remote-execution', id) as Promise<string>,
     listAuditLog: (payload?: unknown) => ipcRenderer.invoke('scriptmanager:runtime:list-audit-log', payload ?? null) as Promise<unknown>,
+    listStorageProviders: () => ipcRenderer.invoke('scriptmanager:runtime:list-storage-providers') as Promise<unknown[]>,
+    saveStorageProvider: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-storage-provider', payload) as Promise<unknown>,
+    deleteStorageProvider: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-storage-provider', id) as Promise<unknown>,
+    testStorageProvider: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:test-storage-provider', id) as Promise<unknown>,
     onTerminalEvent: (listener: (event: unknown) => void) => {
       const wrapped = (_event: unknown, payload: unknown) => listener(payload)
       ipcRenderer.on('scriptmanager:runtime:terminal', wrapped)

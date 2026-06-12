@@ -78,6 +78,10 @@ declare global {
         approveRemoteExecution: (payload: { id: string; approverName: string }) => Promise<string>
         rejectRemoteExecution: (id: string) => Promise<string>
         listAuditLog: (payload?: unknown) => Promise<unknown>
+        listStorageProviders?: () => Promise<unknown[]>
+        saveStorageProvider?: (payload: unknown) => Promise<unknown>
+        deleteStorageProvider?: (id: string) => Promise<unknown>
+        testStorageProvider?: (id: string) => Promise<unknown>
         onTerminalEvent: (listener: (event: ScriptManagerDesktopTerminalEvent) => void) => () => void
         onBuildEvent: (listener: (event: ScriptManagerDesktopBuildEvent) => void) => () => void
         onRemoteExecEvent: (listener: (event: ScriptManagerDesktopRemoteExecEvent) => void) => () => void
