@@ -51,6 +51,16 @@ declare global {
         deleteScript: (payload: { id: string }) => Promise<string>
         duplicateScript: (scriptId: string) => Promise<unknown>
         openFolder: (payload: unknown) => Promise<unknown>
+        scanPcScripts?: (payload: { roots: string[]; extensions: string[] }) => Promise<{
+          files: Array<{ path: string; name: string; ext: string; sizeBytes: number; modifiedAt: string }>
+          truncated: boolean
+          scannedDirs: number
+        }>
+        importScannedScripts?: (payload: { files: { path: string }[]; mode: 'misc' | 'by-folder'; rootForGrouping?: string }) => Promise<{
+          imported: number
+          skipped: number
+          collections: string[]
+        }>
         setTerminalContext: (payload: { sessionId?: string; scriptId: string | null }) => Promise<{ ok: boolean }>
         warmTerminal: (payload?: { sessionId?: string }) => Promise<{ ok: boolean }>
         sendTerminalInput: (payload: { sessionId?: string; data: string }) => Promise<{ ok: boolean }>

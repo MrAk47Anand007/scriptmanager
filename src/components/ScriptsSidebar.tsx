@@ -24,8 +24,9 @@ import { toast } from '@/components/ui/toast';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
-    FileCode, Plus, Folder, Search, LayoutTemplate, Loader2, Layers, FolderOpen,
+    FileCode, Plus, Folder, Search, LayoutTemplate, Loader2, Layers, FolderOpen, ScanSearch,
 } from 'lucide-react';
+import { ScanPcDialog } from './sidebar/ScanPcDialog';
 import { CreateScriptDialog } from './sidebar/CreateScriptDialog';
 import { CreateCollectionDialog } from './sidebar/CreateCollectionDialog';
 import { OpenFolderDialog, type OpenFolderSubmitValues } from './sidebar/OpenFolderDialog';
@@ -105,6 +106,8 @@ const ScriptsSidebarComponent = () => {
     const [convertCollectionName, setConvertCollectionName] = useState('');
     const [isConvertingCollection, setIsConvertingCollection] = useState(false);
     const [hasDesktopFolderPicker, setHasDesktopFolderPicker] = useState(false);
+    const [hasDesktopPcScan, setHasDesktopPcScan] = useState(false);
+    const [isScanPcDialogOpen, setIsScanPcDialogOpen] = useState(false);
     const [pythonEnvCollection, setPythonEnvCollection] = useState<Collection | null>(null);
     const [isPythonEnvLoading, setIsPythonEnvLoading] = useState(false);
     const [cloudStorageCollection, setCloudStorageCollection] = useState<Collection | null>(null);
@@ -166,6 +169,7 @@ const ScriptsSidebarComponent = () => {
 
     useEffect(() => {
         setHasDesktopFolderPicker(Boolean(window.scriptManagerDesktop?.selectFolder));
+        setHasDesktopPcScan(Boolean(window.scriptManagerDesktop?.runtime?.scanPcScripts));
 
         const openFolderFromDesktopMenu = () => {
             openFolderDialog();
@@ -726,6 +730,11 @@ const ScriptsSidebarComponent = () => {
                                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={openFolderDialog} title="Open local folder">
                                     <FolderOpen className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                                 </Button>
+                                {hasDesktopPcScan && (
+                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsScanPcDialogOpen(true)} title="Find scripts on this PC">
+                                        <ScanSearch className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
+                                    </Button>
+                                )}
                                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => dispatch(setPaletteOpen(true))} title="Command palette (Ctrl+P)">
                                     <Search className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                                 </Button>
@@ -896,6 +905,10 @@ const ScriptsSidebarComponent = () => {
                     submitting={isOpeningFolder}
                     onOpenChange={setIsOpenFolderDialogOpen}
                     onSubmit={handleOpenFolderSubmit}
+                />
+                <ScanPcDialog
+                    open={isScanPcDialogOpen}
+                    onOpenChange={setIsScanPcDialogOpen}
                 />
                 <PythonEnvDialog
                     collection={pythonEnvCollection}

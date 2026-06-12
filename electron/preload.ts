@@ -37,6 +37,10 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     deleteScript: (payload: { id: string }) => ipcRenderer.invoke('scriptmanager:runtime:delete-script', payload) as Promise<string>,
     duplicateScript: (scriptId: string) => ipcRenderer.invoke('scriptmanager:runtime:duplicate-script', scriptId) as Promise<unknown>,
     openFolder: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:open-folder', payload) as Promise<unknown>,
+    scanPcScripts: (payload: { roots: string[]; extensions: string[] }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:scan-pc-scripts', payload) as Promise<unknown>,
+    importScannedScripts: (payload: { files: { path: string }[]; mode: 'misc' | 'by-folder'; rootForGrouping?: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:import-scanned-scripts', payload) as Promise<unknown>,
     setTerminalContext: (payload: { sessionId?: string; scriptId: string | null }) => ipcRenderer.invoke('scriptmanager:runtime:set-terminal-context', payload) as Promise<{ ok: boolean }>,
     warmTerminal: (payload?: { sessionId?: string }) => ipcRenderer.invoke('scriptmanager:runtime:warm-terminal', payload ?? {}) as Promise<{ ok: boolean }>,
     sendTerminalInput: (payload: { sessionId?: string; data: string }) => ipcRenderer.invoke('scriptmanager:runtime:terminal-input', payload) as Promise<{ ok: boolean }>,

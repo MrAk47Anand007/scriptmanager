@@ -49,6 +49,7 @@ import {
   testConnection as testDesktopConnection,
   transferScript as transferDesktopRemoteScript,
 } from './opsRuntime'
+import { scanForScripts, type ScanForScriptsResult } from './scriptScanner'
 
 type TerminalEvent =
   | { sessionId: string; type: 'connected' }
@@ -189,6 +190,17 @@ type UpdateCollectionPayload = {
 type DeleteCollectionPayload = {
   id: string
   hardDelete?: boolean
+}
+
+type ScanPcScriptsPayload = {
+  roots: string[]
+  extensions: string[]
+}
+
+type ImportScannedScriptsPayload = {
+  files: { path: string }[]
+  mode: 'misc' | 'by-folder'
+  rootForGrouping?: string
 }
 
 type ManageCollectionPythonEnvPayload = {
@@ -1737,6 +1749,152 @@ async function openLocalFolder(payload: OpenFolderPayload) {
   }
 }
 
+// --- Find scripts on this PC (scan + import as linked scripts) ---
+
+async function scanPcScripts(payload: ScanPcScriptsPayload): Promise<ScanForScriptsResult> {
+  const roots = (payload.roots ?? []).map((root) => String(root).trim()).filter(Boolean)
+  if (roots.length === 0) {
+    throw new Error('At least one folder is required')
+  }
+
+  for (const root of roots) {
+    if (!path.isAbsolute(root)) {
+      throw new Error(`Folder path must be absolute: ${root}`)
+    }
+    if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+      throw new Error(`Folder does not exist: ${root}`)
+    }
+  }
+
+  const extensions = (payload.extensions ?? []).filter((ext) => typeof ext === 'string' && ext.trim())
+  if (extensions.length === 0) {
+    throw new Error('At least one extension is required')
+  }
+
+  return scanForScripts({ roots, extensions })
+}
+
+function normalizeSourcePathKey(sourcePath: string): string {
+  const resolved = path.resolve(sourcePath)
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+}
+
+/** Group name for 'by-folder' mode: top-level segment under the scan root, falling back to the parent dir name. */
+function scannedScriptGroupName(filePath: string, rootForGrouping?: string): string {
+  if (rootForGrouping) {
+    const relative = path.relative(path.resolve(rootForGrouping), path.resolve(filePath))
+    if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+      const segments = relative.split(/[\\/]/).filter(Boolean)
+      if (segments.length > 1) {
+        return segments[0]!
+      }
+      return path.basename(path.resolve(rootForGrouping)) || 'Miscellaneous'
+    }
+  }
+  return path.basename(path.dirname(path.resolve(filePath))) || 'Miscellaneous'
+}
+
+/** Find-or-create a plain DB collection (no folderPath) by name. */
+async function findOrCreatePlainCollection(name: string, cache: Map<string, string>): Promise<string> {
+  const cached = cache.get(name)
+  if (cached) {
+    return cached
+  }
+
+  const existing = await prisma.collection.findFirst({ where: { name } })
+  if (existing) {
+    cache.set(name, existing.id)
+    return existing.id
+  }
+
+  const created = await prisma.collection.create({
+    data: {
+      name,
+      description: '',
+      isTemporary: false,
+    },
+  })
+  cache.set(name, created.id)
+  return created.id
+}
+
+async function importScannedScripts(payload: ImportScannedScriptsPayload): Promise<{
+  imported: number
+  skipped: number
+  collections: string[]
+}> {
+  const requested = (payload.files ?? [])
+    .map((file) => String(file?.path ?? '').trim())
+    .filter(Boolean)
+
+  if (requested.length === 0) {
+    return { imported: 0, skipped: 0, collections: [] }
+  }
+
+  // Skip files already linked (compare sourcePath case-insensitively on Windows).
+  const existingScripts = await prisma.script.findMany({
+    where: { sourcePath: { not: null } },
+    select: { sourcePath: true },
+  })
+  const existingSourceKeys = new Set(
+    existingScripts
+      .map((script) => script.sourcePath)
+      .filter((sourcePath): sourcePath is string => Boolean(sourcePath))
+      .map(normalizeSourcePathKey),
+  )
+
+  const collectionCache = new Map<string, string>()
+  const usedCollectionNames = new Set<string>()
+  const seenInBatch = new Set<string>()
+  let imported = 0
+  let skipped = 0
+
+  for (const rawPath of requested) {
+    const absolutePath = path.resolve(rawPath)
+    const key = normalizeSourcePathKey(absolutePath)
+    if (existingSourceKeys.has(key) || seenInBatch.has(key)) {
+      skipped += 1
+      continue
+    }
+    if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) {
+      skipped += 1
+      continue
+    }
+    seenInBatch.add(key)
+
+    const collectionName = payload.mode === 'by-folder'
+      ? scannedScriptGroupName(absolutePath, payload.rootForGrouping)
+      : 'Miscellaneous'
+    const collectionId = await findOrCreatePlainCollection(collectionName, collectionCache)
+    usedCollectionNames.add(collectionName)
+
+    const filename = path.basename(absolutePath)
+    const baseName = path.basename(absolutePath, path.extname(absolutePath)) || filename
+
+    // Dedupe the display name with a numeric suffix, mirroring duplicateScript.
+    let name = baseName
+    let counter = 2
+    while (await prisma.script.findFirst({ where: { name } })) {
+      name = `${baseName} ${counter++}`
+    }
+
+    await prisma.script.create({
+      data: {
+        name,
+        filename,
+        sourcePath: absolutePath,
+        language: inferScriptLanguage(absolutePath),
+        parameters: '[]',
+        webhookToken: crypto.randomUUID().replace(/-/g, ''),
+        collectionId,
+      },
+    })
+    imported += 1
+  }
+
+  return { imported, skipped, collections: Array.from(usedCollectionNames) }
+}
+
 // --- Native build notifications + last-run tracking (used by the tray in main.ts) ---
 
 let notificationsEnabled = true
@@ -2093,6 +2251,14 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:open-folder', async (_event, payload: OpenFolderPayload) => {
     return openLocalFolder(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:scan-pc-scripts', async (_event, payload: ScanPcScriptsPayload) => {
+    return scanPcScripts(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:import-scanned-scripts', async (_event, payload: ImportScannedScriptsPayload) => {
+    return importScannedScripts(payload)
   })
 
   ipcMain.handle('scriptmanager:runtime:list-api-collections', async () => {
