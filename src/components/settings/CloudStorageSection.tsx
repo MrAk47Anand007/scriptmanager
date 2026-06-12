@@ -30,8 +30,8 @@ const PROVIDER_TYPES: { type: ProviderType; label: string; description: string; 
     { type: 's3', label: 'S3 / MinIO / compatible', description: 'Amazon S3 or any S3-compatible object store' },
     { type: 'gcs', label: 'Google Cloud Storage', description: 'GCS buckets via HMAC interoperability keys' },
     { type: 'webdav', label: 'WebDAV / Nextcloud', description: 'Any WebDAV server, including Nextcloud' },
-    { type: 'gdrive', label: 'Google Drive', description: 'Coming soon', disabled: true },
-    { type: 'onedrive', label: 'OneDrive', description: 'Coming soon', disabled: true },
+    { type: 'gdrive', label: 'Google Drive', description: 'Sign in with your own Google OAuth Client ID (desktop connect)' },
+    { type: 'onedrive', label: 'OneDrive', description: 'Sign in with your own Microsoft app Client ID (desktop connect)' },
 ]
 
 const TYPE_LABELS: Record<ProviderType, string> = {
@@ -60,6 +60,12 @@ function providerSummary(record: StorageProviderRecord): string {
     if (record.type === 'webdav') {
         return typeof cfg.baseUrl === 'string' && cfg.baseUrl ? cfg.baseUrl : '—'
     }
+    if (record.type === 'gdrive') {
+        return typeof cfg.folderId === 'string' && cfg.folderId ? `folder: ${cfg.folderId}` : 'Drive root'
+    }
+    if (record.type === 'onedrive') {
+        return typeof cfg.folderPath === 'string' && cfg.folderPath ? `/${cfg.folderPath}` : 'Drive root'
+    }
     const parts: string[] = []
     if (typeof cfg.endpoint === 'string' && cfg.endpoint) parts.push(cfg.endpoint)
     if (typeof cfg.bucket === 'string' && cfg.bucket) parts.push(`bucket: ${cfg.bucket}`)
@@ -80,6 +86,10 @@ type FormState = {
     baseUrl: string
     username: string
     password: string
+    clientId: string
+    refreshToken: string
+    folderId: string
+    folderPath: string
 }
 
 const EMPTY_FORM: FormState = {
@@ -94,6 +104,10 @@ const EMPTY_FORM: FormState = {
     baseUrl: '',
     username: '',
     password: '',
+    clientId: '',
+    refreshToken: '',
+    folderId: '',
+    folderPath: '',
 }
 
 type TestState = { status: 'testing' } | { status: 'ok'; latencyMs?: number } | { status: 'error'; error: string }
@@ -113,6 +127,7 @@ export const CloudStorageSection = () => {
     const [isDeleting, setIsDeleting] = useState(false)
 
     const [testStates, setTestStates] = useState<Record<string, TestState>>({})
+    const [isConnecting, setIsConnecting] = useState(false)
 
     const refresh = useCallback(async () => {
         try {
@@ -152,6 +167,10 @@ export const CloudStorageSection = () => {
             baseUrl: typeof cfg.baseUrl === 'string' ? cfg.baseUrl : '',
             username: typeof cfg.username === 'string' ? cfg.username : '',
             password: typeof cfg.password === 'string' ? cfg.password : '',
+            clientId: typeof cfg.clientId === 'string' ? cfg.clientId : '',
+            refreshToken: typeof cfg.refreshToken === 'string' ? cfg.refreshToken : '',
+            folderId: typeof cfg.folderId === 'string' ? cfg.folderId : '',
+            folderPath: typeof cfg.folderPath === 'string' ? cfg.folderPath : '',
         })
         setIsEditing(true)
         setDialogStep('form')
@@ -168,8 +187,24 @@ export const CloudStorageSection = () => {
             toast.error('Provider name is required')
             return
         }
-        const config: Record<string, unknown> =
-            form.type === 'webdav'
+        if (isOAuthType) {
+            if (!form.clientId.trim()) {
+                toast.error('OAuth Client ID is required')
+                return
+            }
+            if (!form.refreshToken) {
+                toast.error('Connect your account before saving')
+                return
+            }
+        }
+        const config: Record<string, unknown> = isOAuthType
+            ? {
+                  clientId: form.clientId.trim(),
+                  refreshToken: form.refreshToken,
+                  ...(form.type === 'gdrive' && form.folderId.trim() ? { folderId: form.folderId.trim() } : {}),
+                  ...(form.type === 'onedrive' && form.folderPath.trim() ? { folderPath: form.folderPath.trim() } : {}),
+              }
+            : form.type === 'webdav'
                 ? {
                       baseUrl: form.baseUrl,
                       username: form.username,
@@ -236,6 +271,38 @@ export const CloudStorageSection = () => {
     }
 
     const isS3Like = form.type === 's3' || form.type === 'gcs'
+    const isOAuthType = form.type === 'gdrive' || form.type === 'onedrive'
+    const isDesktop = typeof window !== 'undefined' && !!window.scriptManagerDesktop?.oauthConnect
+    const isConnected = form.refreshToken.length > 0
+
+    const handleOAuthConnect = async () => {
+        if (!form.clientId.trim()) {
+            toast.error('Enter your OAuth Client ID first')
+            return
+        }
+        const connect = window.scriptManagerDesktop?.oauthConnect
+        if (!connect) {
+            toast.error('Account connection is only available in the desktop app')
+            return
+        }
+        setIsConnecting(true)
+        try {
+            const result = await connect({
+                provider: form.type as 'gdrive' | 'onedrive',
+                clientId: form.clientId.trim(),
+            })
+            if (result.ok && result.refreshToken) {
+                setForm((prev) => ({ ...prev, refreshToken: result.refreshToken as string }))
+                toast.success('Account connected')
+            } else {
+                toast.error(result.error ?? 'Connection failed')
+            }
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Connection failed')
+        } finally {
+            setIsConnecting(false)
+        }
+    }
 
     return (
         <section className="space-y-6">
@@ -380,9 +447,11 @@ export const CloudStorageSection = () => {
                                     {isEditing ? `Edit ${form.name || 'provider'}` : `New ${TYPE_LABELS[form.type]} provider`}
                                 </DialogTitle>
                                 <DialogDescription>
-                                    {form.type === 'webdav'
-                                        ? 'Credentials are stored encrypted on this machine.'
-                                        : 'Access keys are stored encrypted on this machine.'}
+                                    {isOAuthType
+                                        ? 'Use your own OAuth Client ID — tokens are stored encrypted on this machine.'
+                                        : form.type === 'webdav'
+                                          ? 'Credentials are stored encrypted on this machine.'
+                                          : 'Access keys are stored encrypted on this machine.'}
                                 </DialogDescription>
                             </DialogHeader>
                             <div className="space-y-4 py-2">
@@ -497,6 +566,68 @@ export const CloudStorageSection = () => {
                                                 <p className="text-xs text-muted-foreground">
                                                     Leave as &bull;&bull;&bull; to keep the existing password.
                                                 </p>
+                                            )}
+                                        </div>
+                                    </>
+                                )}
+
+                                {isOAuthType && (
+                                    <>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="provider_client_id">OAuth Client ID</Label>
+                                            <Input
+                                                id="provider_client_id"
+                                                placeholder={form.type === 'gdrive'
+                                                    ? 'xxxx.apps.googleusercontent.com'
+                                                    : 'Application (client) ID from Azure portal'}
+                                                value={form.clientId}
+                                                onChange={(e) => setForm((prev) => ({ ...prev, clientId: e.target.value }))}
+                                            />
+                                            <p className="text-xs text-muted-foreground">
+                                                {form.type === 'gdrive'
+                                                    ? 'Create a "Desktop app" OAuth client in Google Cloud Console with the Drive API enabled.'
+                                                    : 'Register an app in Microsoft Entra with "Mobile and desktop applications" + http://127.0.0.1 redirect.'}
+                                            </p>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="provider_oauth_folder">
+                                                {form.type === 'gdrive' ? 'Folder ID (optional)' : 'Folder path (optional)'}
+                                            </Label>
+                                            <Input
+                                                id="provider_oauth_folder"
+                                                placeholder={form.type === 'gdrive'
+                                                    ? 'Drive folder ID (blank = My Drive root)'
+                                                    : 'ScriptManager (blank = OneDrive root)'}
+                                                value={form.type === 'gdrive' ? form.folderId : form.folderPath}
+                                                onChange={(e) =>
+                                                    setForm((prev) =>
+                                                        form.type === 'gdrive'
+                                                            ? { ...prev, folderId: e.target.value }
+                                                            : { ...prev, folderPath: e.target.value }
+                                                    )
+                                                }
+                                            />
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="gap-1.5"
+                                                onClick={handleOAuthConnect}
+                                                disabled={!isDesktop || isConnecting || !form.clientId.trim()}
+                                            >
+                                                {isConnecting
+                                                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                    : <PlugZap className="h-3.5 w-3.5" />}
+                                                {isConnected ? 'Reconnect account' : 'Connect account'}
+                                            </Button>
+                                            {isConnected && (
+                                                <span className="text-xs text-success">Connected ✓</span>
+                                            )}
+                                            {!isDesktop && (
+                                                <span className="text-xs text-muted-foreground">
+                                                    Account connection requires the desktop app.
+                                                </span>
                                             )}
                                         </div>
                                     </>

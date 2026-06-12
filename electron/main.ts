@@ -12,6 +12,7 @@ import {
   setDesktopNotificationsEnabled,
   setLastRunScriptListener,
 } from './desktopRuntime'
+import { OAUTH_ENDPOINTS, runOAuthFlow } from './oauthFlow'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
 // In production (packaged), Electron spawns the standalone server itself.
@@ -751,6 +752,38 @@ ipcMain.handle('scriptmanager:copy-text', async (_event, value: string) => {
 ipcMain.handle('scriptmanager:read-text', async () => {
   return clipboard.readText()
 })
+
+// Desktop OAuth connect (PKCE loopback) for Google Drive / OneDrive storage
+// providers. The renderer supplies the user's own OAuth Client ID.
+ipcMain.handle(
+  'scriptmanager:oauth-connect',
+  async (_event, payload: { provider: 'gdrive' | 'onedrive'; clientId: string }) => {
+    try {
+      const endpoints = OAUTH_ENDPOINTS[payload?.provider]
+      if (!endpoints) {
+        return { ok: false, error: `Unknown OAuth provider '${String(payload?.provider)}'` }
+      }
+      if (!payload.clientId?.trim()) {
+        return { ok: false, error: 'OAuth Client ID is required' }
+      }
+      const tokens = await runOAuthFlow({
+        authUrl: endpoints.authUrl,
+        tokenUrl: endpoints.tokenUrl,
+        clientId: payload.clientId.trim(),
+        scopes: endpoints.scopes,
+        extraAuthParams: { ...endpoints.extraAuthParams },
+      })
+      return {
+        ok: true,
+        refreshToken: tokens.refreshToken,
+        accessToken: tokens.accessToken,
+        expiresAt: tokens.expiresAt,
+      }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+)
 
 app.on('window-all-closed', () => {
   serverProcess?.kill()

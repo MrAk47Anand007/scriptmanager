@@ -1,7 +1,9 @@
 import { decryptString, encryptString } from './secretBox'
 import { createS3Provider } from './s3Provider'
 import { createWebdavProvider } from './webdavProvider'
-import type { ProviderType, S3Config, StorageProviderClient, WebdavConfig } from './types'
+import { createGdriveProvider } from './gdriveProvider'
+import { createOnedriveProvider } from './onedriveProvider'
+import type { GdriveConfig, OnedriveConfig, ProviderType, S3Config, StorageProviderClient, WebdavConfig } from './types'
 
 export * from './types'
 export { encryptString, decryptString } from './secretBox'
@@ -24,8 +26,9 @@ export function createProviderClient(
     case 'webdav':
       return createWebdavProvider(decryptedConfig as unknown as WebdavConfig)
     case 'gdrive':
+      return createGdriveProvider(decryptedConfig as GdriveConfig)
     case 'onedrive':
-      throw new Error(`Storage provider type '${type}' is not yet implemented`)
+      return createOnedriveProvider(decryptedConfig as OnedriveConfig)
     default:
       throw new Error(`Unknown storage provider type '${type as string}'`)
   }

@@ -28,4 +28,18 @@ export type WebdavConfig = {
   password: string
 }
 
+export type GdriveConfig = {
+  clientId: string
+  refreshToken: string
+  /** Google Drive folder id to sync into; defaults to the Drive root. */
+  folderId?: string
+}
+
+export type OnedriveConfig = {
+  clientId: string
+  refreshToken: string
+  /** Folder path under /drive/root:, e.g. 'ScriptManager'; defaults to the drive root. */
+  folderPath?: string
+}
+
 export type ProviderType = 's3' | 'gcs' | 'webdav' | 'gdrive' | 'onedrive'

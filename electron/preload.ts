@@ -9,6 +9,14 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
   readClipboardText: () => ipcRenderer.invoke('scriptmanager:read-text') as Promise<string>,
   setNotificationsEnabled: (enabled: boolean) =>
     ipcRenderer.invoke('scriptmanager:set-notifications-enabled', enabled) as Promise<boolean>,
+  oauthConnect: (payload: { provider: 'gdrive' | 'onedrive'; clientId: string }) =>
+    ipcRenderer.invoke('scriptmanager:oauth-connect', payload) as Promise<{
+      ok: boolean
+      refreshToken?: string
+      accessToken?: string
+      expiresAt?: number
+      error?: string
+    }>,
   runtime: {
     listScripts: () => ipcRenderer.invoke('scriptmanager:runtime:list-scripts') as Promise<unknown[]>,
     listCollections: () => ipcRenderer.invoke('scriptmanager:runtime:list-collections') as Promise<unknown[]>,
