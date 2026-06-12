@@ -27,13 +27,15 @@ declare global {
       copyText: (value: string) => Promise<boolean>
       readClipboardText: () => Promise<string>
       setNotificationsEnabled?: (enabled: boolean) => Promise<boolean>
-      oauthConnect?: (payload: { provider: 'gdrive' | 'onedrive'; clientId: string }) => Promise<{
+      oauthConnect?: (payload: { provider: 'gdrive' | 'onedrive'; clientId?: string; fullAccess?: boolean }) => Promise<{
         ok: boolean
         refreshToken?: string
         accessToken?: string
         expiresAt?: number
+        clientIdUsed?: string
         error?: string
       }>
+      oauthDefaults?: () => Promise<{ gdrive: boolean; onedrive: boolean }>
       runtime?: {
         listScripts: () => Promise<unknown[]>
         listCollections: () => Promise<unknown[]>

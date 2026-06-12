@@ -90,6 +90,7 @@ type FormState = {
     refreshToken: string
     folderId: string
     folderPath: string
+    fullAccess: boolean
 }
 
 const EMPTY_FORM: FormState = {
@@ -108,6 +109,7 @@ const EMPTY_FORM: FormState = {
     refreshToken: '',
     folderId: '',
     folderPath: '',
+    fullAccess: false,
 }
 
 type TestState = { status: 'testing' } | { status: 'ok'; latencyMs?: number } | { status: 'error'; error: string }
@@ -128,6 +130,15 @@ export const CloudStorageSection = () => {
 
     const [testStates, setTestStates] = useState<Record<string, TestState>>({})
     const [isConnecting, setIsConnecting] = useState(false)
+    // Whether this build ships a default OAuth client (one-click connect, no
+    // Client ID needed from the user).
+    const [oauthDefaults, setOauthDefaults] = useState<{ gdrive: boolean; onedrive: boolean }>({ gdrive: false, onedrive: false })
+
+    useEffect(() => {
+        void window.scriptManagerDesktop?.oauthDefaults?.().then((defaults) => {
+            if (defaults) setOauthDefaults(defaults)
+        })
+    }, [])
 
     const refresh = useCallback(async () => {
         try {
@@ -171,6 +182,7 @@ export const CloudStorageSection = () => {
             refreshToken: typeof cfg.refreshToken === 'string' ? cfg.refreshToken : '',
             folderId: typeof cfg.folderId === 'string' ? cfg.folderId : '',
             folderPath: typeof cfg.folderPath === 'string' ? cfg.folderPath : '',
+            fullAccess: false,
         })
         setIsEditing(true)
         setDialogStep('form')
@@ -188,10 +200,8 @@ export const CloudStorageSection = () => {
             return
         }
         if (isOAuthType) {
-            if (!form.clientId.trim()) {
-                toast.error('OAuth Client ID is required')
-                return
-            }
+            // The connect flow fills clientId (built-in default or user-supplied),
+            // so a refresh token implies a usable client id.
             if (!form.refreshToken) {
                 toast.error('Connect your account before saving')
                 return
@@ -275,24 +285,36 @@ export const CloudStorageSection = () => {
     const isDesktop = typeof window !== 'undefined' && !!window.scriptManagerDesktop?.oauthConnect
     const isConnected = form.refreshToken.length > 0
 
+    const hasDefaultClient = form.type === 'gdrive' ? oauthDefaults.gdrive : form.type === 'onedrive' ? oauthDefaults.onedrive : false
+    // '•••' is the masked placeholder on edit — treat it as "no override entered".
+    const enteredClientId = form.clientId.trim().replace(/^•+$/, '')
+    const canConnect = isDesktop && (hasDefaultClient || enteredClientId.length > 0)
+
     const handleOAuthConnect = async () => {
-        if (!form.clientId.trim()) {
-            toast.error('Enter your OAuth Client ID first')
-            return
-        }
         const connect = window.scriptManagerDesktop?.oauthConnect
         if (!connect) {
             toast.error('Account connection is only available in the desktop app')
+            return
+        }
+        if (!hasDefaultClient && !enteredClientId) {
+            toast.error('This build has no built-in app credentials — enter a Client ID under Advanced')
             return
         }
         setIsConnecting(true)
         try {
             const result = await connect({
                 provider: form.type as 'gdrive' | 'onedrive',
-                clientId: form.clientId.trim(),
+                ...(enteredClientId ? { clientId: enteredClientId } : {}),
+                fullAccess: form.fullAccess,
             })
             if (result.ok && result.refreshToken) {
-                setForm((prev) => ({ ...prev, refreshToken: result.refreshToken as string }))
+                setForm((prev) => ({
+                    ...prev,
+                    refreshToken: result.refreshToken as string,
+                    // Persist the client the consent was granted to so token
+                    // refreshes keep working (default or user-supplied).
+                    clientId: result.clientIdUsed ?? prev.clientId,
+                }))
                 toast.success('Account connected')
             } else {
                 toast.error(result.error ?? 'Connection failed')
@@ -573,21 +595,47 @@ export const CloudStorageSection = () => {
 
                                 {isOAuthType && (
                                     <>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="provider_client_id">OAuth Client ID</Label>
-                                            <Input
-                                                id="provider_client_id"
-                                                placeholder={form.type === 'gdrive'
-                                                    ? 'xxxx.apps.googleusercontent.com'
-                                                    : 'Application (client) ID from Azure portal'}
-                                                value={form.clientId}
-                                                onChange={(e) => setForm((prev) => ({ ...prev, clientId: e.target.value }))}
-                                            />
+                                        {/* One-click connect — opens the browser, account picker, consent. */}
+                                        <div className="space-y-2 rounded-md border border-wb-border bg-card p-3">
+                                            <div className="flex items-center gap-3">
+                                                <Button
+                                                    type="button"
+                                                    variant={isConnected ? 'outline' : 'default'}
+                                                    className="gap-1.5"
+                                                    onClick={handleOAuthConnect}
+                                                    disabled={!canConnect || isConnecting}
+                                                >
+                                                    {isConnecting
+                                                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                        : <PlugZap className="h-3.5 w-3.5" />}
+                                                    {isConnecting
+                                                        ? 'Waiting for browser…'
+                                                        : isConnected ? 'Reconnect account' : `Connect ${form.type === 'gdrive' ? 'Google' : 'Microsoft'} account`}
+                                                </Button>
+                                                {isConnected && (
+                                                    <span className="text-xs text-success">Connected ✓</span>
+                                                )}
+                                            </div>
                                             <p className="text-xs text-muted-foreground">
-                                                {form.type === 'gdrive'
-                                                    ? 'Create a "Desktop app" OAuth client in Google Cloud Console with the Drive API enabled.'
-                                                    : 'Register an app in Microsoft Entra with "Mobile and desktop applications" + http://127.0.0.1 redirect.'}
+                                                {!isDesktop
+                                                    ? 'Account connection requires the desktop app.'
+                                                    : isConnecting
+                                                        ? 'Pick your account and grant access in the browser window that just opened.'
+                                                        : 'Opens your browser to pick an account and grant access.'}
                                             </p>
+                                            <label className="flex cursor-pointer items-center gap-2 text-xs">
+                                                <input
+                                                    type="checkbox"
+                                                    className="accent-[hsl(var(--accent-brand))]"
+                                                    checked={form.fullAccess}
+                                                    onChange={(e) => setForm((prev) => ({ ...prev, fullAccess: e.target.checked }))}
+                                                    disabled={isConnecting}
+                                                />
+                                                <span>
+                                                    Full {form.type === 'gdrive' ? 'Drive' : 'OneDrive'} access
+                                                    <span className="text-muted-foreground"> — see all files, not just ones this app creates (reconnect after changing)</span>
+                                                </span>
+                                            </label>
                                         </div>
                                         <div className="space-y-2">
                                             <Label htmlFor="provider_oauth_folder">
@@ -608,28 +656,29 @@ export const CloudStorageSection = () => {
                                                 }
                                             />
                                         </div>
-                                        <div className="flex items-center gap-3">
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                className="gap-1.5"
-                                                onClick={handleOAuthConnect}
-                                                disabled={!isDesktop || isConnecting || !form.clientId.trim()}
-                                            >
-                                                {isConnecting
-                                                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                                    : <PlugZap className="h-3.5 w-3.5" />}
-                                                {isConnected ? 'Reconnect account' : 'Connect account'}
-                                            </Button>
-                                            {isConnected && (
-                                                <span className="text-xs text-success">Connected ✓</span>
-                                            )}
-                                            {!isDesktop && (
-                                                <span className="text-xs text-muted-foreground">
-                                                    Account connection requires the desktop app.
-                                                </span>
-                                            )}
-                                        </div>
+                                        <details className="rounded-md border border-wb-border p-3" open={!hasDefaultClient}>
+                                            <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                                                Advanced — use your own OAuth app
+                                            </summary>
+                                            <div className="mt-3 space-y-2">
+                                                <Label htmlFor="provider_client_id">OAuth Client ID</Label>
+                                                <Input
+                                                    id="provider_client_id"
+                                                    placeholder={form.type === 'gdrive'
+                                                        ? 'xxxx.apps.googleusercontent.com'
+                                                        : 'Application (client) ID from Azure portal'}
+                                                    value={form.clientId}
+                                                    onChange={(e) => setForm((prev) => ({ ...prev, clientId: e.target.value }))}
+                                                />
+                                                <p className="text-xs text-muted-foreground">
+                                                    {hasDefaultClient
+                                                        ? 'Leave blank to use the built-in app credentials.'
+                                                        : form.type === 'gdrive'
+                                                            ? 'This build has no built-in Google credentials. Create a "Desktop app" OAuth client in Google Cloud Console (Drive API enabled) and paste its ID here, or set GDRIVE_CLIENT_ID in electron/oauthDefaults.ts.'
+                                                            : 'This build has no built-in Microsoft credentials. Register an app in Microsoft Entra ("Mobile and desktop applications" + http://127.0.0.1 redirect) and paste its ID here, or set ONEDRIVE_CLIENT_ID in electron/oauthDefaults.ts.'}
+                                                </p>
+                                            </div>
+                                        </details>
                                     </>
                                 )}
                             </div>

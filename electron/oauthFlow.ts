@@ -25,14 +25,21 @@ export const OAUTH_ENDPOINTS = {
   gdrive: {
     authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
     tokenUrl: 'https://oauth2.googleapis.com/token',
+    // drive.file = only files the app creates/opens; drive = full account
+    // access (Google marks it "restricted" — fine for personal/internal use,
+    // requires Google verification for a published public app).
     scopes: 'https://www.googleapis.com/auth/drive.file',
-    extraAuthParams: { access_type: 'offline', prompt: 'consent' },
+    fullAccessScopes: 'https://www.googleapis.com/auth/drive',
+    // select_account forces the account chooser even when one account is
+    // signed in — the "pick your account" step users expect from app sign-in.
+    extraAuthParams: { access_type: 'offline', prompt: 'consent select_account' },
   },
   onedrive: {
     authUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
     tokenUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
     scopes: 'Files.ReadWrite offline_access',
-    extraAuthParams: {},
+    fullAccessScopes: 'Files.ReadWrite.All offline_access',
+    extraAuthParams: { prompt: 'select_account' },
   },
 } as const
 
