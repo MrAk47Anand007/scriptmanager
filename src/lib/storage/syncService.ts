@@ -283,9 +283,11 @@ export async function syncCollection(
         matchedRemotePaths.add(remoteFile.path.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase())
 
         const remoteChanged = !script.remoteEtag || remoteFile.etag !== script.remoteEtag
+        // A never-synced script with an existing local file counts as locally
+        // edited — otherwise the first sync after binding would silently
+        // overwrite local work with the remote copy (no conflict sibling).
         const locallyEdited = localMtime !== null
-          && script.remoteSyncedAt !== null
-          && localMtime > script.remoteSyncedAt.getTime()
+          && (script.remoteSyncedAt === null || localMtime > script.remoteSyncedAt.getTime())
 
         if (localMtime === null) {
           // No local copy → pull.
