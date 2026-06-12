@@ -6,7 +6,7 @@ import type { RootState } from '@/store/store';
 import {
     setActiveScript, createScript, createCollection, deleteCollection, moveScript, moveCollection,
     saveAsTemplate, duplicateScript, deleteScript, openScriptsFolder, importScriptsFolder,
-    removeTemporaryCollection, convertTemporaryCollection, fetchCollections,
+    removeTemporaryCollection, convertTemporaryCollection, fetchCollections, fetchScripts,
 } from '@/features/scripts/scriptsSlice';
 import type { Script, Collection, ScriptTemplate } from '@/features/scripts/scriptsSlice';
 import {
@@ -32,6 +32,8 @@ import { OpenFolderDialog, type OpenFolderSubmitValues } from './sidebar/OpenFol
 import { DeleteScriptDialog } from './sidebar/DeleteScriptDialog';
 import { DeleteCollectionDialog } from './sidebar/DeleteCollectionDialog';
 import { PythonEnvDialog } from './sidebar/PythonEnvDialog';
+import { CloudStorageDialog } from './sidebar/CloudStorageDialog';
+import { syncCollectionRemote } from '@/lib/storageRuntimeClient';
 import { SaveAsTemplateDialog } from './sidebar/SaveAsTemplateDialog';
 import { ScriptTree, getCollectionTreeKey, type ScriptTreeCallbacks } from './sidebar/ScriptTree';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
@@ -105,6 +107,7 @@ const ScriptsSidebarComponent = () => {
     const [hasDesktopFolderPicker, setHasDesktopFolderPicker] = useState(false);
     const [pythonEnvCollection, setPythonEnvCollection] = useState<Collection | null>(null);
     const [isPythonEnvLoading, setIsPythonEnvLoading] = useState(false);
+    const [cloudStorageCollection, setCloudStorageCollection] = useState<Collection | null>(null);
 
     // Search + filter state
     const [searchQuery, setSearchQuery] = useState('');
@@ -288,6 +291,28 @@ const ScriptsSidebarComponent = () => {
 
     const handlePythonEnvChanged = useCallback(async () => {
         await dispatch(fetchCollections());
+    }, [dispatch]);
+
+    const openCloudStorageDialog = useCallback((collection: Collection) => {
+        setCloudStorageCollection(collection);
+    }, []);
+
+    const handleSyncCollection = useCallback(async (collection: Collection) => {
+        toast.info(`Syncing "${collection.name}"...`);
+        try {
+            const result = await syncCollectionRemote(collection.id);
+            if (result.ok) {
+                toast.success(`Pulled ${result.pulled}, pushed ${result.pushed}, ${result.conflicts} conflicts`);
+                if (result.pulled > 0) {
+                    await Promise.all([dispatch(fetchScripts()), dispatch(fetchCollections())]);
+                }
+            } else {
+                toast.error(result.error ?? 'Sync failed');
+            }
+        } catch (error) {
+            console.error('Failed to sync collection:', error);
+            toast.error(error instanceof Error ? error.message : 'Sync failed');
+        }
     }, [dispatch]);
 
     const handleOpenFolderSubmit = async (values: OpenFolderSubmitValues): Promise<string | null> => {
@@ -674,12 +699,14 @@ const ScriptsSidebarComponent = () => {
         onCreateCollection: openCreateCollectionDialog,
         onConvertCollection: openConvertCollectionDialog,
         onManagePythonEnv: openPythonEnvironmentDialog,
+        onCloudStorage: openCloudStorageDialog,
+        onSyncCollection: handleSyncCollection,
         onDeleteProject: handleDeleteProject,
     }), [
         toggleCollection, toggleProject, handleActivateScript, openSaveAsTemplate,
         handleDuplicateScript, handleDeleteScriptRequest, handleDeleteCollection,
         openCreateScriptDialog, openCreateCollectionDialog, openConvertCollectionDialog,
-        openPythonEnvironmentDialog, handleDeleteProject,
+        openPythonEnvironmentDialog, openCloudStorageDialog, handleSyncCollection, handleDeleteProject,
     ]);
 
     return (
@@ -876,6 +903,10 @@ const ScriptsSidebarComponent = () => {
                     onLoadingChange={setIsPythonEnvLoading}
                     onOpenChange={(open) => !open && setPythonEnvCollection(null)}
                     onEnvChanged={handlePythonEnvChanged}
+                />
+                <CloudStorageDialog
+                    collection={cloudStorageCollection}
+                    onOpenChange={(open) => !open && setCloudStorageCollection(null)}
                 />
                 <Dialog open={!!collectionToConvert} onOpenChange={(open) => !open && setCollectionToConvert(null)}>
                     <DialogContent className="sm:max-w-md">

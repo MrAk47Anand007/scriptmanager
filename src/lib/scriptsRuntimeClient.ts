@@ -77,6 +77,8 @@ type DesktopCollectionRecord = {
   python_toolchain_enabled?: boolean
   python_venv_path?: string | null
   python_interpreter_path?: string | null
+  storage_provider_id?: string | null
+  remote_prefix?: string | null
   created_at: string
 }
 
@@ -93,6 +95,8 @@ type DesktopUpdateCollectionPayload = {
   name?: string
   projectId?: string | null
   parentId?: string | null
+  storageProviderId?: string | null
+  remotePrefix?: string | null
 }
 
 type DesktopUpdateCollectionResult = {
