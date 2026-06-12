@@ -18,20 +18,11 @@ import {
     selectAllTags, selectEnvVars, selectAutoSaveEnabled, selectActiveScript, selectVersionsStatus,
 } from '@/features/scripts/selectors';
 import { selectSettings } from '@/features/settings/selectors';
-import { selectIsModeActive } from '@/features/ops/selectors';
 import dynamic from 'next/dynamic';
 
 const TerminalComponent = dynamic(() => import('./TerminalComponent').then(mod => mod.TerminalComponent), {
     ssr: false,
     loading: () => <div className="h-64 bg-slate-950 flex items-center justify-center border-t border-slate-700"><Loader2 className="h-6 w-6 animate-spin text-slate-500" /></div>
-});
-const ServerProfilesPanel = dynamic(() => import('./ServerProfilesPanel').then(mod => mod.ServerProfilesPanel), {
-    ssr: false,
-    loading: () => <div className="border-b dark:border-slate-700 p-3 text-[10px] text-slate-400">Loading server profiles...</div>,
-});
-const RemoteExecutionPanel = dynamic(() => import('./RemoteExecutionPanel').then(mod => mod.RemoteExecutionPanel), {
-    ssr: false,
-    loading: () => <div className="border-b dark:border-slate-700 p-3 text-[10px] text-slate-400">Loading remote execution...</div>,
 });
 import { DOCK_PANE_IDS } from '@/components/workbench/BottomDock';
 import { setActiveDockTab } from '@/features/workbench/workbenchSlice';
@@ -414,7 +405,6 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
     const activeScript = useAppSelector(selectActiveScript);
     const versionsStatus = useAppSelector(selectVersionsStatus);
     const settings = useAppSelector(selectSettings);
-    const isModeActive = useAppSelector(selectIsModeActive);
     const { resolvedTheme } = useTheme();
     const isDesktopRuntime = useMemo(() => typeof window !== 'undefined' && hasDesktopScriptsRuntime(), []);
     const consoleRef = useRef<HTMLDivElement>(null);
@@ -1373,8 +1363,6 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
             {/* ── Right Panel ── */}
             <div className="w-[350px] flex-shrink-0 border-l dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex flex-col h-full overflow-hidden">
                 <div className="flex-1 overflow-y-auto overflow-x-hidden">
-                    {isModeActive && <ServerProfilesPanel />}
-                    {isModeActive && <RemoteExecutionPanel />}
                     {activeScriptId && (
                         <>
                             <ScriptInspectorSection

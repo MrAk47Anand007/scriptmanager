@@ -1,18 +1,11 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import dynamic from 'next/dynamic'
 import { X } from 'lucide-react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { selectDockVisible, selectActiveDockTab } from '@/features/workbench/selectors'
 import { setDockVisible, setActiveDockTab, type DockTabId } from '@/features/workbench/workbenchSlice'
-import { selectIsModeActive } from '@/features/ops/selectors'
 import { cn } from '@/lib/utils'
-
-const AuditTrailPanel = dynamic(() => import('../AuditTrailPanel').then((mod) => mod.AuditTrailPanel), {
-  ssr: false,
-  loading: () => <div className="p-3 text-[10px] text-muted-foreground">Loading audit trail...</div>,
-})
 
 const DOCK_HEIGHT_KEY = 'wb_dock_height'
 const DEFAULT_HEIGHT = 280
@@ -40,9 +33,7 @@ export function BottomDock() {
   const dispatch = useAppDispatch()
   const visible = useAppSelector(selectDockVisible)
   const activeTab = useAppSelector(selectActiveDockTab)
-  const isModeActive = useAppSelector(selectIsModeActive)
   const [height, setHeight] = useState(DEFAULT_HEIGHT)
-  const [auditMounted, setAuditMounted] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null)
 
@@ -54,20 +45,15 @@ export function BottomDock() {
     }
   }, [])
 
-  // Lazy-mount audit pane on first activation, then keep mounted.
+  // The Audit pane moved to the Ops console (OpsView) — if persisted state
+  // still points at it, fall back to Terminal. setActiveDockTab force-opens
+  // the dock, so restore hidden state after.
   useEffect(() => {
-    if (visible && activeTab === 'audit') setAuditMounted(true)
-  }, [activeTab, visible])
-
-  // The Audit tab only exists while ops mode is on — if it goes away while
-  // active, fall back to Terminal so the dock isn't left on a missing tab.
-  // setActiveDockTab force-opens the dock, so restore hidden state after.
-  useEffect(() => {
-    if (!isModeActive && activeTab === 'audit') {
+    if (activeTab === 'audit') {
       dispatch(setActiveDockTab('terminal'))
       if (!visible) dispatch(setDockVisible(false))
     }
-  }, [isModeActive, activeTab, visible, dispatch])
+  }, [activeTab, visible, dispatch])
 
   // Window listeners only attached while a drag is in progress (mirrors SidePanel)
   useEffect(() => {
@@ -105,7 +91,7 @@ export function BottomDock() {
     event.preventDefault()
   }, [height])
 
-  const tabs = isModeActive ? [...BASE_TABS, { id: 'audit' as DockTabId, label: 'Audit' }] : BASE_TABS
+  const tabs = BASE_TABS
 
   return (
     // Keep children mounted when hidden (height 0) so the terminal pty/xterm buffer survives.
@@ -150,9 +136,6 @@ export function BottomDock() {
         <div id={DOCK_PANE_IDS.terminal} className={cn('absolute inset-0', activeTab !== 'terminal' && 'hidden')} />
         <div id={DOCK_PANE_IDS.output} className={cn('absolute inset-0 overflow-hidden', activeTab !== 'output' && 'hidden')} />
         <div id={DOCK_PANE_IDS.builds} className={cn('absolute inset-0 overflow-hidden', activeTab !== 'builds' && 'hidden')} />
-        <div className={cn('absolute inset-0 overflow-y-auto', activeTab !== 'audit' && 'hidden')}>
-          {auditMounted && <AuditTrailPanel />}
-        </div>
       </div>
     </div>
   )

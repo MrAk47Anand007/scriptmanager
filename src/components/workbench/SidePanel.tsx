@@ -5,6 +5,7 @@ import { useAppSelector } from '@/store/hooks'
 import { selectActiveActivity, selectSidePanelVisible } from '@/features/workbench/selectors'
 import { ScriptsSidebar } from '@/components/ScriptsSidebar'
 import { ApiSidebar } from '@/components/api/ApiSidebar'
+import { OpsSidebar } from './OpsSidebar'
 import { cn } from '@/lib/utils'
 
 const MIN_WIDTH = 200
@@ -87,8 +88,9 @@ export function SidePanel() {
 
   // Settings and Schedules have no sidebar — the panel collapses to width 0 there too.
   const collapsed = !sidePanelVisible || activeActivity === 'settings' || activeActivity === 'schedules'
-  const scriptsActive = activeActivity === 'scripts' || activeActivity === 'ops'
+  const scriptsActive = activeActivity === 'scripts'
   const apiActive = activeActivity === 'api'
+  const opsActive = activeActivity === 'ops'
 
   return (
     <div className="flex h-full shrink-0">
@@ -109,6 +111,11 @@ export function SidePanel() {
           {apiMounted && (
             <div className={cn('h-full', !apiActive && 'hidden')}>
               <ApiSidebar />
+            </div>
+          )}
+          {opsActive && (
+            <div className="h-full">
+              <OpsSidebar />
             </div>
           )}
         </div>

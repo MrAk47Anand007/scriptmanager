@@ -77,6 +77,13 @@ const SettingsManager = dynamic(
   }
 )
 
+const OpsView = dynamic(
+  () => import('@/components/OpsView').then((mod) => mod.OpsView),
+  {
+    loading: () => <SectionSkeleton label="Loading ops console" />,
+  }
+)
+
 function SectionSkeleton({ label }: { label: string }) {
   return (
     <div className="flex h-full items-center justify-center bg-white dark:bg-slate-950">
@@ -105,7 +112,7 @@ function scheduleIdleWork(callback: () => void, delay = 180) {
   return () => globalThis.clearTimeout(timeoutId)
 }
 
-type TabId = 'scripts' | 'settings' | 'api' | 'schedules'
+type TabId = 'scripts' | 'settings' | 'api' | 'schedules' | 'ops'
 
 export default function Home() {
   const dispatch = useAppDispatch()
@@ -125,13 +132,16 @@ export default function Home() {
     ? 'settings'
     : activeActivity === 'schedules'
       ? 'schedules'
-      : activeEditorKind === 'api' ? 'api' : 'scripts'
+      : activeActivity === 'ops'
+        ? 'ops'
+        : activeEditorKind === 'api' ? 'api' : 'scripts'
   const [isBootstrapping, setIsBootstrapping] = useState(true)
   const [mountedTabs, setMountedTabs] = useState<Record<TabId, boolean>>({
     scripts: true,
     settings: false,
     api: false,
     schedules: false,
+    ops: false,
   })
 
   useEffect(() => {
@@ -249,6 +259,12 @@ export default function Home() {
       : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
     [activeTab]
   )
+  const opsPanelClassName = useMemo(
+    () => activeTab === 'ops'
+      ? 'absolute inset-0 opacity-100 z-10'
+      : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
+    [activeTab]
+  )
   const settingsPanelClassName = useMemo(
     () => activeTab === 'settings'
       ? 'absolute inset-0 overflow-y-auto bg-white dark:bg-slate-950 opacity-100 z-10'
@@ -268,7 +284,7 @@ export default function Home() {
             <div className="h-full w-full animate-pulse bg-gradient-to-r from-blue-500 via-blue-300 to-blue-500" />
           </div>
         )}
-        {activeTab !== 'settings' && activeTab !== 'schedules' && <EditorTabs />}
+        {activeTab !== 'settings' && activeTab !== 'schedules' && activeTab !== 'ops' && <EditorTabs />}
         <main className="relative flex-1 overflow-hidden">
           {mountedTabs.scripts && (
             <div className={scriptsPanelClassName}>
@@ -283,6 +299,11 @@ export default function Home() {
           {mountedTabs.schedules && (
             <div className={schedulesPanelClassName}>
               <SchedulesView />
+            </div>
+          )}
+          {mountedTabs.ops && (
+            <div className={opsPanelClassName}>
+              <OpsView />
             </div>
           )}
           {mountedTabs.settings && (
