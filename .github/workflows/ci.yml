@@ -9,7 +9,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: file:./data/ci.db
+      DATABASE_URL: file:./ci.db
       AUTH_SECRET: ci-only-secret-not-for-production
       SESSION_SECRET: ci-only-session-secret
     steps:
@@ -20,5 +20,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
+      - run: touch prisma/ci.db && npx prisma migrate deploy
       - run: npm run test:unit
+      - run: npm run test:integration
       - run: npm run build

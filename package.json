@@ -12,6 +12,7 @@
     "build": "npx prisma generate && next build",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
     "test:coverage": "vitest run --coverage",
     "start": "NODE_ENV=production ts-node -r tsconfig-paths/register --project tsconfig.server.json server.ts",
     "db:migrate": "prisma migrate dev",
