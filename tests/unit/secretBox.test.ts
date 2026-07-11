@@ -1,14 +1,14 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 afterEach(() => {
-  delete process.env.AUTH_SECRET
-  delete process.env.DESKTOP_AUTH_SECRET
-  delete process.env.NODE_ENV
+  vi.unstubAllEnvs()
 })
 
 describe('storage secret configuration', () => {
   it('rejects encryption with no configured secret in production', async () => {
-    process.env.NODE_ENV = 'production'
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('AUTH_SECRET', '')
+    vi.stubEnv('DESKTOP_AUTH_SECRET', '')
     const { encryptString } = await import('@/lib/storage/secretBox')
     expect(() => encryptString('credential')).toThrow('Storage encryption requires AUTH_SECRET or DESKTOP_AUTH_SECRET in production')
   })
