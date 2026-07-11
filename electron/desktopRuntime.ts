@@ -8,6 +8,14 @@ import os from 'os'
 import path from 'path'
 import { getDesktopWorkspaceLayout, ensureDesktopWorkspaceLayout, sanitizeWorkspaceName } from '../src/lib/workspaceLayout'
 import {
+  deleteStorageProvider as deleteDesktopStorageProvider,
+  listStorageProviders as listDesktopStorageProviders,
+  saveStorageProvider as saveDesktopStorageProvider,
+  testStorageProvider as testDesktopStorageProvider,
+  type SaveStorageProviderPayload,
+} from '../src/lib/storage/providerStore'
+import { ensureFreshScript, pushScript, syncCollection } from '../src/lib/storage/syncService'
+import {
   clearApiHistory as clearDesktopApiHistory,
   deleteApiCollection as deleteDesktopApiCollection,
   deleteApiEnvironment as deleteDesktopApiEnvironment,
@@ -41,6 +49,7 @@ import {
   testConnection as testDesktopConnection,
   transferScript as transferDesktopRemoteScript,
 } from './opsRuntime'
+import { scanForScripts, type ScanForScriptsResult } from './scriptScanner'
 
 type TerminalEvent =
   | { sessionId: string; type: 'connected' }
@@ -111,6 +120,8 @@ type CollectionDto = {
   python_toolchain_enabled: boolean
   python_venv_path: string | null
   python_interpreter_path: string | null
+  storage_provider_id: string | null
+  remote_prefix: string | null
   created_at: string
 }
 
@@ -172,11 +183,24 @@ type UpdateCollectionPayload = {
   name?: string
   projectId?: string | null
   parentId?: string | null
+  storageProviderId?: string | null
+  remotePrefix?: string | null
 }
 
 type DeleteCollectionPayload = {
   id: string
   hardDelete?: boolean
+}
+
+type ScanPcScriptsPayload = {
+  roots: string[]
+  extensions: string[]
+}
+
+type ImportScannedScriptsPayload = {
+  files: { path: string }[]
+  mode: 'misc' | 'by-folder'
+  rootForGrouping?: string
 }
 
 type ManageCollectionPythonEnvPayload = {
@@ -196,6 +220,8 @@ type CollectionRecord = {
   pythonToolchainEnabled: boolean
   pythonVenvPath: string | null
   pythonInterpreterPath: string | null
+  storageProviderId?: string | null
+  remotePrefix?: string | null
   createdAt: Date
   _count?: { scripts: number }
 }
@@ -421,6 +447,8 @@ function serializeCollectionRecord(collection: CollectionRecord): CollectionDto 
     python_toolchain_enabled: collection.pythonToolchainEnabled,
     python_venv_path: collection.pythonVenvPath ?? null,
     python_interpreter_path: collection.pythonInterpreterPath ?? null,
+    storage_provider_id: collection.storageProviderId ?? null,
+    remote_prefix: collection.remotePrefix ?? null,
     created_at: collection.createdAt.toISOString(),
   }
 }
@@ -1168,6 +1196,13 @@ async function updateLocalCollection(payload: UpdateCollectionPayload): Promise<
     throw new Error('Collection not found')
   }
 
+  if (payload.storageProviderId) {
+    const provider = await prisma.storageProvider.findUnique({ where: { id: payload.storageProviderId } })
+    if (!provider) {
+      throw new Error('Storage provider not found')
+    }
+  }
+
   const subtree = await getCollectionSubtree(collection.id)
   const descendantIds = new Set(subtree.slice(1).map((entry) => entry.id))
   if (payload.parentId && descendantIds.has(payload.parentId)) {
@@ -1241,6 +1276,13 @@ async function updateLocalCollection(payload: UpdateCollectionPayload): Promise<
           pythonInterpreterPath: oldRootFolderPath && nextRootFolderPath
             ? replacePathPrefix(entry.pythonInterpreterPath, oldRootFolderPath, nextRootFolderPath)
             : entry.pythonInterpreterPath,
+          // Cloud binding only changes on the root collection of the update
+          ...(isRoot && payload.storageProviderId !== undefined
+            ? { storageProviderId: payload.storageProviderId || null }
+            : {}),
+          ...(isRoot && payload.remotePrefix !== undefined
+            ? { remotePrefix: payload.remotePrefix || null }
+            : {}),
         },
         include: { _count: { select: { scripts: true } } },
       })
@@ -1450,6 +1492,15 @@ async function saveLocalScript(payload: SaveScriptPayload): Promise<ScriptDto> {
       updatedAt: new Date(),
     },
     include: { tags: { include: { tag: true } } },
+  })
+
+  // Push-on-save: fire-and-forget upload for cloud-bound collections.
+  void pushScript(prisma, script.id, getScriptsDir()).then((result) => {
+    if (result.pushed) {
+      console.log(`[CloudSync] pushed ${script.filename} after save`)
+    } else if (result.error) {
+      console.warn(`[CloudSync] push after save failed for ${script.filename}: ${result.error}`)
+    }
   })
 
   return serializeScriptRecord(updated)
@@ -1698,6 +1749,152 @@ async function openLocalFolder(payload: OpenFolderPayload) {
   }
 }
 
+// --- Find scripts on this PC (scan + import as linked scripts) ---
+
+async function scanPcScripts(payload: ScanPcScriptsPayload): Promise<ScanForScriptsResult> {
+  const roots = (payload.roots ?? []).map((root) => String(root).trim()).filter(Boolean)
+  if (roots.length === 0) {
+    throw new Error('At least one folder is required')
+  }
+
+  for (const root of roots) {
+    if (!path.isAbsolute(root)) {
+      throw new Error(`Folder path must be absolute: ${root}`)
+    }
+    if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+      throw new Error(`Folder does not exist: ${root}`)
+    }
+  }
+
+  const extensions = (payload.extensions ?? []).filter((ext) => typeof ext === 'string' && ext.trim())
+  if (extensions.length === 0) {
+    throw new Error('At least one extension is required')
+  }
+
+  return scanForScripts({ roots, extensions })
+}
+
+function normalizeSourcePathKey(sourcePath: string): string {
+  const resolved = path.resolve(sourcePath)
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+}
+
+/** Group name for 'by-folder' mode: top-level segment under the scan root, falling back to the parent dir name. */
+function scannedScriptGroupName(filePath: string, rootForGrouping?: string): string {
+  if (rootForGrouping) {
+    const relative = path.relative(path.resolve(rootForGrouping), path.resolve(filePath))
+    if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+      const segments = relative.split(/[\\/]/).filter(Boolean)
+      if (segments.length > 1) {
+        return segments[0]!
+      }
+      return path.basename(path.resolve(rootForGrouping)) || 'Miscellaneous'
+    }
+  }
+  return path.basename(path.dirname(path.resolve(filePath))) || 'Miscellaneous'
+}
+
+/** Find-or-create a plain DB collection (no folderPath) by name. */
+async function findOrCreatePlainCollection(name: string, cache: Map<string, string>): Promise<string> {
+  const cached = cache.get(name)
+  if (cached) {
+    return cached
+  }
+
+  const existing = await prisma.collection.findFirst({ where: { name } })
+  if (existing) {
+    cache.set(name, existing.id)
+    return existing.id
+  }
+
+  const created = await prisma.collection.create({
+    data: {
+      name,
+      description: '',
+      isTemporary: false,
+    },
+  })
+  cache.set(name, created.id)
+  return created.id
+}
+
+async function importScannedScripts(payload: ImportScannedScriptsPayload): Promise<{
+  imported: number
+  skipped: number
+  collections: string[]
+}> {
+  const requested = (payload.files ?? [])
+    .map((file) => String(file?.path ?? '').trim())
+    .filter(Boolean)
+
+  if (requested.length === 0) {
+    return { imported: 0, skipped: 0, collections: [] }
+  }
+
+  // Skip files already linked (compare sourcePath case-insensitively on Windows).
+  const existingScripts = await prisma.script.findMany({
+    where: { sourcePath: { not: null } },
+    select: { sourcePath: true },
+  })
+  const existingSourceKeys = new Set(
+    existingScripts
+      .map((script) => script.sourcePath)
+      .filter((sourcePath): sourcePath is string => Boolean(sourcePath))
+      .map(normalizeSourcePathKey),
+  )
+
+  const collectionCache = new Map<string, string>()
+  const usedCollectionNames = new Set<string>()
+  const seenInBatch = new Set<string>()
+  let imported = 0
+  let skipped = 0
+
+  for (const rawPath of requested) {
+    const absolutePath = path.resolve(rawPath)
+    const key = normalizeSourcePathKey(absolutePath)
+    if (existingSourceKeys.has(key) || seenInBatch.has(key)) {
+      skipped += 1
+      continue
+    }
+    if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) {
+      skipped += 1
+      continue
+    }
+    seenInBatch.add(key)
+
+    const collectionName = payload.mode === 'by-folder'
+      ? scannedScriptGroupName(absolutePath, payload.rootForGrouping)
+      : 'Miscellaneous'
+    const collectionId = await findOrCreatePlainCollection(collectionName, collectionCache)
+    usedCollectionNames.add(collectionName)
+
+    const filename = path.basename(absolutePath)
+    const baseName = path.basename(absolutePath, path.extname(absolutePath)) || filename
+
+    // Dedupe the display name with a numeric suffix, mirroring duplicateScript.
+    let name = baseName
+    let counter = 2
+    while (await prisma.script.findFirst({ where: { name } })) {
+      name = `${baseName} ${counter++}`
+    }
+
+    await prisma.script.create({
+      data: {
+        name,
+        filename,
+        sourcePath: absolutePath,
+        language: inferScriptLanguage(absolutePath),
+        parameters: '[]',
+        webhookToken: crypto.randomUUID().replace(/-/g, ''),
+        collectionId,
+      },
+    })
+    imported += 1
+  }
+
+  return { imported, skipped, collections: Array.from(usedCollectionNames) }
+}
+
 // --- Native build notifications + last-run tracking (used by the tray in main.ts) ---
 
 let notificationsEnabled = true
@@ -1796,6 +1993,11 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
   const runStartedAt = Date.now()
   const buildId = payload.buildId?.trim() || crypto.randomUUID()
   const logFile = getBuildLogPath(script.filename, buildId)
+
+  // Pull-on-run: refresh cloud-bound scripts before executing; remote failures
+  // degrade to the cached local copy (warning surfaced in the build output).
+  const freshness = await ensureFreshScript(prisma, script.id, getScriptsDir())
+
   const scriptPath = resolveScriptPath(script)
   const executionContext = await getScriptExecutionContext(script)
   const timeoutMs = await getTimeoutMs(script.timeoutMs)
@@ -1812,6 +2014,12 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
   })
 
   sendBuildEvent(window.webContents, { type: 'started', buildId })
+
+  if (freshness.pulled) {
+    sendBuildEvent(window.webContents, { type: 'line', buildId, line: '[cloud] pulled latest version from storage provider\n' })
+  } else if (freshness.warning) {
+    sendBuildEvent(window.webContents, { type: 'line', buildId, line: `[cloud] ${freshness.warning}\n` })
+  }
 
   if (!fs.existsSync(scriptPath)) {
     const message = `Script file not found: ${scriptPath}`
@@ -2045,6 +2253,14 @@ export function initDesktopRuntimeIpc() {
     return openLocalFolder(payload)
   })
 
+  ipcMain.handle('scriptmanager:runtime:scan-pc-scripts', async (_event, payload: ScanPcScriptsPayload) => {
+    return scanPcScripts(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:import-scanned-scripts', async (_event, payload: ImportScannedScriptsPayload) => {
+    return importScannedScripts(payload)
+  })
+
   ipcMain.handle('scriptmanager:runtime:list-api-collections', async () => {
     return listDesktopApiCollections()
   })
@@ -2167,6 +2383,26 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:list-audit-log', async (_event, payload) => {
     return listDesktopAuditLog(payload ?? undefined)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-storage-providers', async () => {
+    return listDesktopStorageProviders(prisma)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-storage-provider', async (_event, payload: SaveStorageProviderPayload) => {
+    return saveDesktopStorageProvider(prisma, payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:delete-storage-provider', async (_event, id: string) => {
+    return deleteDesktopStorageProvider(prisma, id)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:test-storage-provider', async (_event, id: string) => {
+    return testDesktopStorageProvider(prisma, id)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:sync-collection', async (_event, collectionId: string) => {
+    return syncCollection(prisma, collectionId, getScriptsDir())
   })
 
   ipcMain.handle('scriptmanager:runtime:warm-terminal', async (event, payload?: { sessionId?: string }) => {

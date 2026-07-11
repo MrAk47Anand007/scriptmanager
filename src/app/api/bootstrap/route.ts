@@ -63,8 +63,11 @@ export async function GET() {
             description: c.description,
             script_count: c._count.scripts,
             project_id: c.projectId ?? null,
+            parent_id: c.parentId ?? null,
             folder_path: c.folderPath ?? null,
             is_temporary: c.isTemporary,
+            storage_provider_id: c.storageProviderId ?? null,
+            remote_prefix: c.remotePrefix ?? null,
             created_at: c.createdAt.toISOString(),
         }))),
 

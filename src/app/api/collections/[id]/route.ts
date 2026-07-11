@@ -19,11 +19,20 @@ export async function PUT(
     python_toolchain_enabled,
     python_venv_path,
     python_interpreter_path,
+    storage_provider_id,
+    remote_prefix,
   } = await req.json()
 
   const collection = await prisma.collection.findUnique({ where: { id } })
   if (!collection) {
     return NextResponse.json({ error: 'Collection not found' }, { status: 404 })
+  }
+
+  if (storage_provider_id) {
+    const provider = await prisma.storageProvider.findUnique({ where: { id: storage_provider_id } })
+    if (!provider) {
+      return NextResponse.json({ error: 'Storage provider not found' }, { status: 400 })
+    }
   }
 
   const updated = await prisma.collection.update({
@@ -38,6 +47,8 @@ export async function PUT(
       pythonToolchainEnabled: python_toolchain_enabled !== undefined ? !!python_toolchain_enabled : collection.pythonToolchainEnabled,
       pythonVenvPath: python_venv_path !== undefined ? (python_venv_path || null) : collection.pythonVenvPath,
       pythonInterpreterPath: python_interpreter_path !== undefined ? (python_interpreter_path || null) : collection.pythonInterpreterPath,
+      storageProviderId: storage_provider_id !== undefined ? (storage_provider_id || null) : collection.storageProviderId,
+      remotePrefix: remote_prefix !== undefined ? (remote_prefix || null) : collection.remotePrefix,
     },
   })
 
@@ -53,6 +64,8 @@ export async function PUT(
     python_toolchain_enabled: updated.pythonToolchainEnabled,
     python_venv_path: updated.pythonVenvPath,
     python_interpreter_path: updated.pythonInterpreterPath,
+    storage_provider_id: updated.storageProviderId,
+    remote_prefix: updated.remotePrefix,
     created_at: updated.createdAt.toISOString(),
   })
 }

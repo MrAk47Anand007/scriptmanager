@@ -6,7 +6,7 @@ import type { RootState } from '@/store/store';
 import {
     setActiveScript, createScript, createCollection, deleteCollection, moveScript, moveCollection,
     saveAsTemplate, duplicateScript, deleteScript, openScriptsFolder, importScriptsFolder,
-    removeTemporaryCollection, convertTemporaryCollection, fetchCollections,
+    removeTemporaryCollection, convertTemporaryCollection, fetchCollections, fetchScripts,
 } from '@/features/scripts/scriptsSlice';
 import type { Script, Collection, ScriptTemplate } from '@/features/scripts/scriptsSlice';
 import {
@@ -24,14 +24,17 @@ import { toast } from '@/components/ui/toast';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
-    FileCode, Plus, Folder, Search, LayoutTemplate, Loader2, Layers, FolderOpen,
+    FileCode, Plus, Folder, Search, LayoutTemplate, Loader2, Layers, FolderOpen, ScanSearch,
 } from 'lucide-react';
+import { ScanPcDialog } from './sidebar/ScanPcDialog';
 import { CreateScriptDialog } from './sidebar/CreateScriptDialog';
 import { CreateCollectionDialog } from './sidebar/CreateCollectionDialog';
 import { OpenFolderDialog, type OpenFolderSubmitValues } from './sidebar/OpenFolderDialog';
 import { DeleteScriptDialog } from './sidebar/DeleteScriptDialog';
 import { DeleteCollectionDialog } from './sidebar/DeleteCollectionDialog';
 import { PythonEnvDialog } from './sidebar/PythonEnvDialog';
+import { CloudStorageDialog } from './sidebar/CloudStorageDialog';
+import { syncCollectionRemote } from '@/lib/storageRuntimeClient';
 import { SaveAsTemplateDialog } from './sidebar/SaveAsTemplateDialog';
 import { ScriptTree, getCollectionTreeKey, type ScriptTreeCallbacks } from './sidebar/ScriptTree';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
@@ -103,8 +106,11 @@ const ScriptsSidebarComponent = () => {
     const [convertCollectionName, setConvertCollectionName] = useState('');
     const [isConvertingCollection, setIsConvertingCollection] = useState(false);
     const [hasDesktopFolderPicker, setHasDesktopFolderPicker] = useState(false);
+    const [hasDesktopPcScan, setHasDesktopPcScan] = useState(false);
+    const [isScanPcDialogOpen, setIsScanPcDialogOpen] = useState(false);
     const [pythonEnvCollection, setPythonEnvCollection] = useState<Collection | null>(null);
     const [isPythonEnvLoading, setIsPythonEnvLoading] = useState(false);
+    const [cloudStorageCollection, setCloudStorageCollection] = useState<Collection | null>(null);
 
     // Search + filter state
     const [searchQuery, setSearchQuery] = useState('');
@@ -163,6 +169,7 @@ const ScriptsSidebarComponent = () => {
 
     useEffect(() => {
         setHasDesktopFolderPicker(Boolean(window.scriptManagerDesktop?.selectFolder));
+        setHasDesktopPcScan(Boolean(window.scriptManagerDesktop?.runtime?.scanPcScripts));
 
         const openFolderFromDesktopMenu = () => {
             openFolderDialog();
@@ -288,6 +295,28 @@ const ScriptsSidebarComponent = () => {
 
     const handlePythonEnvChanged = useCallback(async () => {
         await dispatch(fetchCollections());
+    }, [dispatch]);
+
+    const openCloudStorageDialog = useCallback((collection: Collection) => {
+        setCloudStorageCollection(collection);
+    }, []);
+
+    const handleSyncCollection = useCallback(async (collection: Collection) => {
+        toast.info(`Syncing "${collection.name}"...`);
+        try {
+            const result = await syncCollectionRemote(collection.id);
+            if (result.ok) {
+                toast.success(`Pulled ${result.pulled}, pushed ${result.pushed}, ${result.conflicts} conflicts`);
+                if (result.pulled > 0) {
+                    await Promise.all([dispatch(fetchScripts()), dispatch(fetchCollections())]);
+                }
+            } else {
+                toast.error(result.error ?? 'Sync failed');
+            }
+        } catch (error) {
+            console.error('Failed to sync collection:', error);
+            toast.error(error instanceof Error ? error.message : 'Sync failed');
+        }
     }, [dispatch]);
 
     const handleOpenFolderSubmit = async (values: OpenFolderSubmitValues): Promise<string | null> => {
@@ -674,12 +703,14 @@ const ScriptsSidebarComponent = () => {
         onCreateCollection: openCreateCollectionDialog,
         onConvertCollection: openConvertCollectionDialog,
         onManagePythonEnv: openPythonEnvironmentDialog,
+        onCloudStorage: openCloudStorageDialog,
+        onSyncCollection: handleSyncCollection,
         onDeleteProject: handleDeleteProject,
     }), [
         toggleCollection, toggleProject, handleActivateScript, openSaveAsTemplate,
         handleDuplicateScript, handleDeleteScriptRequest, handleDeleteCollection,
         openCreateScriptDialog, openCreateCollectionDialog, openConvertCollectionDialog,
-        openPythonEnvironmentDialog, handleDeleteProject,
+        openPythonEnvironmentDialog, openCloudStorageDialog, handleSyncCollection, handleDeleteProject,
     ]);
 
     return (
@@ -699,6 +730,11 @@ const ScriptsSidebarComponent = () => {
                                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={openFolderDialog} title="Open local folder">
                                     <FolderOpen className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                                 </Button>
+                                {hasDesktopPcScan && (
+                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsScanPcDialogOpen(true)} title="Find scripts on this PC">
+                                        <ScanSearch className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
+                                    </Button>
+                                )}
                                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => dispatch(setPaletteOpen(true))} title="Command palette (Ctrl+P)">
                                     <Search className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                                 </Button>
@@ -870,12 +906,20 @@ const ScriptsSidebarComponent = () => {
                     onOpenChange={setIsOpenFolderDialogOpen}
                     onSubmit={handleOpenFolderSubmit}
                 />
+                <ScanPcDialog
+                    open={isScanPcDialogOpen}
+                    onOpenChange={setIsScanPcDialogOpen}
+                />
                 <PythonEnvDialog
                     collection={pythonEnvCollection}
                     loading={isPythonEnvLoading}
                     onLoadingChange={setIsPythonEnvLoading}
                     onOpenChange={(open) => !open && setPythonEnvCollection(null)}
                     onEnvChanged={handlePythonEnvChanged}
+                />
+                <CloudStorageDialog
+                    collection={cloudStorageCollection}
+                    onOpenChange={(open) => !open && setCloudStorageCollection(null)}
                 />
                 <Dialog open={!!collectionToConvert} onOpenChange={(open) => !open && setCollectionToConvert(null)}>
                     <DialogContent className="sm:max-w-md">

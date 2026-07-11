@@ -20,6 +20,8 @@ export async function GET() {
     python_toolchain_enabled: c.pythonToolchainEnabled,
     python_venv_path: c.pythonVenvPath ?? null,
     python_interpreter_path: c.pythonInterpreterPath ?? null,
+    storage_provider_id: c.storageProviderId ?? null,
+    remote_prefix: c.remotePrefix ?? null,
     created_at: c.createdAt.toISOString()
   })))
 }
@@ -70,6 +72,8 @@ export async function POST(req: Request) {
     python_toolchain_enabled: collection.pythonToolchainEnabled,
     python_venv_path: collection.pythonVenvPath,
     python_interpreter_path: collection.pythonInterpreterPath,
+    storage_provider_id: collection.storageProviderId,
+    remote_prefix: collection.remotePrefix,
     created_at: collection.createdAt.toISOString()
   })
 }

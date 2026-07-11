@@ -12,6 +12,8 @@ import {
   setDesktopNotificationsEnabled,
   setLastRunScriptListener,
 } from './desktopRuntime'
+import { OAUTH_ENDPOINTS, runOAuthFlow } from './oauthFlow'
+import { getDefaultClientId } from './oauthDefaults'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
 // In production (packaged), Electron spawns the standalone server itself.
@@ -751,6 +753,53 @@ ipcMain.handle('scriptmanager:copy-text', async (_event, value: string) => {
 ipcMain.handle('scriptmanager:read-text', async () => {
   return clipboard.readText()
 })
+
+// Desktop OAuth connect (PKCE loopback) for Google Drive / OneDrive storage
+// providers. Uses the built-in app client ID when the renderer doesn't pass
+// one — one-click connect, like any commercial desktop app.
+ipcMain.handle(
+  'scriptmanager:oauth-connect',
+  async (_event, payload: { provider: 'gdrive' | 'onedrive'; clientId?: string; fullAccess?: boolean }) => {
+    try {
+      const endpoints = OAUTH_ENDPOINTS[payload?.provider]
+      if (!endpoints) {
+        return { ok: false, error: `Unknown OAuth provider '${String(payload?.provider)}'` }
+      }
+      const clientId = payload.clientId?.trim() || getDefaultClientId(payload.provider)
+      if (!clientId) {
+        return {
+          ok: false,
+          error: 'No OAuth Client ID available — this build has no built-in app credentials. Enter your own Client ID under Advanced.',
+        }
+      }
+      const tokens = await runOAuthFlow({
+        authUrl: endpoints.authUrl,
+        tokenUrl: endpoints.tokenUrl,
+        clientId,
+        scopes: payload.fullAccess ? endpoints.fullAccessScopes : endpoints.scopes,
+        extraAuthParams: { ...endpoints.extraAuthParams },
+      })
+      return {
+        ok: true,
+        refreshToken: tokens.refreshToken,
+        accessToken: tokens.accessToken,
+        expiresAt: tokens.expiresAt,
+        // The renderer persists this into the provider config so token
+        // refreshes use the same client the consent was granted to.
+        clientIdUsed: clientId,
+      }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+)
+
+// Which providers have a built-in client ID (i.e. one-click connect works
+// without the user supplying their own).
+ipcMain.handle('scriptmanager:oauth-defaults', async () => ({
+  gdrive: Boolean(getDefaultClientId('gdrive')),
+  onedrive: Boolean(getDefaultClientId('onedrive')),
+}))
 
 app.on('window-all-closed', () => {
   serverProcess?.kill()

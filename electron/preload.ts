@@ -9,6 +9,17 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
   readClipboardText: () => ipcRenderer.invoke('scriptmanager:read-text') as Promise<string>,
   setNotificationsEnabled: (enabled: boolean) =>
     ipcRenderer.invoke('scriptmanager:set-notifications-enabled', enabled) as Promise<boolean>,
+  oauthConnect: (payload: { provider: 'gdrive' | 'onedrive'; clientId?: string; fullAccess?: boolean }) =>
+    ipcRenderer.invoke('scriptmanager:oauth-connect', payload) as Promise<{
+      ok: boolean
+      refreshToken?: string
+      accessToken?: string
+      expiresAt?: number
+      clientIdUsed?: string
+      error?: string
+    }>,
+  oauthDefaults: () =>
+    ipcRenderer.invoke('scriptmanager:oauth-defaults') as Promise<{ gdrive: boolean; onedrive: boolean }>,
   runtime: {
     listScripts: () => ipcRenderer.invoke('scriptmanager:runtime:list-scripts') as Promise<unknown[]>,
     listCollections: () => ipcRenderer.invoke('scriptmanager:runtime:list-collections') as Promise<unknown[]>,
@@ -26,6 +37,10 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     deleteScript: (payload: { id: string }) => ipcRenderer.invoke('scriptmanager:runtime:delete-script', payload) as Promise<string>,
     duplicateScript: (scriptId: string) => ipcRenderer.invoke('scriptmanager:runtime:duplicate-script', scriptId) as Promise<unknown>,
     openFolder: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:open-folder', payload) as Promise<unknown>,
+    scanPcScripts: (payload: { roots: string[]; extensions: string[] }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:scan-pc-scripts', payload) as Promise<unknown>,
+    importScannedScripts: (payload: { files: { path: string }[]; mode: 'misc' | 'by-folder'; rootForGrouping?: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:import-scanned-scripts', payload) as Promise<unknown>,
     setTerminalContext: (payload: { sessionId?: string; scriptId: string | null }) => ipcRenderer.invoke('scriptmanager:runtime:set-terminal-context', payload) as Promise<{ ok: boolean }>,
     warmTerminal: (payload?: { sessionId?: string }) => ipcRenderer.invoke('scriptmanager:runtime:warm-terminal', payload ?? {}) as Promise<{ ok: boolean }>,
     sendTerminalInput: (payload: { sessionId?: string; data: string }) => ipcRenderer.invoke('scriptmanager:runtime:terminal-input', payload) as Promise<{ ok: boolean }>,
@@ -68,6 +83,11 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
       ipcRenderer.invoke('scriptmanager:runtime:approve-remote-execution', payload) as Promise<string>,
     rejectRemoteExecution: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:reject-remote-execution', id) as Promise<string>,
     listAuditLog: (payload?: unknown) => ipcRenderer.invoke('scriptmanager:runtime:list-audit-log', payload ?? null) as Promise<unknown>,
+    listStorageProviders: () => ipcRenderer.invoke('scriptmanager:runtime:list-storage-providers') as Promise<unknown[]>,
+    saveStorageProvider: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-storage-provider', payload) as Promise<unknown>,
+    deleteStorageProvider: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-storage-provider', id) as Promise<unknown>,
+    testStorageProvider: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:test-storage-provider', id) as Promise<unknown>,
+    syncCollection: (collectionId: string) => ipcRenderer.invoke('scriptmanager:runtime:sync-collection', collectionId) as Promise<unknown>,
     onTerminalEvent: (listener: (event: unknown) => void) => {
       const wrapped = (_event: unknown, payload: unknown) => listener(payload)
       ipcRenderer.on('scriptmanager:runtime:terminal', wrapped)

@@ -6,6 +6,7 @@ import fs from 'fs'
 import os from 'os'
 import { assertSafeStoredFilename } from '@/lib/executionSafety'
 import { ensureDesktopWorkspaceLayout, getDesktopWorkspaceLayout } from '@/lib/workspaceLayout'
+import { ensureFreshScript } from '@/lib/storage/syncService'
 
 // Module-level map: buildId -> EventEmitter (Node.js equivalent of Python's _output_queues dict)
 const buildEmitters = new Map<string, EventEmitter>()
@@ -98,6 +99,15 @@ export async function executeScriptAsync(
   const logFile = path.join(buildScriptDir, `${buildId}.log`)
 
   try {
+    // Pull-on-run: refresh cloud-bound scripts before executing. Never blocks —
+    // remote failures degrade to the cached local copy with a warning line.
+    const freshness = await ensureFreshScript(prisma, script.id, await getScriptsDir())
+    if (freshness.pulled) {
+      emitter.emit('line', '[cloud] pulled latest version from storage provider')
+    } else if (freshness.warning) {
+      emitter.emit('line', `[cloud] ${freshness.warning}`)
+    }
+
     const [scriptPath, scriptEnvVarsFromDB, defaultTimeoutMs] = await Promise.all([
       getScriptResolvedFilePath(script),
       prisma.scriptEnvVar.findMany({ where: { scriptId: script.id } }),
@@ -267,6 +277,11 @@ export async function getScriptResolvedFilePath(script: { filename: string; sour
   }
 
   return getScriptFilePath(script.filename)
+}
+
+/** Resolved managed scripts root — used by the cloud sync service callers. */
+export async function getScriptsRootDir(): Promise<string> {
+  return getScriptsDir()
 }
 
 export async function ensureScriptsDirExists(): Promise<void> {

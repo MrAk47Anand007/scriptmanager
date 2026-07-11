@@ -27,6 +27,8 @@ model Script {
   gistFilename    String?     @map("gist_filename")
   collectionId    String?     @map("collection_id")
   timeoutMs       Int?        @map("timeout_ms")
+  remoteEtag      String?     @map("remote_etag")
+  remoteSyncedAt  DateTime?   @map("remote_synced_at")
   createdAt       DateTime    @default(now()) @map("created_at")
   updatedAt       DateTime    @updatedAt @map("updated_at")
   lastRun         DateTime?   @map("last_run")
@@ -117,13 +119,29 @@ model Collection {
   createdAt   DateTime  @default(now()) @map("created_at")
   projectId   String?   @map("project_id")
   parentId    String?   @map("parent_id")
+  storageProviderId String? @map("storage_provider_id")
+  remotePrefix String?  @map("remote_prefix")
 
   scripts     Script[]
   project     Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
   parent      Collection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
   children    Collection[] @relation("CollectionHierarchy")
+  storageProvider StorageProvider? @relation(fields: [storageProviderId], references: [id], onDelete: SetNull)
 
   @@map("collections")
+}
+
+model StorageProvider {
+  id         String   @id @default(uuid())
+  name       String
+  type       String
+  configJson String   @map("config_json")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  collections Collection[]
+
+  @@map("storage_providers")
 }
 
 model Project {

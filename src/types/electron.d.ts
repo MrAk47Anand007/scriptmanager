@@ -27,6 +27,15 @@ declare global {
       copyText: (value: string) => Promise<boolean>
       readClipboardText: () => Promise<string>
       setNotificationsEnabled?: (enabled: boolean) => Promise<boolean>
+      oauthConnect?: (payload: { provider: 'gdrive' | 'onedrive'; clientId?: string; fullAccess?: boolean }) => Promise<{
+        ok: boolean
+        refreshToken?: string
+        accessToken?: string
+        expiresAt?: number
+        clientIdUsed?: string
+        error?: string
+      }>
+      oauthDefaults?: () => Promise<{ gdrive: boolean; onedrive: boolean }>
       runtime?: {
         listScripts: () => Promise<unknown[]>
         listCollections: () => Promise<unknown[]>
@@ -42,6 +51,16 @@ declare global {
         deleteScript: (payload: { id: string }) => Promise<string>
         duplicateScript: (scriptId: string) => Promise<unknown>
         openFolder: (payload: unknown) => Promise<unknown>
+        scanPcScripts?: (payload: { roots: string[]; extensions: string[] }) => Promise<{
+          files: Array<{ path: string; name: string; ext: string; sizeBytes: number; modifiedAt: string }>
+          truncated: boolean
+          scannedDirs: number
+        }>
+        importScannedScripts?: (payload: { files: { path: string }[]; mode: 'misc' | 'by-folder'; rootForGrouping?: string }) => Promise<{
+          imported: number
+          skipped: number
+          collections: string[]
+        }>
         setTerminalContext: (payload: { sessionId?: string; scriptId: string | null }) => Promise<{ ok: boolean }>
         warmTerminal: (payload?: { sessionId?: string }) => Promise<{ ok: boolean }>
         sendTerminalInput: (payload: { sessionId?: string; data: string }) => Promise<{ ok: boolean }>
@@ -78,6 +97,11 @@ declare global {
         approveRemoteExecution: (payload: { id: string; approverName: string }) => Promise<string>
         rejectRemoteExecution: (id: string) => Promise<string>
         listAuditLog: (payload?: unknown) => Promise<unknown>
+        listStorageProviders?: () => Promise<unknown[]>
+        saveStorageProvider?: (payload: unknown) => Promise<unknown>
+        deleteStorageProvider?: (id: string) => Promise<unknown>
+        testStorageProvider?: (id: string) => Promise<unknown>
+        syncCollection?: (collectionId: string) => Promise<unknown>
         onTerminalEvent: (listener: (event: ScriptManagerDesktopTerminalEvent) => void) => () => void
         onBuildEvent: (listener: (event: ScriptManagerDesktopBuildEvent) => void) => () => void
         onRemoteExecEvent: (listener: (event: ScriptManagerDesktopRemoteExecEvent) => void) => () => void

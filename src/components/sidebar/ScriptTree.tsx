@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
     FileCode, Plus, Folder, MoreVertical, Trash2, ChevronRight, ChevronDown,
-    GripVertical, LayoutTemplate, Copy, Loader2, Layers, FolderOpen,
+    GripVertical, LayoutTemplate, Copy, Loader2, Layers, FolderOpen, Cloud, RefreshCw,
 } from 'lucide-react';
 import {
     DropdownMenu,
@@ -87,6 +87,8 @@ export interface ScriptTreeCallbacks {
     onCreateCollection: (projectId?: string | null, parentId?: string | null) => void;
     onConvertCollection: (collection: Collection) => void;
     onManagePythonEnv: (collection: Collection) => void;
+    onCloudStorage: (collection: Collection) => void;
+    onSyncCollection: (collection: Collection) => void;
     onDeleteProject: (projectId: string) => void;
 }
 
@@ -322,6 +324,11 @@ const CollectionRow = memo(({
                     <Folder className={cn("h-4 w-4 flex-shrink-0", isOver ? "text-blue-500" : "text-slate-500")} />
                     <span className="min-w-0 flex-1 truncate pr-1 text-[13px] leading-5 text-slate-700 dark:text-slate-300" title={collection.name}>
                         {collection.name}
+                        {collection.storage_provider_id && (
+                            <span title="Cloud-bound collection" aria-label="Cloud-bound collection">
+                                <Cloud className="ml-1 inline-block h-3 w-3 align-[-1px] text-muted-foreground" />
+                            </span>
+                        )}
                     </span>
                     <div className="ml-auto flex shrink-0 items-center gap-1">
                         <CollectionLinkStatusDot hasLinkedFolder={Boolean(collection.folder_path)} isTemporary={Boolean(collection.is_temporary)} />
@@ -379,6 +386,14 @@ const CollectionRow = memo(({
                                             <Folder className="mr-2 h-4 w-4" /> Python Environment...
                                         </DropdownMenuItem>
                                     )}
+                                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); callbacks.onCloudStorage(collection); }}>
+                                        <Cloud className="mr-2 h-4 w-4" /> Cloud storage...
+                                    </DropdownMenuItem>
+                                    {collection.storage_provider_id && (
+                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); callbacks.onSyncCollection(collection); }}>
+                                            <RefreshCw className="mr-2 h-4 w-4" /> Sync now
+                                        </DropdownMenuItem>
+                                    )}
                                     <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={(e) => { e.stopPropagation(); callbacks.onDeleteCollection(collection); }}>
                                         <Trash2 className="mr-2 h-4 w-4" /> {collection.is_temporary ? 'Remove Workspace' : 'Delete'}
                                     </DropdownMenuItem>
@@ -403,6 +418,14 @@ const CollectionRow = memo(({
                 {canManagePythonEnv && (
                     <ContextMenuItem onClick={() => callbacks.onManagePythonEnv(collection)}>
                         <Folder className="mr-2 h-4 w-4" /> Python Environment...
+                    </ContextMenuItem>
+                )}
+                <ContextMenuItem onClick={() => callbacks.onCloudStorage(collection)}>
+                    <Cloud className="mr-2 h-4 w-4" /> Cloud storage...
+                </ContextMenuItem>
+                {collection.storage_provider_id && (
+                    <ContextMenuItem onClick={() => callbacks.onSyncCollection(collection)}>
+                        <RefreshCw className="mr-2 h-4 w-4" /> Sync now
                     </ContextMenuItem>
                 )}
                 <ContextMenuItem className="text-red-600 focus:text-red-600" onClick={() => callbacks.onDeleteCollection(collection)}>

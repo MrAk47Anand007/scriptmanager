@@ -89,6 +89,8 @@ export interface Collection {
     python_toolchain_enabled?: boolean;
     python_venv_path?: string | null;
     python_interpreter_path?: string | null;
+    storage_provider_id?: string | null;
+    remote_prefix?: string | null;
     created_at: string;
 }
 
@@ -498,6 +500,31 @@ export const moveCollection = createAsyncThunk('scripts/moveCollection', async (
     return { updatedCollections: [response.data as Collection] }
 })
 
+export const updateCollectionCloudBinding = createAsyncThunk(
+    'scripts/updateCollectionCloudBinding',
+    async ({ collectionId, projectId, storageProviderId, remotePrefix }: {
+        collectionId: string
+        projectId?: string | null
+        storageProviderId: string | null
+        remotePrefix: string | null
+    }) => {
+        if (isDesktopScriptsRuntimeAvailable()) {
+            return updateDesktopCollection({
+                id: collectionId,
+                storageProviderId,
+                remotePrefix,
+            })
+        }
+        // Web PUT resets project_id when omitted, so pass it through explicitly.
+        const response = await axios.put(`/api/collections/${collectionId}`, {
+            project_id: projectId ?? null,
+            storage_provider_id: storageProviderId,
+            remote_prefix: remotePrefix,
+        })
+        return { updatedCollections: [response.data as Collection] }
+    }
+)
+
 // --- Env Var Thunks ---
 
 export const fetchEnvVars = createAsyncThunk('scripts/fetchEnvVars', async (scriptId: string) => {
@@ -753,6 +780,16 @@ const scriptsSlice = createSlice({
                 }
             })
             .addCase(moveCollection.fulfilled, (state, action) => {
+                for (const updatedCollection of action.payload.updatedCollections ?? []) {
+                    const existing = state.collections.find(c => c.id === updatedCollection.id)
+                    if (existing) {
+                        Object.assign(existing, updatedCollection)
+                    } else {
+                        state.collections.push(updatedCollection)
+                    }
+                }
+            })
+            .addCase(updateCollectionCloudBinding.fulfilled, (state, action) => {
                 for (const updatedCollection of action.payload.updatedCollections ?? []) {
                     const existing = state.collections.find(c => c.id === updatedCollection.id)
                     if (existing) {
