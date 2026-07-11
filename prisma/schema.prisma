@@ -8,70 +8,70 @@ datasource db {
 }
 
 model Script {
-  id              String      @id @default(uuid())
-  name            String
-  filename        String
-  sourcePath      String?     @map("source_path")
-  description     String      @default("")
-  language        String      @default("python")
-  interpreter     String?
-  webhookToken    String?     @unique @map("webhook_token")
-  webhookSecret   String?     @map("webhook_secret")
-  requireWebhookSignature Boolean @default(false) @map("require_webhook_signature")
-  scheduleCron    String?     @map("schedule_cron")
-  scheduleEnabled Boolean     @default(false) @map("schedule_enabled")
-  parameters      String      @default("[]")
-  gistId          String?     @map("gist_id")
-  gistUrl         String?     @map("gist_url")
-  syncToGist      Boolean     @default(false) @map("sync_to_gist")
-  gistFilename    String?     @map("gist_filename")
-  collectionId    String?     @map("collection_id")
-  timeoutMs       Int?        @map("timeout_ms")
-  remoteEtag      String?     @map("remote_etag")
-  remoteSyncedAt  DateTime?   @map("remote_synced_at")
-  createdAt       DateTime    @default(now()) @map("created_at")
-  updatedAt       DateTime    @updatedAt @map("updated_at")
-  lastRun         DateTime?   @map("last_run")
+  id                      String    @id @default(uuid())
+  name                    String
+  filename                String
+  sourcePath              String?   @map("source_path")
+  description             String    @default("")
+  language                String    @default("python")
+  interpreter             String?
+  webhookToken            String?   @unique @map("webhook_token")
+  webhookSecret           String?   @map("webhook_secret")
+  requireWebhookSignature Boolean   @default(false) @map("require_webhook_signature")
+  scheduleCron            String?   @map("schedule_cron")
+  scheduleEnabled         Boolean   @default(false) @map("schedule_enabled")
+  parameters              String    @default("[]")
+  gistId                  String?   @map("gist_id")
+  gistUrl                 String?   @map("gist_url")
+  syncToGist              Boolean   @default(false) @map("sync_to_gist")
+  gistFilename            String?   @map("gist_filename")
+  collectionId            String?   @map("collection_id")
+  timeoutMs               Int?      @map("timeout_ms")
+  remoteEtag              String?   @map("remote_etag")
+  remoteSyncedAt          DateTime? @map("remote_synced_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+  lastRun                 DateTime? @map("last_run")
 
-  collection      Collection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
-  builds          Build[]
-  tags            ScriptTag[]
-  envVars         ScriptEnvVar[]
-  versions        ScriptVersion[]
+  collection Collection?     @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  builds     Build[]
+  tags       ScriptTag[]
+  envVars    ScriptEnvVar[]
+  versions   ScriptVersion[]
 
   @@map("scripts")
 }
 
 model Tag {
-  id        String      @id @default(uuid())
-  name      String      @unique
-  color     String      @default("#6366f1")
-  createdAt DateTime    @default(now()) @map("created_at")
+  id        String   @id @default(uuid())
+  name      String   @unique
+  color     String   @default("#6366f1")
+  createdAt DateTime @default(now()) @map("created_at")
 
-  scripts   ScriptTag[]
+  scripts ScriptTag[]
 
   @@map("tags")
 }
 
 model ScriptTag {
-  scriptId  String  @map("script_id")
-  tagId     String  @map("tag_id")
+  scriptId String @map("script_id")
+  tagId    String @map("tag_id")
 
-  script    Script  @relation(fields: [scriptId], references: [id], onDelete: Cascade)
-  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  script Script @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([scriptId, tagId])
   @@map("script_tags")
 }
 
 model ScriptEnvVar {
-  id        String  @id @default(uuid())
-  scriptId  String  @map("script_id")
-  key       String
-  value     String  @default("")
-  isSecret  Boolean @default(false) @map("is_secret")
+  id       String  @id @default(uuid())
+  scriptId String  @map("script_id")
+  key      String
+  value    String  @default("")
+  isSecret Boolean @default(false) @map("is_secret")
 
-  script    Script  @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  script Script @relation(fields: [scriptId], references: [id], onDelete: Cascade)
 
   @@unique([scriptId, key])
   @@map("script_env_vars")
@@ -84,48 +84,48 @@ model ScriptVersion {
   snapshotNumber Int      @map("snapshot_number")
   savedAt        DateTime @default(now()) @map("saved_at")
 
-  script         Script   @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  script Script @relation(fields: [scriptId], references: [id], onDelete: Cascade)
 
   @@map("script_versions")
 }
 
 model Build {
-  id              String    @id @default(uuid())
-  scriptId        String    @map("script_id")
-  status          String    @default("pending")
-  triggeredBy     String    @default("manual") @map("triggered_by")
-  logFile         String?   @map("log_file")
-  startedAt       DateTime? @map("started_at")
-  finishedAt      DateTime? @map("finished_at")
-  exitCode        Int?      @map("exit_code")
-  webhookPayload  String?   @map("webhook_payload")
-  createdAt       DateTime  @default(now()) @map("created_at")
+  id             String    @id @default(uuid())
+  scriptId       String    @map("script_id")
+  status         String    @default("pending")
+  triggeredBy    String    @default("manual") @map("triggered_by")
+  logFile        String?   @map("log_file")
+  startedAt      DateTime? @map("started_at")
+  finishedAt     DateTime? @map("finished_at")
+  exitCode       Int?      @map("exit_code")
+  webhookPayload String?   @map("webhook_payload")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
-  script          Script    @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  script Script @relation(fields: [scriptId], references: [id], onDelete: Cascade)
 
   @@map("builds")
 }
 
 model Collection {
-  id          String    @id @default(uuid())
-  name        String
-  description String    @default("")
-  folderPath  String?   @map("folder_path")
-  isTemporary Boolean   @default(false) @map("is_temporary")
-  runtimePreset String  @default("general") @map("runtime_preset")
-  pythonToolchainEnabled Boolean @default(false) @map("python_toolchain_enabled")
-  pythonVenvPath String? @map("python_venv_path")
-  pythonInterpreterPath String? @map("python_interpreter_path")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  projectId   String?   @map("project_id")
-  parentId    String?   @map("parent_id")
-  storageProviderId String? @map("storage_provider_id")
-  remotePrefix String?  @map("remote_prefix")
+  id                     String   @id @default(uuid())
+  name                   String
+  description            String   @default("")
+  folderPath             String?  @map("folder_path")
+  isTemporary            Boolean  @default(false) @map("is_temporary")
+  runtimePreset          String   @default("general") @map("runtime_preset")
+  pythonToolchainEnabled Boolean  @default(false) @map("python_toolchain_enabled")
+  pythonVenvPath         String?  @map("python_venv_path")
+  pythonInterpreterPath  String?  @map("python_interpreter_path")
+  createdAt              DateTime @default(now()) @map("created_at")
+  projectId              String?  @map("project_id")
+  parentId               String?  @map("parent_id")
+  storageProviderId      String?  @map("storage_provider_id")
+  remotePrefix           String?  @map("remote_prefix")
 
-  scripts     Script[]
-  project     Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  parent      Collection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  children    Collection[] @relation("CollectionHierarchy")
+  scripts         Script[]
+  project         Project?         @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  parent          Collection?      @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children        Collection[]     @relation("CollectionHierarchy")
   storageProvider StorageProvider? @relation(fields: [storageProviderId], references: [id], onDelete: SetNull)
 
   @@map("collections")
@@ -145,13 +145,13 @@ model StorageProvider {
 }
 
 model Project {
-  id          String       @id @default(uuid())
+  id          String   @id @default(uuid())
   name        String
-  description String       @default("")
-  environment String       @default("development")
-  color       String       @default("#6366f1")
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
+  description String   @default("")
+  environment String   @default("development")
+  color       String   @default("#6366f1")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   collections    Collection[]
   serverProfiles ServerProfile[]
@@ -198,15 +198,15 @@ model RemoteExecution {
   startedAt   DateTime? @map("started_at")
   finishedAt  DateTime? @map("finished_at")
 
-  profile     ServerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profile ServerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@map("remote_executions")
 }
 
 model Setting {
-  key       String    @id
+  key       String   @id
   value     String?
-  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("settings")
 }
@@ -227,12 +227,12 @@ model ScriptTemplate {
 }
 
 model ApiCollection {
-  id          String       @id @default(cuid())
+  id          String             @id @default(cuid())
   name        String
-  description String       @default("")
-  variables   String       @default("[]")
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
+  description String             @default("")
+  variables   String             @default("[]")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
   requests    ApiRequest[]
   runs        ApiCollectionRun[]
 
@@ -240,45 +240,45 @@ model ApiCollection {
 }
 
 model ApiRequest {
-  id           String         @id @default(cuid())
-  name         String
-  method       String         @default("GET")
-  url          String         @default("")
-  headers      String         @default("[]")
-  queryParams  String         @default("[]") @map("query_params")
-  variables    String         @default("[]")
-  requestOptions String       @default("{}") @map("request_options")
-  preRequestScript String     @default("") @map("pre_request_script")
-  testScript   String         @default("") @map("test_script")
-  responseMappings String     @default("[]") @map("response_mappings")
-  bodyType     String         @default("none") @map("body_type")
-  body         String         @default("")
-  authType     String         @default("none") @map("auth_type")
-  authConfig   String         @default("{}") @map("auth_config")
-  collectionId String?        @map("collection_id")
-  collection   ApiCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
-  createdAt    DateTime       @default(now()) @map("created_at")
-  updatedAt    DateTime       @updatedAt @map("updated_at")
+  id               String         @id @default(cuid())
+  name             String
+  method           String         @default("GET")
+  url              String         @default("")
+  headers          String         @default("[]")
+  queryParams      String         @default("[]") @map("query_params")
+  variables        String         @default("[]")
+  requestOptions   String         @default("{}") @map("request_options")
+  preRequestScript String         @default("") @map("pre_request_script")
+  testScript       String         @default("") @map("test_script")
+  responseMappings String         @default("[]") @map("response_mappings")
+  bodyType         String         @default("none") @map("body_type")
+  body             String         @default("")
+  authType         String         @default("none") @map("auth_type")
+  authConfig       String         @default("{}") @map("auth_config")
+  collectionId     String?        @map("collection_id")
+  collection       ApiCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
 
   @@map("api_requests")
 }
 
 model ApiCollectionRun {
-  id             String        @id @default(cuid())
-  collectionId   String        @map("collection_id")
-  collectionName String        @map("collection_name")
-  environmentId  String?       @map("environment_id")
-  environmentName String?      @map("environment_name")
-  status         String        @default("running")
-  totalRequests  Int           @default(0) @map("total_requests")
-  passedRequests Int           @default(0) @map("passed_requests")
-  failedRequests Int           @default(0) @map("failed_requests")
-  results        String        @default("[]")
-  startedAt      DateTime      @default(now()) @map("started_at")
-  finishedAt     DateTime?     @map("finished_at")
-  durationMs     Int?          @map("duration_ms")
+  id              String    @id @default(cuid())
+  collectionId    String    @map("collection_id")
+  collectionName  String    @map("collection_name")
+  environmentId   String?   @map("environment_id")
+  environmentName String?   @map("environment_name")
+  status          String    @default("running")
+  totalRequests   Int       @default(0) @map("total_requests")
+  passedRequests  Int       @default(0) @map("passed_requests")
+  failedRequests  Int       @default(0) @map("failed_requests")
+  results         String    @default("[]")
+  startedAt       DateTime  @default(now()) @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+  durationMs      Int?      @map("duration_ms")
 
-  collection     ApiCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  collection ApiCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
 
   @@map("api_collection_runs")
 }
@@ -311,4 +311,26 @@ model ApiHistory {
   createdAt       DateTime @default(now()) @map("created_at")
 
   @@map("api_history")
+}
+
+model ExecutionEvent {
+  id            String   @id
+  schemaVersion Int      @default(1) @map("schema_version")
+  type          String
+  executionKind String   @map("execution_kind")
+  correlationId String   @map("correlation_id")
+  occurredAt    DateTime @map("occurred_at")
+  actorType     String   @map("actor_type")
+  actorId       String   @map("actor_id")
+  actorName     String?  @map("actor_name")
+  targetType    String   @map("target_type")
+  targetId      String   @map("target_id")
+  targetName    String?  @map("target_name")
+  dataJson      String   @default("{}") @map("data_json")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([correlationId, occurredAt])
+  @@index([executionKind, occurredAt])
+  @@index([targetType, targetId, occurredAt])
+  @@map("execution_events")
 }
