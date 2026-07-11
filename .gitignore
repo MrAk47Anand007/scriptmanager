@@ -45,6 +45,7 @@ builds/
 # Electron build outputs
 dist-electron/
 release/
+coverage/
 
 # Editor
 .vscode/
