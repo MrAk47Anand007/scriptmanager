@@ -1,5 +1,6 @@
 import { Client as SshClient, ConnectConfig, SFTPWrapper } from 'ssh2'
 import { EventEmitter } from 'events'
+import { createCorrelationId, executionTelemetry, lifecycleEventType, type ExecutionContext } from '@/lib/execution'
 import fs from 'fs'
 import path from 'path'
 import { prisma } from './db'
@@ -131,8 +132,14 @@ export async function execRemote(opts: {
     profileId: string
     command: string
     remoteExecId: string
+    context?: ExecutionContext
 }): Promise<void> {
     const { profileId, command, remoteExecId } = opts
+    const context = opts.context ?? {
+        correlationId: createCorrelationId(),
+        actor: { type: 'system' as const, id: 'remote-runner' },
+        trigger: 'remote' as const,
+    }
 
     const emitter = new EventEmitter()
     remoteExecEmitters.set(remoteExecId, emitter)
@@ -142,6 +149,11 @@ export async function execRemote(opts: {
         where: { id: remoteExecId },
         data: { status: 'running', startedAt: new Date() },
     }).catch(() => { /* record may not exist in stub mode */ })
+    await executionTelemetry.emit({
+        type: lifecycleEventType('running'), executionKind: 'remote', correlationId: context.correlationId,
+        actor: context.actor, target: { type: 'remote_execution', id: remoteExecId },
+        data: { profileId, trigger: context.trigger },
+    })
 
     let client: SshClient | null = null
     const outputLines: string[] = []
@@ -187,6 +199,11 @@ export async function execRemote(opts: {
                 logOutput: fullOutput.slice(0, 100000), // cap to 100KB
             },
         }).catch(() => { })
+        await executionTelemetry.emit({
+            type: lifecycleEventType(exitCode === 0 ? 'success' : 'failure'),
+            executionKind: 'remote', correlationId: context.correlationId, actor: context.actor,
+            target: { type: 'remote_execution', id: remoteExecId }, data: { profileId, exitCode },
+        })
     } catch (err) {
         const errMsg = `\n[Error] ${(err as Error).message}\n`
         outputLines.push(errMsg)
@@ -203,6 +220,11 @@ export async function execRemote(opts: {
                 logOutput: outputLines.join('').slice(0, 100000),
             },
         }).catch(() => { })
+        await executionTelemetry.emit({
+            type: lifecycleEventType('failure'), executionKind: 'remote', correlationId: context.correlationId,
+            actor: context.actor, target: { type: 'remote_execution', id: remoteExecId },
+            data: { profileId, exitCode, error: (err as Error).message },
+        })
     } finally {
         client?.end()
         remoteExecEmitters.delete(remoteExecId)

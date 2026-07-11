@@ -97,7 +97,7 @@ export function SidePanel() {
       <div
         className={cn(
           'h-full overflow-hidden bg-wb-sidepanel border-r border-wb-border',
-          // Arbitrary-property syntax avoids the Tailwind `duration-[130ms]`
+          // Arbitrary-property syntax avoids an ambiguous Tailwind duration utility.
           // ambiguity warning while keeping the 130ms width collapse.
           !isDragging && '[transition:width_130ms_ease-out]'
         )}

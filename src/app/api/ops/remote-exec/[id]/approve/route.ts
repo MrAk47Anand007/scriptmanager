@@ -2,12 +2,14 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { execRemote } from '@/lib/sshService'
 import { buildRemoteCommand } from '@/lib/executionSafety'
+import { executionTelemetry } from '@/lib/execution'
 
 export async function POST(
     req: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
     const { id } = await params
+    const correlationId = executionTelemetry.correlationId(req)
     const { approver_name } = await req.json()
 
     if (!approver_name?.trim()) {
@@ -43,7 +45,12 @@ export async function POST(
     const command = buildRemoteCommand(script.filename, execution.remotePath ?? undefined, paramValues as Record<string, string>)
 
     // Fire-and-forget
-    execRemote({ profileId: execution.profileId, command, remoteExecId: id }).catch(console.error)
+    execRemote({
+        profileId: execution.profileId, command, remoteExecId: id,
+        context: { correlationId, actor: { type: 'user', id: approver_name.trim() }, trigger: 'remote' },
+    }).catch(console.error)
 
-    return NextResponse.json({ ok: true, remote_exec_id: id })
+    return NextResponse.json({ ok: true, remote_exec_id: id }, {
+        headers: { 'x-correlation-id': correlationId },
+    })
 }

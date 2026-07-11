@@ -44,6 +44,11 @@ A self-hosted, local-first script manager — write, run, schedule, and organize
 
 ## Features
 
+### Reliability foundation
+- **Correlated execution events** — Script, API, webhook, scheduled, and remote runs emit redacted durable lifecycle events under one correlation ID.
+- **Automated verification** — Vitest security/regression tests and GitHub Actions run unit tests and production builds.
+- **Production encryption guard** — Production credential encryption requires an administrator-supplied secret and will not silently use the development fallback.
+
 ### Core
 - **Monaco Editor** — Full VS Code-powered editor with syntax highlighting, autocomplete, and multi-language support (Python, JavaScript/Node.js, Shell/Bash, and custom interpreters).
 - **Real-time Output Streaming** — Script output streams live to the console via Server-Sent Events (SSE) and WebSockets; no page refresh needed.

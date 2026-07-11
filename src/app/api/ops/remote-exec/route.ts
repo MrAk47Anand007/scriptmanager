@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { execRemote } from '@/lib/sshService'
 import crypto from 'crypto'
 import { buildRemoteCommand } from '@/lib/executionSafety'
+import { executionTelemetry } from '@/lib/execution'
 
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
@@ -44,6 +45,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+    const correlationId = executionTelemetry.correlationId(req)
     const body = await req.json()
     const { profileId, scriptId, paramValues, remotePath } = body
 
@@ -84,12 +86,15 @@ export async function POST(req: Request) {
     if (!requiresApproval) {
         // Fire-and-forget execution (same pattern as executeScriptAsync in scriptRunner.ts)
         const remoteCommand = buildRemoteCommand(script.filename, remotePath, paramValues)
-        execRemote({ profileId, command: remoteCommand, remoteExecId }).catch(console.error)
+        execRemote({
+            profileId, command: remoteCommand, remoteExecId,
+            context: { correlationId, actor: { type: 'user', id: 'session-user' }, trigger: 'remote' },
+        }).catch(console.error)
     }
 
     return NextResponse.json({
         remote_exec_id: remoteExecId,
         requires_approval: requiresApproval,
         environment,
-    })
+    }, { headers: { 'x-correlation-id': correlationId } })
 }
