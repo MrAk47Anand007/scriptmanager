@@ -2,6 +2,7 @@ import { Cron } from 'croner'
 import { prisma } from '@/lib/db'
 import { executeScriptAsync } from '@/lib/scriptRunner'
 import type { ScriptParameter } from '@/lib/types'
+import { createCorrelationId } from '@/lib/execution'
 
 // Module-level map: scriptId -> Cron instance
 const scheduledJobs = new Map<string, Cron>()
@@ -72,7 +73,11 @@ export function registerSchedule(script: ScriptScheduleInfo): void {
           }
         }
 
-        await executeScriptAsync(build.id, freshScript, paramValues)
+        await executeScriptAsync(build.id, freshScript, paramValues, {
+          correlationId: createCorrelationId(),
+          actor: { type: 'schedule', id: freshScript.id },
+          trigger: 'scheduler',
+        })
       } catch (err) {
         console.error(`[Scheduler] Error running scheduled script ${script.id}:`, err)
       }

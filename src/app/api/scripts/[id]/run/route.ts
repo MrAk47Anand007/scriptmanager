@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { ensureBuildEmitter, executeScriptAsync } from '@/lib/scriptRunner'
+import { executionTelemetry } from '@/lib/execution'
 
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
+  const correlationId = executionTelemetry.correlationId(req)
 
   const script = await prisma.script.findUnique({
     where: { id },
@@ -50,9 +52,13 @@ export async function POST(
   ensureBuildEmitter(build.id)
 
   // Fire-and-forget - don't await
-  executeScriptAsync(build.id, script, paramValues).catch(err => {
+  executeScriptAsync(build.id, script, paramValues, {
+    correlationId, actor: { type: 'user', id: 'session-user' }, trigger: 'manual',
+  }).catch(err => {
     console.error('[Run] Script execution error:', err)
   })
 
-  return NextResponse.json({ build_id: build.id, status: 'started' })
+  return NextResponse.json({ build_id: build.id, status: 'started' }, {
+    headers: { 'x-correlation-id': correlationId },
+  })
 }

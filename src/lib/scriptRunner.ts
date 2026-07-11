@@ -7,6 +7,7 @@ import os from 'os'
 import { assertSafeStoredFilename } from '@/lib/executionSafety'
 import { ensureDesktopWorkspaceLayout, getDesktopWorkspaceLayout } from '@/lib/workspaceLayout'
 import { ensureFreshScript } from '@/lib/storage/syncService'
+import { executionTelemetry, lifecycleEventType, type ExecutionContext, createCorrelationId } from '@/lib/execution'
 
 // Module-level map: buildId -> EventEmitter (Node.js equivalent of Python's _output_queues dict)
 const buildEmitters = new Map<string, EventEmitter>()
@@ -90,7 +91,12 @@ function resolveInterpreter(language: string, interpreter: string | null | undef
 export async function executeScriptAsync(
   buildId: string,
   script: ScriptInfo,
-  paramValues?: Record<string, string>
+  paramValues?: Record<string, string>,
+  context: ExecutionContext = {
+    correlationId: createCorrelationId(),
+    actor: { type: 'system', id: 'script-runner' },
+    trigger: 'manual',
+  },
 ): Promise<void> {
   const emitter = ensureBuildEmitter(buildId)
 
@@ -122,6 +128,11 @@ export async function executeScriptAsync(
     logStream.setMaxListeners(20); // Suppress warnings if we attach multiple listeners (though we shouldn't be)
 
     const startedAt = new Date()
+    await executionTelemetry.emit({
+      type: lifecycleEventType('running'), executionKind: 'script', correlationId: context.correlationId,
+      actor: context.actor, target: { type: 'script', id: script.id, name: script.filename },
+      data: { buildId, trigger: context.trigger },
+    })
     const buildUpdatePromise = prisma.build.update({
       where: { id: buildId },
       data: { status: 'running', startedAt, logFile }
@@ -139,6 +150,7 @@ export async function executeScriptAsync(
         where: { id: buildId },
         data: { status: 'failure', exitCode: 1, finishedAt: new Date() }
       })
+      await emitFinalScriptEvent('failure', 1)
       return
     }
 
@@ -203,6 +215,7 @@ export async function executeScriptAsync(
         where: { id: buildId },
         data: { status: 'failure', exitCode: -1, finishedAt: new Date() }
       })
+      await emitFinalScriptEvent('failure', -1)
     })
 
     child.on('close', async (code) => {
@@ -221,6 +234,7 @@ export async function executeScriptAsync(
           finishedAt: new Date()
         }
       })
+      await emitFinalScriptEvent(finalStatus, exitCode)
 
       // Update script's last_run timestamp
       await prisma.script.update({
@@ -235,8 +249,17 @@ export async function executeScriptAsync(
       where: { id: buildId },
       data: { status: 'failure', exitCode: -1, finishedAt: new Date() }
     }).catch(() => { })
+    await emitFinalScriptEvent('failure', -1)
     emitter.emit('line', errMsg)
     emitter.emit('done')
+  }
+
+  async function emitFinalScriptEvent(status: 'success' | 'failure' | 'timeout', exitCode: number) {
+    await executionTelemetry.emit({
+      type: lifecycleEventType(status), executionKind: 'script', correlationId: context.correlationId,
+      actor: context.actor, target: { type: 'script', id: script.id, name: script.filename },
+      data: { buildId, trigger: context.trigger, exitCode },
+    })
   }
 }
 

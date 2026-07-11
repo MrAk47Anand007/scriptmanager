@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { ensureBuildEmitter, executeScriptAsync } from '@/lib/scriptRunner'
 import type { ScriptParameter } from '@/lib/types'
 import crypto from 'crypto'
+import { executionTelemetry } from '@/lib/execution'
 
 /**
  * Verify an X-Hub-Signature-256 header against a shared secret.
@@ -23,6 +24,7 @@ export async function POST(
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params
+  const correlationId = executionTelemetry.correlationId(req)
 
   const script = await prisma.script.findUnique({
     where: { webhookToken: token }
@@ -80,7 +82,9 @@ export async function POST(
   ensureBuildEmitter(build.id)
 
   // Fire-and-forget
-  executeScriptAsync(build.id, script, paramValues).catch(err => {
+  executeScriptAsync(build.id, script, paramValues, {
+    correlationId, actor: { type: 'webhook', id: script.id }, trigger: 'webhook',
+  }).catch(err => {
     console.error('[Webhook] Script execution error:', err)
   })
 
@@ -88,7 +92,7 @@ export async function POST(
     message: 'Script triggered',
     build_id: build.id,
     script_name: script.name
-  })
+  }, { headers: { 'x-correlation-id': correlationId } })
 }
 
 // Allow GET for testing (returns script info without triggering)
