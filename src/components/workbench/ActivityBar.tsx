@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { CalendarClock, Code2, GitBranch, Globe, Server, Settings, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { Activity, CalendarClock, Code2, GitBranch, Globe, Server, Settings, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setActiveActivity, type ActivityId } from '@/features/workbench/workbenchSlice'
 import { selectActiveActivity } from '@/features/workbench/selectors'
@@ -77,6 +77,7 @@ export function ActivityBar() {
         onClick={() => select('api')}
       />
       <ActivityButton icon={GitBranch} title="Workflows" active={activeActivity === 'workflows'} onClick={() => select('workflows')} />
+      <ActivityButton icon={Activity} title="Executions" active={activeActivity === 'executions'} onClick={() => select('executions')} />
       {isOpsModeActive && (
         <ActivityButton
           icon={Server}

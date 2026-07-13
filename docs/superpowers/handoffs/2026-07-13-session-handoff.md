@@ -132,3 +132,27 @@ Phase 3 should deliver active-run visibility, failure trends, schedule health, r
 - Phase 2 merged/pushed/PR created: no.
 - Fresh SQLite creation verified on this Windows machine: no; blocked by the Prisma schema-engine environment issue described above.
 - Manual visual QA of the workflow builder in a running Electron window: not recorded in this session.
+
+## Phase 3 implementation — execution dashboard and observability
+
+Phase 3 work continues on `codex/phase-3-execution-observability`, based directly on Phase 2 commit `6747193`.
+
+Implemented scope:
+
+- Unified filter and status contracts for workflow, script, API, and remote execution records.
+- Aggregated active/success/failure/timeout/retry/duration metrics, failure trend, schedule health, and recent runs.
+- Redacted workflow detail with node attempts, persisted execution events, actors, provenance, and correlation IDs.
+- Dashboard, run-list, detail, redacted-log, workflow-cancel, and targeted failed-node retry routes.
+- Workbench execution dashboard with filters, run inspection, cancel/retry actions, and redacted log download.
+- Bounded execution-event retention cleanup; business-state run records are deliberately preserved.
+
+Final verification from the completed Phase 3 state:
+
+- Vitest: 25 test files passed, 75 tests passed, 0 failures.
+- Application TypeScript: `npx tsc --noEmit` passed.
+- Electron TypeScript: `npx tsc -p electron/tsconfig.json --noEmit` passed.
+- Next.js production build: passed; all seven observability routes appeared in the route manifest.
+- Diff hygiene: `git diff --check` passed (Git emitted line-ending conversion notices only).
+- Route integration coverage proves dashboard aggregation, redaction across run/node/event values, and targeted retry preserving a completed node.
+
+Known validation limit: manual visual QA of the execution dashboard in a running Electron window was not performed in this implementation session.

@@ -68,6 +68,7 @@ A self-hosted, local-first script manager — write, run, schedule, and organize
 - **Workflow Templates** — Start from script pipeline, API-to-script, approval deploy, or remote maintenance templates.
 - **Webhooks** — Every script gets a unique HTTP POST endpoint. Send a request from IFTTT, Zapier, GitHub Actions, or any HTTP client to trigger execution. Supports optional HMAC-SHA256 signature verification (GitHub-compatible).
 - **Cron Scheduling** — Built-in cron scheduler. Enter any standard cron expression and the server executes your script automatically. Next-run time displayed in the UI.
+- **Execution Observability** — One operational dashboard for workflow, script, API, and remote runs with health metrics, filters, redacted causal timelines, correlation IDs, cancellation, targeted failed-node retry, and configurable execution-event retention.
 - **Script Parameters** — Define typed, named parameters per script. Parameters are injected as environment variables at runtime and can be supplied via the UI, CLI, or webhook payload.
 - **Environment Variables** — Per-script environment variables (with optional secret masking) stored securely in the database.
 - **Execution Timeout** — Configurable timeout per script (or global default) to prevent runaway processes.

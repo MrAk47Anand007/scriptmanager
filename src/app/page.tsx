@@ -84,6 +84,7 @@ const OpsView = dynamic(
   }
 )
 const WorkflowBuilder = dynamic(() => import('@/components/workflows/WorkflowBuilder').then((mod) => mod.WorkflowBuilder), { loading: () => <SectionSkeleton label="Loading workflow builder" /> })
+const ExecutionDashboard = dynamic(() => import('@/components/observability/ExecutionDashboard').then((mod) => mod.ExecutionDashboard), { loading: () => <SectionSkeleton label="Loading execution dashboard" /> })
 
 function SectionSkeleton({ label }: { label: string }) {
   return (
@@ -113,7 +114,7 @@ function scheduleIdleWork(callback: () => void, delay = 180) {
   return () => globalThis.clearTimeout(timeoutId)
 }
 
-type TabId = 'scripts' | 'settings' | 'api' | 'workflows' | 'schedules' | 'ops'
+type TabId = 'scripts' | 'settings' | 'api' | 'workflows' | 'executions' | 'schedules' | 'ops'
 
 export default function Home() {
   const dispatch = useAppDispatch()
@@ -135,6 +136,8 @@ export default function Home() {
       ? 'schedules'
       : activeActivity === 'workflows'
         ? 'workflows'
+      : activeActivity === 'executions'
+        ? 'executions'
       : activeActivity === 'ops'
         ? 'ops'
         : activeEditorKind === 'api' ? 'api' : 'scripts'
@@ -146,6 +149,7 @@ export default function Home() {
     schedules: false,
     ops: false,
     workflows: false,
+    executions: false,
   })
 
   useEffect(() => {
@@ -276,6 +280,7 @@ export default function Home() {
     [activeTab]
   )
   const workflowsPanelClassName = useMemo(() => activeTab === 'workflows' ? 'absolute inset-0 opacity-100 z-10' : 'absolute inset-0 opacity-0 pointer-events-none -z-10', [activeTab])
+  const executionsPanelClassName = useMemo(() => activeTab === 'executions' ? 'absolute inset-0 opacity-100 z-10' : 'absolute inset-0 opacity-0 pointer-events-none -z-10', [activeTab])
 
   return (
     <WorkbenchShell
@@ -289,7 +294,7 @@ export default function Home() {
             <div className="h-full w-full animate-pulse bg-gradient-to-r from-blue-500 via-blue-300 to-blue-500" />
           </div>
         )}
-        {activeTab !== 'settings' && activeTab !== 'schedules' && activeTab !== 'ops' && activeTab !== 'workflows' && <EditorTabs />}
+        {activeTab !== 'settings' && activeTab !== 'schedules' && activeTab !== 'ops' && activeTab !== 'workflows' && activeTab !== 'executions' && <EditorTabs />}
         <main className="relative flex-1 overflow-hidden">
           {mountedTabs.scripts && (
             <div className={scriptsPanelClassName}>
@@ -312,6 +317,7 @@ export default function Home() {
             </div>
           )}
           {mountedTabs.workflows && <div className={workflowsPanelClassName}><WorkflowBuilder /></div>}
+          {mountedTabs.executions && <div className={executionsPanelClassName}><ExecutionDashboard /></div>}
           {mountedTabs.settings && (
             <div className={settingsPanelClassName}>
               <SettingsManager />
