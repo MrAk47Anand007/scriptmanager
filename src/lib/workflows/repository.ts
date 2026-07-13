@@ -105,6 +105,23 @@ export function createWorkflowRepository(database: Database) {
       return database.workflowRun.update({ where: { id: runId }, data: { cancelRequestedAt: new Date() } })
     },
 
+    async getRun(runId: string) {
+      return database.workflowRun.findUniqueOrThrow({ where: { id: runId }, include: { version: true, nodeRuns: true } })
+    },
+
+    async setRunStatus(runId: string, status: string, output?: unknown, error?: unknown) {
+      const terminal = ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(status)
+      return database.workflowRun.update({
+        where: { id: runId },
+        data: {
+          status,
+          outputJson: output === undefined ? undefined : JSON.stringify(output),
+          errorJson: error === undefined ? undefined : JSON.stringify(error),
+          finishedAt: terminal ? new Date() : undefined,
+        },
+      })
+    },
+
     async reconcileInterruptedRuns() {
       const finishedAt = new Date()
       await database.workflowNodeRun.updateMany({ where: { status: 'running' }, data: { status: 'interrupted', finishedAt } })
