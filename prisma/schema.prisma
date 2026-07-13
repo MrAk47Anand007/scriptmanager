@@ -529,3 +529,74 @@ model ApprovalGrant {
   @@index([actorId, workspaceId, capability])
   @@map("approval_grants")
 }
+
+model Secret {
+  id             String   @id @default(uuid())
+  name           String
+  description    String   @default("")
+  scope          String   @default("workspace")
+  workspaceId    String   @default("default") @map("workspace_id")
+  status         String   @default("active")
+  currentVersion Int      @default(1) @map("current_version")
+  createdBy      String   @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  disabledAt     DateTime? @map("disabled_at")
+  versions       SecretVersion[]
+  bindings       SecretBinding[]
+  accessEvents   SecretAccessEvent[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, status])
+  @@map("secrets")
+}
+
+model SecretVersion {
+  id         String   @id @default(uuid())
+  secretId   String   @map("secret_id")
+  version    Int
+  ciphertext String
+  storeKind  String   @default("server") @map("store_kind")
+  createdBy  String   @map("created_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+  secret     Secret   @relation(fields: [secretId], references: [id], onDelete: Cascade)
+
+  @@unique([secretId, version])
+  @@map("secret_versions")
+}
+
+model SecretBinding {
+  id           String   @id @default(uuid())
+  secretId     String   @map("secret_id")
+  workspaceId  String   @default("default") @map("workspace_id")
+  resourceType String   @map("resource_type")
+  resourceId   String   @map("resource_id")
+  field        String
+  createdBy    String   @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+  secret       Secret   @relation(fields: [secretId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceType, resourceId, field])
+  @@index([secretId])
+  @@map("secret_bindings")
+}
+
+model SecretAccessEvent {
+  id          String   @id @default(uuid())
+  secretId    String   @map("secret_id")
+  version     Int?
+  actorType   String   @map("actor_type")
+  actorId     String   @map("actor_id")
+  workspaceId String   @map("workspace_id")
+  capability  String
+  resource    String
+  operation   String
+  reason      String   @default("")
+  outcome     String
+  createdAt   DateTime @default(now()) @map("created_at")
+  secret      Secret   @relation(fields: [secretId], references: [id], onDelete: Cascade)
+
+  @@index([secretId, createdAt])
+  @@index([actorId, createdAt])
+  @@map("secret_access_events")
+}

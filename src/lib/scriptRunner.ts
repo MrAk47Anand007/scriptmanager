@@ -3,6 +3,7 @@ import { EventEmitter } from 'events'
 import { prisma } from '@/lib/db'
 import path from 'path'
 import fs from 'fs'
+import { resolveScriptEnvironment } from './secrets/runtime'
 import os from 'os'
 import { assertSafeStoredFilename } from '@/lib/executionSafety'
 import { ensureDesktopWorkspaceLayout, getDesktopWorkspaceLayout } from '@/lib/workspaceLayout'
@@ -164,10 +165,7 @@ export async function executeScriptAsync(
     }
 
     // Load per-script env vars from DB
-    const scriptEnv: Record<string, string> = {}
-    for (const ev of scriptEnvVarsFromDB) {
-      scriptEnv[ev.key] = ev.value
-    }
+    const scriptEnv = await resolveScriptEnvironment(prisma, script.id, scriptEnvVarsFromDB)
 
     // Determine timeout: per-script override → global setting → hardcoded default
     const timeoutMs = script.timeoutMs ?? defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS

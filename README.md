@@ -71,8 +71,9 @@ A self-hosted, local-first script manager — write, run, schedule, and organize
 - **Execution Observability** — One operational dashboard for workflow, script, API, and remote runs with health metrics, filters, redacted causal timelines, correlation IDs, cancellation, targeted failed-node retry, and configurable execution-event retention.
 - **Approval Inbox** — Review actor, risk, exact redacted operation, affected resource, expiry, and audit history; decide with Allow once, Allow for run, Always for workspace, or Reject.
 - **Event Notifications** — Route typed execution and approval events to desktop, generic webhook, Slack, SMTP, or Teams channels using filters, templates, throttling, deduplication, audited delivery, and bounded retry state.
+- **Shared Secret Vault** — Store versioned ciphertext behind opaque references with rotation, disable, scoped bindings, reveal-once access, audit history, server master-key encryption, and Electron OS-backed encryption support.
 - **Script Parameters** — Define typed, named parameters per script. Parameters are injected as environment variables at runtime and can be supplied via the UI, CLI, or webhook payload.
-- **Environment Variables** — Per-script environment variables (with optional secret masking) stored securely in the database.
+- **Environment Variables** — Per-script environment variables; secret values are vault-backed and resolve only for the bound script at execution time.
 - **Execution Timeout** — Configurable timeout per script (or global default) to prevent runaway processes.
 
 ### Sync & Backup

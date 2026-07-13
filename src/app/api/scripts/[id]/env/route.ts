@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { defaultSecretVaultService } from '@/lib/secrets/defaultService'
+import { parseSecretReference, serializeSecretReference } from '@/lib/secrets/references'
 
 type Params = Promise<{ id: string }>
 
@@ -44,10 +46,27 @@ export async function POST(
   const script = await prisma.script.findUnique({ where: { id: scriptId } })
   if (!script) return NextResponse.json({ error: 'Script not found' }, { status: 404 })
 
+  const existing = await prisma.scriptEnvVar.findUnique({ where: { scriptId_key: { scriptId, key } } })
+  let persistedValue = value
+  if (isSecret) {
+    const service = defaultSecretVaultService()
+    const access = { actorType: 'user' as const, actorId: 'current-user', workspaceId: 'default', capability: 'secret:write', resource: `script:${scriptId}`, reason: 'script environment update' }
+    let secretId: string
+    if (existing?.isSecret && existing.value.startsWith('secretref:')) {
+      secretId = parseSecretReference(existing.value)
+      await service.rotateSecret(secretId, value, access)
+    } else {
+      const secret = await service.createSecret({ name: `script:${scriptId}:${key}`, plaintext: value, description: `Environment variable ${key}`, scope: 'resource', workspaceId: 'default', createdBy: access.actorId })
+      secretId = secret.id
+    }
+    await service.bindSecret(secretId, { resourceType: 'script', resourceId: scriptId, field: key, workspaceId: 'default', createdBy: access.actorId })
+    persistedValue = serializeSecretReference(secretId)
+  }
+
   const envVar = await prisma.scriptEnvVar.upsert({
     where: { scriptId_key: { scriptId, key } },
-    update: { value, isSecret },
-    create: { scriptId, key, value, isSecret },
+    update: { value: persistedValue, isSecret },
+    create: { scriptId, key, value: persistedValue, isSecret },
   })
 
   return NextResponse.json({

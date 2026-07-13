@@ -235,3 +235,37 @@ Recommended first slice:
 - `src/lib/storageEncryption.ts`
 - `electron/preload.ts`
 - `src/types/electron.d.ts`
+
+## Phase 5 implementation — shared encrypted secret vault
+
+Phase 5 work is on `codex/phase-5-secret-vault`, based directly on committed Phase 4 commit `87506bd`.
+
+Implemented and verified in the current working tree:
+
+- Durable `Secret`, `SecretVersion`, `SecretBinding`, and `SecretAccessEvent` models plus migration.
+- Provider-neutral `SecretStore` contract with authenticated AES-256-GCM server storage and an Electron `safeStorage` adapter.
+- Vault create, rotate, disable, bind, resolve, reveal-once, metadata list, and access-history operations.
+- Workspace, capability, resource-binding, and disabled-state read checks with allowed and denied access audit events.
+- Opaque object and string secret-reference contracts.
+- Metadata-only vault APIs plus explicit rotate, disable, bind, reveal, and history endpoints.
+- Settings Secret Vault surface showing scope, version, binding count, access count, rotation, and disable controls.
+- Script environment secrets now persist as vault references and resolve only in ephemeral server/Electron runtime environment maps.
+- Regression coverage for non-deterministic ciphertext, tamper detection, production key validation, scoped access, rotation, disabled denial, API leakage, reference persistence, and execution-event redaction.
+
+Fresh verification after the implementation:
+
+- Vitest: 36 test files passed, 95 tests passed, 0 failures.
+- Focused application and Electron typechecks passed before the final verification gate.
+
+Current limitations and remaining Phase 5 acceptance work:
+
+- Ops SSH credentials, storage-provider credentials, inline API authentication, script/workflow webhook secrets, and existing legacy records still require idempotent vault-reference migration.
+- The current leak regression covers vault records, vault API responses, script environment persistence, and registered execution-event values. Exports, all notification payload shapes, and future ACP transcript persistence need broader sentinel scans after every credential family is migrated.
+- Manual Electron visual QA and a live OS `safeStorage` round trip are not recorded.
+- Phase 5 is therefore in progress; do not mark the roadmap exit gate complete or start Phase 6 yet.
+
+Next implementation slice:
+
+1. Add idempotent migration/resolution helpers for Ops, storage providers, API request auth, and both webhook-secret families.
+2. Extend leak sentinels across exports, notification delivery payloads, workflow records, Redux/API serialization, and ACP-shaped transcript fixtures.
+3. Run the full completion gate: application TypeScript, Electron TypeScript, production build, full tests, and diff hygiene.
