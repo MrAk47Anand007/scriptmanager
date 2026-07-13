@@ -4,6 +4,7 @@ import settingsReducer from '@/features/settings/settingsSlice'
 import opsReducer from '@/features/ops/opsSlice'
 import apiReducer from '@/features/api/apiSlice'
 import workbenchReducer from '@/features/workbench/workbenchSlice'
+import workflowsReducer from '@/features/workflows/workflowsSlice'
 
 export const makeStore = () =>
   configureStore({
@@ -13,6 +14,7 @@ export const makeStore = () =>
       ops: opsReducer,
       api: apiReducer,
       workbench: workbenchReducer,
+      workflows: workflowsReducer,
     },
   })
 

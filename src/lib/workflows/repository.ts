@@ -7,6 +7,14 @@ type Database = PrismaClient
 
 export function createWorkflowRepository(database: Database) {
   return {
+    listWorkflows() {
+      return database.workflow.findMany({ orderBy: { updatedAt: 'desc' }, include: { _count: { select: { versions: true, runs: true } } } })
+    },
+
+    getWorkflow(id: string) {
+      return database.workflow.findUnique({ where: { id }, include: { versions: { orderBy: { version: 'desc' } }, triggers: true } })
+    },
+
     async createDraft(input: { name: string; description?: string; definition: WorkflowDefinition }) {
       const definition = parseWorkflowDefinition(input.definition)
       return database.workflow.create({
@@ -20,6 +28,10 @@ export function createWorkflowRepository(database: Database) {
         where: { id },
         data: { name: definition.name, description: definition.description ?? '', draftDefinition: JSON.stringify(definition) },
       })
+    },
+
+    deleteWorkflow(id: string) {
+      return database.workflow.delete({ where: { id } })
     },
 
     async publish(id: string) {
@@ -107,6 +119,28 @@ export function createWorkflowRepository(database: Database) {
 
     async getRun(runId: string) {
       return database.workflowRun.findUniqueOrThrow({ where: { id: runId }, include: { version: true, nodeRuns: true } })
+    },
+
+    listRuns(workflowId: string) {
+      return database.workflowRun.findMany({ where: { workflowId }, orderBy: { createdAt: 'desc' }, include: { nodeRuns: true }, take: 50 })
+    },
+
+    async retryNode(runId: string, nodeId: string) {
+      return database.$transaction(async (tx) => {
+        const node = await tx.workflowNodeRun.findUniqueOrThrow({ where: { runId_nodeId: { runId, nodeId } } })
+        if (!['failed', 'interrupted'].includes(node.status)) throw new Error(`Cannot retry node with status: ${node.status}`)
+        await tx.workflowNodeRun.update({ where: { id: node.id }, data: { status: 'pending', errorJson: null, finishedAt: null } })
+        return tx.workflowRun.update({ where: { id: runId }, data: { status: 'queued', workerId: null, claimedAt: null, finishedAt: null, errorJson: null, cancelRequestedAt: null } })
+      })
+    },
+
+    async approveNode(runId: string, nodeId: string, actorId: string) {
+      return database.$transaction(async (tx) => {
+        const node = await tx.workflowNodeRun.findUniqueOrThrow({ where: { runId_nodeId: { runId, nodeId } } })
+        if (node.status !== 'waiting_approval') throw new Error(`Cannot approve node with status: ${node.status}`)
+        await tx.workflowNodeRun.update({ where: { id: node.id }, data: { status: 'succeeded', outputJson: JSON.stringify({ approved: true, actorId }), finishedAt: new Date() } })
+        return tx.workflowRun.update({ where: { id: runId }, data: { status: 'queued', workerId: null, claimedAt: null, finishedAt: null } })
+      })
     },
 
     async setRunStatus(runId: string, status: string, output?: unknown, error?: unknown) {

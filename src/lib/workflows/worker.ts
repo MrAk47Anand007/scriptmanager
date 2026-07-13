@@ -18,10 +18,15 @@ export async function runClaimedWorkflow(run: ClaimedRun, repository: WorkflowRe
   const outputs: Record<string, unknown> = {}
   const selectedPorts: Record<string, 'true' | 'false' | undefined> = {}
   const nodeById = new Map(definition.nodes.map((node) => [node.id, node]))
+  for (const nodeRun of run.nodeRuns) {
+    if (nodeRun.status === 'succeeded' && nodeRun.outputJson) outputs[nodeRun.nodeId] = JSON.parse(nodeRun.outputJson)
+  }
 
   try {
     for (const layer of planWorkflow(definition)) {
       for (const nodeId of layer) {
+        const persistedNode = (await repository.getRun(run.id)).nodeRuns.find((item) => item.nodeId === nodeId)
+        if (persistedNode?.status === 'succeeded') continue
         const latest = await repository.getRun(run.id)
         if (latest.cancelRequestedAt) {
           await repository.setRunStatus(run.id, 'cancelled')
@@ -40,6 +45,8 @@ export async function runClaimedWorkflow(run: ClaimedRun, repository: WorkflowRe
         const input = node.config.inputs === undefined ? baseInput : resolveMappings(node.config.inputs, mappingContext)
         const executableNode = node.type === 'transform'
           ? { ...node, config: { ...node.config, mappings: resolveMappings(node.config.mappings, mappingContext) as Record<string, unknown> } }
+          : node.type === 'condition'
+            ? { ...node, config: { ...node.config, left: resolveMappings(node.config.left, mappingContext), right: resolveMappings(node.config.right, mappingContext) } }
           : node
         const policy = normalizeExecutionPolicy({ timeoutMs: node.timeoutMs, retry: node.retry, failureAction: node.failurePolicy?.action })
         let attempt = 0

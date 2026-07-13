@@ -62,6 +62,10 @@ A self-hosted, local-first script manager — write, run, schedule, and organize
 - **Script Duplication** — Clone any script with one click.
 
 ### Automation
+- **Visual Workflows** — Build versioned DAG workflows from scripts, API requests, conditions, transforms, delays, approvals, parallel branches, remote operations, and notifications.
+- **Durable Workflow Runs** — Database-backed runs persist node attempts, outputs, retries, cancellation, approval pauses, and restart reconciliation.
+- **Workflow Triggers** — Start published workflows manually, with cron schedules, or through encrypted HMAC-signed webhooks with replay protection.
+- **Workflow Templates** — Start from script pipeline, API-to-script, approval deploy, or remote maintenance templates.
 - **Webhooks** — Every script gets a unique HTTP POST endpoint. Send a request from IFTTT, Zapier, GitHub Actions, or any HTTP client to trigger execution. Supports optional HMAC-SHA256 signature verification (GitHub-compatible).
 - **Cron Scheduling** — Built-in cron scheduler. Enter any standard cron expression and the server executes your script automatically. Next-run time displayed in the UI.
 - **Script Parameters** — Define typed, named parameters per script. Parameters are injected as environment variables at runtime and can be supplied via the UI, CLI, or webhook payload.

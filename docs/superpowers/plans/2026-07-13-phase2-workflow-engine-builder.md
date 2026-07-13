@@ -8,6 +8,8 @@
 
 **Tech Stack:** Next.js 15, React 19, TypeScript, Redux Toolkit, Prisma 6/SQLite, Vitest, Croner.
 
+**Implementation status (2026-07-13):** Complete. Tasks 1-8 are implemented and verified on `codex/phase-2-workflow-engine`.
+
 ## Global Constraints
 
 - Preserve all existing script, API, Ops, cloud-storage, CLI, web, and Electron behavior.
@@ -168,3 +170,10 @@
 - [ ] Run fresh schema generation, all tests, TypeScript checks, Electron checks, and production build.
 - [ ] Update README and mark plan checkboxes from evidence only.
 - [ ] Commit Phase 2 completion documentation.
+
+## Verification evidence
+
+- Workflow schemas, graph planning, mappings, policies, persistence, worker execution, triggers, HTTP routes, Redux state, templates, and acceptance contracts are covered by Vitest.
+- `npm test` passes against a freshly synchronized SQLite schema.
+- `npm run build` completes with every workflow route included in the Next.js route manifest.
+- `npx tsc -p electron/tsconfig.json --noEmit` passes.

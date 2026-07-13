@@ -1,0 +1,22 @@
+'use client'
+import { useEffect } from 'react'
+import { GitBranch, Plus } from 'lucide-react'
+import { useAppDispatch, useAppSelector } from '@/store/hooks'
+import { fetchWorkflows, selectWorkflow } from '@/features/workflows/workflowsSlice'
+import { selectActiveWorkflow, selectWorkflows } from '@/features/workflows/selectors'
+import { workflowTemplates } from '@/lib/workflows/templates'
+
+export function WorkflowSidebar() {
+  const dispatch = useAppDispatch(); const items = useAppSelector(selectWorkflows); const active = useAppSelector(selectActiveWorkflow)
+  useEffect(() => { void dispatch(fetchWorkflows()) }, [dispatch])
+  const create = async (templateKey?: keyof typeof workflowTemplates) => {
+    const definition = templateKey ? workflowTemplates[templateKey].definition : { schemaVersion: 1 as const, name: 'Untitled workflow', nodes: [], edges: [] }
+    const item = await (await fetch('/api/workflows', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: definition.name, definition }) })).json()
+    dispatch(selectWorkflow(item)); void dispatch(fetchWorkflows())
+  }
+  return <div className="flex h-full flex-col">
+    <div className="flex h-11 items-center justify-between border-b border-wb-border px-3"><span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Workflows</span><button onClick={() => void create()} className="rounded p-1.5 hover:bg-muted" aria-label="New workflow"><Plus className="h-4 w-4" /></button></div>
+    <div className="flex-1 overflow-y-auto py-1">{items.map((item) => <button key={item.id} onClick={() => dispatch(selectWorkflow(item))} className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${active?.id === item.id ? 'bg-accent-brand/10 text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}><GitBranch className="h-4 w-4 shrink-0" /><span className="truncate">{item.name}</span>{item.publishedVersion && <span className="ml-auto text-[10px] text-emerald-500">v{item.publishedVersion}</span>}</button>)}</div>
+    <div className="border-t border-wb-border p-2"><div className="px-1 pb-1 text-[9px] uppercase tracking-wider text-muted-foreground">Start from template</div>{Object.entries(workflowTemplates).map(([key,template])=><button key={key} onClick={()=>void create(key as keyof typeof workflowTemplates)} className="block w-full truncate rounded px-1.5 py-1 text-left text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">{template.name}</button>)}</div>
+  </div>
+}

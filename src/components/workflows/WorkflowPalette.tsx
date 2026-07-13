@@ -1,0 +1,6 @@
+'use client'
+import { useAppDispatch } from '@/store/hooks'
+import { addNode } from '@/features/workflows/workflowsSlice'
+import type { WorkflowNodeType } from '@/lib/workflows/types'
+const nodes: Array<[WorkflowNodeType, string, Record<string, unknown>]> = [['script','Script',{scriptId:''}],['api','API request',{requestId:''}],['condition','Condition',{left:'$trigger.value',operator:'truthy'}],['transform','Transform',{mappings:{}}],['delay','Delay',{durationMs:1000}],['approval','Approval',{prompt:'Approve this step?'}],['parallel','Parallel',{}],['join','Join',{}],['remote','Remote',{scriptId:'',profileId:''}],['notification','Notify',{channel:'desktop',message:'Workflow update'}]]
+export function WorkflowPalette() { const dispatch = useAppDispatch(); return <div className="flex w-44 shrink-0 flex-col border-r border-wb-border bg-wb-sidepanel/60"><div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Node palette</div><div className="space-y-0.5 px-2">{nodes.map(([type,name,config]) => <button key={type} onClick={() => dispatch(addNode({type,name,config}))} className="w-full rounded px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground">+ {name}</button>)}</div></div> }

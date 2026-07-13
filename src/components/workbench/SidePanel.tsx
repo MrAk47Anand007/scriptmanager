@@ -6,6 +6,7 @@ import { selectActiveActivity, selectSidePanelVisible } from '@/features/workben
 import { ScriptsSidebar } from '@/components/ScriptsSidebar'
 import { ApiSidebar } from '@/components/api/ApiSidebar'
 import { OpsSidebar } from './OpsSidebar'
+import { WorkflowSidebar } from '@/components/workflows/WorkflowSidebar'
 import { cn } from '@/lib/utils'
 
 const MIN_WIDTH = 200
@@ -36,6 +37,7 @@ export function SidePanel() {
   const [width, setWidth] = useState(DEFAULT_WIDTH)
   const [isDragging, setIsDragging] = useState(false)
   const [apiMounted, setApiMounted] = useState(false)
+  const [workflowsMounted, setWorkflowsMounted] = useState(false)
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const widthRef = useRef(width)
   widthRef.current = width
@@ -46,6 +48,7 @@ export function SidePanel() {
 
   useEffect(() => {
     if (activeActivity === 'api') setApiMounted(true)
+    if (activeActivity === 'workflows') setWorkflowsMounted(true)
   }, [activeActivity])
 
   useEffect(() => {
@@ -91,6 +94,7 @@ export function SidePanel() {
   const scriptsActive = activeActivity === 'scripts'
   const apiActive = activeActivity === 'api'
   const opsActive = activeActivity === 'ops'
+  const workflowsActive = activeActivity === 'workflows'
 
   return (
     <div className="flex h-full shrink-0">
@@ -118,6 +122,7 @@ export function SidePanel() {
               <OpsSidebar />
             </div>
           )}
+          {workflowsMounted && <div className={cn('h-full', !workflowsActive && 'hidden')}><WorkflowSidebar /></div>}
         </div>
       </div>
       {!collapsed && (

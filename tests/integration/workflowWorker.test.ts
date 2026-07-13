@@ -64,4 +64,14 @@ describe('workflow worker', () => {
     expect(run.errorJson).toContain('boom')
     expect(run.nodeRuns[0].status).toBe('failed')
   })
+
+  it('resolves condition references and skips the inactive branch', async () => {
+    const claimed = await queued({ schemaVersion: 1, name: 'Condition', nodes: [
+      { id: 'check', type: 'condition', name: 'Check', config: { left: '$trigger.release', operator: 'falsy' } },
+      { id: 'script', type: 'script', name: 'Script', config: { scriptId: 's' } },
+    ], edges: [{ id: 'edge', source: 'check', sourcePort: 'true', target: 'script' }] })
+    await runClaimedWorkflow(claimed!, repository, adapters)
+    const run = await repository.getRun(claimed!.id)
+    expect(run.nodeRuns.find((item) => item.nodeId === 'script')?.status).toBe('skipped')
+  })
 })
