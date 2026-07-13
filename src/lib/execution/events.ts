@@ -1,10 +1,10 @@
 import crypto from 'node:crypto'
 
-export type ExecutionKind = 'script' | 'api' | 'remote' | 'workflow' | 'agent'
+export type ExecutionKind = 'script' | 'api' | 'remote' | 'workflow' | 'agent' | 'git'
 export type ExecutionEventType =
   | 'execution.queued' | 'execution.started' | 'execution.output'
   | 'execution.succeeded' | 'execution.failed' | 'execution.cancelled'
-  | 'execution.timed_out' | 'approval.requested' | 'approval.decided'
+  | 'execution.timed_out' | 'approval.requested' | 'approval.decided' | 'git.action'
 
 export interface ExecutionActor {
   type: 'user' | 'system' | 'webhook' | 'schedule' | 'agent'
@@ -13,7 +13,7 @@ export interface ExecutionActor {
 }
 
 export interface ExecutionTarget {
-  type: 'script' | 'api_request' | 'remote_execution' | 'workflow' | 'agent_run'
+  type: 'script' | 'api_request' | 'remote_execution' | 'workflow' | 'agent_run' | 'project'
   id: string
   name?: string
 }

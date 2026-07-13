@@ -5,7 +5,7 @@ import type { AcpArtifact, AcpMessage, AcpProvider, AcpUsage } from './types'
 export function createAgentRepository(database: PrismaClient) {
   return {
     createProviderConfig(input: { provider: AcpProvider; name: string; executable: string; credentialRef?: string }) { return database.agentProviderConfig.create({ data: input }) },
-    createProfile(input: { name: string; provider: AcpProvider; providerConfigId?: string; accessLevel: string; workspaceId: string; model?: string; systemPrompt?: string }) { return database.agentProfile.create({ data: input }) },
+    createProfile(input: { name: string; provider: AcpProvider; providerConfigId?: string; accessLevel: string; workspaceId: string; projectId?: string; model?: string; systemPrompt?: string }) { return database.agentProfile.create({ data: input }) },
     createRun(input: { profileId: string; provider: AcpProvider; correlationId: string; workspaceId: string; input: unknown; secrets?: string[] }) {
       return database.agentRun.create({ data: { profileId: input.profileId, provider: input.provider, correlationId: input.correlationId, workspaceId: input.workspaceId, inputJson: JSON.stringify(redactAgentValue(input.input, input.secrets)), status: 'queued' } })
     },

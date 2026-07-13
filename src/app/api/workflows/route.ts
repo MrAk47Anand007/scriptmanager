@@ -8,6 +8,6 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    return Response.json(workflowJson(await workflowRepository.createDraft({ name: body.name, description: body.description, definition: body.definition })), { status: 201 })
+    return Response.json(workflowJson(await workflowRepository.createDraft({ name: body.name, description: body.description, definition: body.definition, projectId: body.projectId })), { status: 201 })
   } catch (error) { return apiError(error) }
 }

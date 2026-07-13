@@ -78,6 +78,7 @@ export function ActivityBar() {
       />
       <ActivityButton icon={GitBranch} title="Workflows" active={activeActivity === 'workflows'} onClick={() => select('workflows')} />
       <ActivityButton icon={Bot} title="Agents" active={activeActivity === 'agents'} onClick={() => select('agents')} />
+      <ActivityButton icon={GitBranch} title="Source Control" active={activeActivity === 'git'} onClick={() => select('git')} />
       <ActivityButton icon={Activity} title="Executions" active={activeActivity === 'executions'} onClick={() => select('executions')} />
       <ActivityButton icon={CheckCheck} title="Approvals" active={activeActivity === 'approvals'} onClick={() => select('approvals')} />
       {isOpsModeActive && (

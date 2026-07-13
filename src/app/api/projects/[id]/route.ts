@@ -1,5 +1,12 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { DEFAULT_WORKSPACE_POLICY } from '@/lib/git/types'
+
+const projectJson = (project: any) => ({ id: project.id, name: project.name, description: project.description,
+  environment: project.environment, color: project.color, repository_root: project.repositoryRoot,
+  default_branch: project.defaultBranch, remote_url: project.remoteUrl,
+  workspace_policy: JSON.parse(project.workspacePolicy || '{}'), collection_ids: project.collections.map((c: { id: string }) => c.id),
+  created_at: project.createdAt.toISOString(), updated_at: project.updatedAt.toISOString() })
 
 export async function GET(
   req: Request,
@@ -16,16 +23,7 @@ export async function GET(
     return NextResponse.json({ error: 'Project not found' }, { status: 404 })
   }
 
-  return NextResponse.json({
-    id: project.id,
-    name: project.name,
-    description: project.description,
-    environment: project.environment,
-    color: project.color,
-    collection_ids: project.collections.map(c => c.id),
-    created_at: project.createdAt.toISOString(),
-    updated_at: project.updatedAt.toISOString(),
-  })
+  return NextResponse.json(projectJson(project))
 }
 
 export async function PUT(
@@ -33,7 +31,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const { name, description, environment, color } = await req.json()
+  const { name, description, environment, color, repository_root, default_branch, remote_url, workspace_policy } = await req.json()
 
   const project = await prisma.project.findUnique({ where: { id } })
   if (!project) {
@@ -49,20 +47,15 @@ export async function PUT(
       ...(description !== undefined && { description }),
       ...(environment !== undefined && validEnvironments.includes(environment) && { environment }),
       ...(color !== undefined && { color }),
+      ...(repository_root !== undefined && { repositoryRoot: repository_root?.trim() || null }),
+      ...(default_branch !== undefined && { defaultBranch: default_branch?.trim() || 'main' }),
+      ...(remote_url !== undefined && { remoteUrl: remote_url?.trim() || null }),
+      ...(workspace_policy !== undefined && { workspacePolicy: JSON.stringify({ ...DEFAULT_WORKSPACE_POLICY, ...workspace_policy }) }),
     },
     include: { collections: { select: { id: true } } }
   })
 
-  return NextResponse.json({
-    id: updated.id,
-    name: updated.name,
-    description: updated.description,
-    environment: updated.environment,
-    color: updated.color,
-    collection_ids: updated.collections.map(c => c.id),
-    created_at: updated.createdAt.toISOString(),
-    updated_at: updated.updatedAt.toISOString(),
-  })
+  return NextResponse.json(projectJson(updated))
 }
 
 export async function DELETE(

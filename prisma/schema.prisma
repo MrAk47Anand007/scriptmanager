@@ -150,11 +150,17 @@ model Project {
   description String   @default("")
   environment String   @default("development")
   color       String   @default("#6366f1")
+  repositoryRoot String? @map("repository_root")
+  defaultBranch  String  @default("main") @map("default_branch")
+  remoteUrl      String? @map("remote_url")
+  workspacePolicy String @default("{}") @map("workspace_policy")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   collections    Collection[]
   serverProfiles ServerProfile[]
+  workflows      Workflow[]
+  agentProfiles  AgentProfile[]
 
   @@map("projects")
 }
@@ -343,6 +349,8 @@ model Workflow {
   publishedVersion Int?              @map("published_version")
   createdAt        DateTime          @default(now()) @map("created_at")
   updatedAt        DateTime          @updatedAt @map("updated_at")
+  projectId        String?           @map("project_id")
+  project          Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
   versions         WorkflowVersion[]
   runs             WorkflowRun[]
   triggers         WorkflowTrigger[]
@@ -629,11 +637,13 @@ model AgentProfile {
   providerConfigId String?              @map("provider_config_id")
   accessLevel      String               @default("observe") @map("access_level")
   workspaceId      String               @default("default") @map("workspace_id")
+  projectId        String?              @map("project_id")
   model            String?
   systemPrompt     String               @default("") @map("system_prompt")
   createdAt        DateTime             @default(now()) @map("created_at")
   updatedAt        DateTime             @updatedAt @map("updated_at")
   providerConfig   AgentProviderConfig? @relation(fields: [providerConfigId], references: [id], onDelete: SetNull)
+  project          Project?             @relation(fields: [projectId], references: [id], onDelete: SetNull)
   runs             AgentRun[]
 
   @@index([workspaceId, provider])

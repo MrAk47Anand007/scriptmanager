@@ -15,10 +15,14 @@ export function createWorkflowRepository(database: Database) {
       return database.workflow.findUnique({ where: { id }, include: { versions: { orderBy: { version: 'desc' } }, triggers: true } })
     },
 
-    async createDraft(input: { name: string; description?: string; definition: WorkflowDefinition }) {
+    async createDraft(input: { name: string; description?: string; definition: WorkflowDefinition; projectId?: string | null }) {
       const definition = parseWorkflowDefinition(input.definition)
+      if (input.projectId) {
+        const project = await database.project.findUnique({ where: { id: input.projectId } })
+        if (!project?.repositoryRoot) throw new Error('Selected project is not connected to a repository')
+      }
       return database.workflow.create({
-        data: { name: input.name, description: input.description ?? '', draftDefinition: JSON.stringify(definition) },
+        data: { name: input.name, description: input.description ?? '', draftDefinition: JSON.stringify(definition), projectId: input.projectId },
       })
     },
 
@@ -28,6 +32,14 @@ export function createWorkflowRepository(database: Database) {
         where: { id },
         data: { name: definition.name, description: definition.description ?? '', draftDefinition: JSON.stringify(definition) },
       })
+    },
+
+    async setProject(id: string, projectId: string | null) {
+      if (projectId) {
+        const project = await database.project.findUnique({ where: { id: projectId } })
+        if (!project?.repositoryRoot) throw new Error('Selected project is not connected to a repository')
+      }
+      return database.workflow.update({ where: { id }, data: { projectId } })
     },
 
     deleteWorkflow(id: string) {

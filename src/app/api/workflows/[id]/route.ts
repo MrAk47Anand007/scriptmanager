@@ -5,7 +5,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   return item ? Response.json(workflowJson(item)) : Response.json({ error: 'Workflow not found' }, { status: 404 })
 }
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  try { return Response.json(workflowJson(await workflowRepository.updateDraft((await params).id, (await request.json()).definition))) }
+  try { const id = (await params).id; const body = await request.json(); const updated = await workflowRepository.updateDraft(id, body.definition); if (body.projectId !== undefined) await workflowRepository.setProject(id, body.projectId); return Response.json(workflowJson({ ...updated, projectId: body.projectId ?? updated.projectId })) }
   catch (error) { return apiError(error) }
 }
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {

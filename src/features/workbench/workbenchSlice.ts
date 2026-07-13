@@ -1,6 +1,6 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 
-export type ActivityId = 'scripts' | 'api' | 'workflows' | 'agents' | 'executions' | 'approvals' | 'ops' | 'schedules' | 'settings'
+export type ActivityId = 'scripts' | 'api' | 'workflows' | 'agents' | 'git' | 'executions' | 'approvals' | 'ops' | 'schedules' | 'settings'
 export type DockTabId = 'terminal' | 'output' | 'builds' | 'audit'
 
 export interface EditorTab {

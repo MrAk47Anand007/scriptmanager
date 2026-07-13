@@ -1,5 +1,13 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { DEFAULT_WORKSPACE_POLICY } from '@/lib/git/types'
+
+const projectJson = (p: any) => ({
+  id: p.id, name: p.name, description: p.description, environment: p.environment, color: p.color,
+  repository_root: p.repositoryRoot, default_branch: p.defaultBranch, remote_url: p.remoteUrl,
+  workspace_policy: JSON.parse(p.workspacePolicy || '{}'), collection_ids: p.collections.map((c: { id: string }) => c.id),
+  created_at: p.createdAt.toISOString(), updated_at: p.updatedAt.toISOString(),
+})
 
 export async function GET() {
   const projects = await prisma.project.findMany({
@@ -9,20 +17,11 @@ export async function GET() {
     }
   })
 
-  return NextResponse.json(projects.map(p => ({
-    id: p.id,
-    name: p.name,
-    description: p.description,
-    environment: p.environment,
-    color: p.color,
-    collection_ids: p.collections.map(c => c.id),
-    created_at: p.createdAt.toISOString(),
-    updated_at: p.updatedAt.toISOString(),
-  })))
+  return NextResponse.json(projects.map(projectJson))
 }
 
 export async function POST(req: Request) {
-  const { name, description, environment, color } = await req.json()
+  const { name, description, environment, color, repository_root, default_branch, remote_url, workspace_policy } = await req.json()
 
   if (!name?.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
@@ -37,18 +36,13 @@ export async function POST(req: Request) {
       description: description ?? '',
       environment: env,
       color: color ?? '#6366f1',
+      repositoryRoot: repository_root?.trim() || null,
+      defaultBranch: default_branch?.trim() || 'main',
+      remoteUrl: remote_url?.trim() || null,
+      workspacePolicy: JSON.stringify({ ...DEFAULT_WORKSPACE_POLICY, ...(workspace_policy ?? {}) }),
     },
     include: { collections: { select: { id: true } } }
   })
 
-  return NextResponse.json({
-    id: project.id,
-    name: project.name,
-    description: project.description,
-    environment: project.environment,
-    color: project.color,
-    collection_ids: project.collections.map(c => c.id),
-    created_at: project.createdAt.toISOString(),
-    updated_at: project.updatedAt.toISOString(),
-  }, { status: 201 })
+  return NextResponse.json(projectJson(project), { status: 201 })
 }
