@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { randomUUID } from 'node:crypto'
+import { vaultApiAuthConfig } from '@/lib/secrets/apiAuth'
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -39,8 +41,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
 
+  const requestId = randomUUID()
   const request = await (prisma.apiRequest as any).create({
     data: {
+      id: requestId,
       name: name.trim(),
       method: method ?? 'GET',
       url: url ?? '',
@@ -54,7 +58,7 @@ export async function POST(req: Request) {
       bodyType: body_type ?? 'none',
       body: body ?? '',
       authType: auth_type ?? 'none',
-      authConfig: auth_config ?? '{}',
+      authConfig: await vaultApiAuthConfig(prisma, requestId, auth_config ?? '{}'),
       collectionId: collection_id ?? null
     }
   })

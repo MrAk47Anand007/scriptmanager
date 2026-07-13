@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { hasStoredOpsSecret, sealOpsSecret } from '@/lib/opsSecretStore'
+import { hasStoredOpsSecret } from '@/lib/opsSecretStore'
+import { storeResourceSecret } from '@/lib/secrets/migration'
 
 function serializeProfile(p: {
     id: string
@@ -64,7 +65,7 @@ export async function PUT(
         if (secret === null || secret === '') {
             encryptedSecretJson = null
         } else {
-            encryptedSecretJson = await sealOpsSecret(secret)
+            encryptedSecretJson = await storeResourceSecret(prisma, { resourceType: 'server-profile', resourceId: id, field: 'password', name: `ops:${id}:password` }, secret)
         }
     }
 

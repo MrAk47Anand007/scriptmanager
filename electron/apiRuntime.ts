@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
 import vm from 'node:vm'
+import { randomUUID } from 'node:crypto'
 import { PrismaClient } from '@prisma/client'
 import {
   materializeApiRequest,
@@ -21,6 +22,7 @@ import {
   getDesktopWorkspaceLayout,
   writeJsonFile,
 } from '../src/lib/workspaceLayout'
+import { resolveApiAuthConfig, vaultApiAuthConfig } from '../src/lib/secrets/apiAuth'
 
 const prisma = new PrismaClient({
   log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
@@ -689,6 +691,7 @@ export async function saveApiRequest(payload: Record<string, any>): Promise<ApiR
   if (typeof payload.name !== 'string' || !payload.name.trim()) {
     throw new Error('Name is required')
   }
+  const requestId = payload.id ?? randomUUID()
   const data = {
     name: payload.name.trim(),
     method: payload.method ?? 'GET',
@@ -703,12 +706,12 @@ export async function saveApiRequest(payload: Record<string, any>): Promise<ApiR
     bodyType: payload.body_type ?? 'none',
     body: payload.body ?? '',
     authType: payload.auth_type ?? 'none',
-    authConfig: payload.auth_config ?? '{}',
+    authConfig: await vaultApiAuthConfig(prisma, requestId, payload.auth_config ?? '{}'),
     collectionId: payload.collection_id ?? null,
   }
   const request = payload.id
     ? await (prisma.apiRequest as any).update({ where: { id: payload.id }, data })
-    : await (prisma.apiRequest as any).create({ data })
+    : await (prisma.apiRequest as any).create({ data: { id: requestId, ...data } })
   await syncApiWorkspaceToDisk()
   return serializeApiRequest(request)
 }
@@ -791,6 +794,9 @@ async function executeDesktopApiRequest(input: DesktopApiRequestInput) {
     prisma.setting.findUnique({ where: { key: API_GLOBALS_KEY } }),
   ])
 
+  const runtimeAuthConfig = input.requestId
+    ? await resolveApiAuthConfig(prisma, input.requestId, input.authConfig ?? {})
+    : input.authConfig ?? {}
   const materialized = materializeApiRequest(
     {
       name: input.requestId ?? 'Ad hoc request',
@@ -802,7 +808,7 @@ async function executeDesktopApiRequest(input: DesktopApiRequestInput) {
       bodyType: input.bodyType,
       body: input.body ?? '',
       authType: input.authType ?? 'none',
-      authConfig: input.authConfig ?? {},
+      authConfig: runtimeAuthConfig,
       requestOptions: input.requestOptions ?? {},
       collectionId: input.collectionId ?? null,
       responseMappings: input.responseMappings ?? [],

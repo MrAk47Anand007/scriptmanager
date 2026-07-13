@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { executeApiRequest } from '@/lib/executeApiRequest'
 import type { ApiResponseMappingRow, ApiVariableRow } from '@/lib/apiRequestMaterialization'
 import { executionTelemetry } from '@/lib/execution'
+import { prisma } from '@/lib/db'
+import { resolveApiAuthConfig } from '@/lib/secrets/apiAuth'
 
 export async function POST(req: Request) {
   const correlationId = executionTelemetry.correlationId(req)
@@ -54,7 +56,7 @@ export async function POST(req: Request) {
       bodyType: bodyType ?? 'none',
       body: body ?? '',
       authType: authType ?? 'none',
-      authConfig: (authConfig ?? {}) as Record<string, string>,
+      authConfig: requestId ? await resolveApiAuthConfig(prisma, requestId, authConfig ?? {}) : (authConfig ?? {}) as Record<string, string>,
     })
 
     if (!result.ok) {

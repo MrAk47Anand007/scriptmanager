@@ -250,22 +250,39 @@ Implemented and verified in the current working tree:
 - Metadata-only vault APIs plus explicit rotate, disable, bind, reveal, and history endpoints.
 - Settings Secret Vault surface showing scope, version, binding count, access count, rotation, and disable controls.
 - Script environment secrets now persist as vault references and resolve only in ephemeral server/Electron runtime environment maps.
+- Ops SSH passwords persist as resource-bound vault references in server and Electron flows; existing DPAPI/legacy encrypted records remain readable.
+- Storage-provider secret fields persist as references inside encrypted configuration and resolve only when constructing a provider runtime.
+- API bearer, basic, API-key, and OAuth credential fields persist as references and resolve only for saved-request execution in web and Electron runtimes.
+- Script and workflow webhook signing values persist as references; newly generated values are returned once and runtime signature verification resolves them server-side.
+- Notification webhook URLs, SMTP passwords, tokens, and API keys persist as references and resolve only during delivery.
 - Regression coverage for non-deterministic ciphertext, tamper detection, production key validation, scoped access, rotation, disabled denial, API leakage, reference persistence, and execution-event redaction.
 
 Fresh verification after the implementation:
 
-- Vitest: 36 test files passed, 95 tests passed, 0 failures.
-- Focused application and Electron typechecks passed before the final verification gate.
+- Vitest: 36 test files passed, 100 tests passed, 0 failures after all credential migrations.
+- Application and Electron typechecks passed after all credential migrations.
 
-Current limitations and remaining Phase 5 acceptance work:
+Phase 5 completion status:
 
-- Ops SSH credentials, storage-provider credentials, inline API authentication, script/workflow webhook secrets, and existing legacy records still require idempotent vault-reference migration.
-- The current leak regression covers vault records, vault API responses, script environment persistence, and registered execution-event values. Exports, all notification payload shapes, and future ACP transcript persistence need broader sentinel scans after every credential family is migrated.
+- Phase 5 code complete: yes.
+- Phase 5 automated verification complete: yes.
+- Phase 5 committed: foundation commit `3d446ca`; completion commit recorded in the current branch history.
+- Phase 5 merged, pushed, or opened as a PR: no.
 - Manual Electron visual QA and a live OS `safeStorage` round trip are not recorded.
-- Phase 5 is therefore in progress; do not mark the roadmap exit gate complete or start Phase 6 yet.
+- Existing DPAPI/legacy Ops values and legacy encrypted storage/workflow values remain readable; new writes and explicit updates use vault references.
+- Fresh SQLite creation on this Windows/OneDrive machine remains subject to the previously documented Prisma schema-engine limitation.
 
-Next implementation slice:
+Final Phase 5 completion gate:
 
-1. Add idempotent migration/resolution helpers for Ops, storage providers, API request auth, and both webhook-secret families.
-2. Extend leak sentinels across exports, notification delivery payloads, workflow records, Redux/API serialization, and ACP-shaped transcript fixtures.
-3. Run the full completion gate: application TypeScript, Electron TypeScript, production build, full tests, and diff hygiene.
+- `npm test`: 36 test files passed, 100 tests passed, 0 failures.
+- `npx tsc --noEmit`: passed.
+- `npx tsc -p electron/tsconfig.json --noEmit`: passed.
+- `npm run build`: passed; all vault and migrated integration routes appeared in the Next.js route manifest.
+- `git diff --check`: passed with Windows line-ending conversion notices only.
+- The build still emits the pre-existing dependency warning for Node `DEP0169` (`url.parse()`); it does not fail the build.
+
+Next phase after preserving the verified completion commit:
+
+1. Proceed to Phase 6 provider-neutral ACP agents with Codex and Claude.
+2. Reuse vault references for provider credentials and agent tool inputs; never add an agent-specific plaintext secret store.
+3. Route agent secret reads and protected actions through Phase 4 approvals and Phase 5 access auditing.

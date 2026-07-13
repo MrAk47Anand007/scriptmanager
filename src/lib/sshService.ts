@@ -5,6 +5,7 @@ import fs from 'fs'
 import path from 'path'
 import { prisma } from './db'
 import { revealOpsSecret } from './opsSecretStore'
+import { resolveResourceSecret } from './secrets/migration'
 import { getScriptResolvedFilePath } from './scriptRunner'
 
 // Module-level map: remoteExecId -> EventEmitter (mirrors buildEmitters in scriptRunner.ts)
@@ -31,7 +32,9 @@ async function buildConnectConfig(profileId: string): Promise<ConnectConfig> {
     } else {
         // Password auth — decrypt stored secret
         if (profile.encryptedSecret) {
-            config.password = await revealOpsSecret(profile.encryptedSecret) ?? undefined
+            config.password = profile.encryptedSecret.startsWith('secretref:')
+                ? await resolveResourceSecret(prisma, profile.encryptedSecret, { resourceType: 'server-profile', resourceId: profile.id, field: 'password' }, 'ssh-runtime') ?? undefined
+                : await revealOpsSecret(profile.encryptedSecret) ?? undefined
         }
     }
 

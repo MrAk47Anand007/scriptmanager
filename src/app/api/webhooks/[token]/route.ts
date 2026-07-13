@@ -4,6 +4,7 @@ import { ensureBuildEmitter, executeScriptAsync } from '@/lib/scriptRunner'
 import type { ScriptParameter } from '@/lib/types'
 import crypto from 'crypto'
 import { executionTelemetry } from '@/lib/execution'
+import { resolveResourceSecret } from '@/lib/secrets/migration'
 
 /**
  * Verify an X-Hub-Signature-256 header against a shared secret.
@@ -40,7 +41,10 @@ export async function POST(
   // HMAC signature verification (optional per-script toggle)
   if (script.requireWebhookSignature && script.webhookSecret) {
     const signatureHeader = req.headers.get('x-hub-signature-256')
-    const valid = verifySignature(script.webhookSecret, rawBody, signatureHeader)
+    const signingSecret = script.webhookSecret.startsWith('secretref:')
+      ? await resolveResourceSecret(prisma, script.webhookSecret, { resourceType: 'script', resourceId: script.id, field: 'webhook-signing' }, 'script-webhook-runtime') ?? ''
+      : script.webhookSecret
+    const valid = verifySignature(signingSecret, rawBody, signatureHeader)
     if (!valid) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }

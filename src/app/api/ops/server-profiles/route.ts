@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { hasStoredOpsSecret, sealOpsSecret } from '@/lib/opsSecretStore'
+import { hasStoredOpsSecret } from '@/lib/opsSecretStore'
+import { randomUUID } from 'node:crypto'
+import { storeResourceSecret } from '@/lib/secrets/migration'
 
 function serializeProfile(p: {
     id: string
@@ -54,13 +56,15 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'Username is required' }, { status: 400 })
     }
 
+    const profileId = randomUUID()
     let encryptedSecretJson: string | null = null
     if (secret) {
-        encryptedSecretJson = await sealOpsSecret(secret)
+        encryptedSecretJson = await storeResourceSecret(prisma, { resourceType: 'server-profile', resourceId: profileId, field: 'password', name: `ops:${profileId}:password` }, secret)
     }
 
     const profile = await prisma.serverProfile.create({
         data: {
+            id: profileId,
             name: name.trim(),
             host: host.trim(),
             port: port ?? 22,

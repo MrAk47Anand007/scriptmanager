@@ -3,6 +3,7 @@ import type { ExecutionEvent } from '@/lib/execution/events'
 import { notificationAdapters, type NotificationAdapter } from './adapters'
 import { matchesNotificationRule } from './matcher'
 import { renderNotification } from './template'
+import { resolveNotificationConfig } from '@/lib/secrets/notificationConfig'
 
 export async function dispatchNotificationEvent(database: PrismaClient, event: ExecutionEvent, adapters: Record<string, NotificationAdapter> = notificationAdapters) {
   const rules = await database.notificationRule.findMany({ where:{enabled:true,channel:{enabled:true}}, include:{channel:true} })
@@ -18,7 +19,7 @@ export async function dispatchNotificationEvent(database: PrismaClient, event: E
     const message = renderNotification(rule.templateJson, event)
     const delivery = await database.notificationDelivery.create({ data:{channelId:rule.channelId,ruleId:rule.id,eventId:event.id,dedupeKey,payloadJson:JSON.stringify(message)} })
     try {
-      await adapters[rule.channel.kind].send(JSON.parse(rule.channel.configJson), message)
+      await adapters[rule.channel.kind].send(await resolveNotificationConfig(database, rule.channel.id, rule.channel.configJson), message)
       await database.notificationDelivery.update({where:{id:delivery.id},data:{status:'delivered',attemptCount:1,deliveredAt:new Date()}})
       outcomes.push({ruleId:rule.id,status:'delivered'})
     } catch (error) {
