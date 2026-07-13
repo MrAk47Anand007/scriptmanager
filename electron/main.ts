@@ -15,6 +15,7 @@ import {
 import { OAUTH_ENDPOINTS, runOAuthFlow } from './oauthFlow'
 import { getDefaultClientId } from './oauthDefaults'
 import { registerAgentRuntimeIpc } from './agentRuntime'
+import { getPackagedServerLaunch } from './serverLaunch'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
 // In production (packaged), Electron spawns the standalone server itself.
@@ -512,13 +513,12 @@ function startServer() {
   }
 
   // Production: spawn the compiled standalone server
-  const nodeExe = process.platform === 'win32' ? 'node.exe' : 'node'
-  const nodePath = path.join(path.dirname(process.execPath), nodeExe)
-  const serverScript = path.join(process.resourcesPath, 'app', 'server.js')
+  const serverLaunch = getPackagedServerLaunch(process.execPath, process.resourcesPath)
 
-  serverProcess = spawn(nodePath, [serverScript], {
+  serverProcess = spawn(serverLaunch.executable, serverLaunch.args, {
     env: {
       ...process.env,
+      ...serverLaunch.env,
       PORT: String(PORT),
       NODE_ENV: 'production',
       DESKTOP_AUTH_SECRET: DESKTOP_SECRET,

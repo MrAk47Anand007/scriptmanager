@@ -9,6 +9,26 @@ beforeAll(async () => { await ensureDefaultWorkspace(prisma) })
 afterEach(async () => { await prisma.userSession.deleteMany({ where: { userId: 'local-admin' } }) })
 
 describe('persisted request session context', () => {
+  it('resolves the local owner context for the Electron desktop session', async () => {
+    const previousSecret = process.env.DESKTOP_AUTH_SECRET
+    process.env.DESKTOP_AUTH_SECRET = 'desktop-context-test'
+    const request = new Request('http://localhost/api/workflows', {
+      headers: { cookie: `${SESSION_COOKIE}=${encodeURIComponent('desktop:desktop-context-test')}` },
+    })
+
+    try {
+      await expect(resolveRequestContext(request)).resolves.toMatchObject({
+        userId: 'local-admin',
+        workspaceId: 'default',
+        roleKey: 'owner',
+        permissions: expect.arrayContaining(['*:*']),
+      })
+    } finally {
+      if (previousSecret === undefined) delete process.env.DESKTOP_AUTH_SECRET
+      else process.env.DESKTOP_AUTH_SECRET = previousSecret
+    }
+  })
+
   it('resolves active membership permissions and rejects revoked sessions', async () => {
     const sessionId = crypto.randomUUID()
     const token = createSessionToken({ userId: 'local-admin', workspaceId: 'default', sessionId })
