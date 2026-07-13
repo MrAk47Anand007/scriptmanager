@@ -3,15 +3,15 @@
 ## Truth source
 
 - Repository: `scriptmanager`
-- Active worktree: `.worktrees/p8`
-- Active branch: `codex/phase-8-teams-rbac`
+- Active worktree: `.worktrees/p9`
+- Active branch: `codex/phase-9-plugin-sdk`
 - Base commit on `main`: `b204cda`
-- Phase 8 base commit: `5d54d48` (`feat: add phase 7 git-backed projects`)
-- Phase 8 implementation head: `8d78ad9` (`feat: add phase 8 teams and workspace RBAC`)
-- Working-tree state at Phase 8 completion: clean after the final build, test, and diff-hygiene pass; this session-handoff update is the only subsequent intentional documentation change.
-- Integration state: Phases 1–8 are preserved in sequential local feature-branch ancestry. Phase 8 is committed locally but not merged, pushed, or opened as a pull request.
+- Phase 9 base commit: `d392c4b` (`docs: update session handoff through phase 8`)
+- Phase 9 implementation head: `ff33f32` (`feat: add phase 9 plugin SDK and marketplace`)
+- Working-tree state at Phase 9 completion: clean after migration replay, application and Electron typechecks, 145 tests, production build, diff-hygiene verification, and the implementation commit.
+- Integration state: Phases 1–9 are preserved in sequential local feature-branch ancestry. Phase 9 is committed locally but not merged, pushed, or opened as a pull request.
 
-Use `.worktrees/p8` as the source of truth for Phases 1–8 and as the baseline for Phase 9 planning. The root `main` checkout does not contain these sequential phase branches and has unrelated local/divergent state that must not be overwritten.
+Use `.worktrees/p9` at commit `ff33f32` as the source of truth for Phases 1–9 and as the baseline for Phase 10 planning. The root `main` checkout does not contain these sequential phase branches and has unrelated local/divergent state that must not be overwritten.
 
 ## Completed phases
 
@@ -427,7 +427,7 @@ Detailed plan and handoff:
 - Phase 8 merged, pushed, or opened as a pull request: no.
 - Root `main` reconciled with the sequential phase branches: no; inspect its divergent/unrelated state before any integration action.
 
-## Phase 9 starting instructions
+## Historical Phase 9 starting instructions
 
 Proceed to Phase 9: plugin SDK and integration marketplace. Create `codex/phase-9-plugin-sdk` from the committed Phase 8 tip, not from `main` or an earlier phase branch.
 
@@ -459,6 +459,8 @@ Read these files first for Phase 9:
 
 Phase 9 is complete on `codex/phase-9-plugin-sdk`, based directly on the committed Phase 8 handoff tip `d392c4b`.
 
+Implementation commit: `ff33f32` (`feat: add phase 9 plugin SDK and marketplace`).
+
 Delivered scope:
 
 - Versioned plugin manifests, compatibility checks, declared capabilities, settings schemas, namespaced workflow nodes, lifecycle hooks, health, and update metadata.
@@ -485,3 +487,18 @@ Detailed handoff: `docs/superpowers/handoffs/2026-07-13-phase-9-plugin-sdk.md`.
 - Phase 9 manual Electron UI and external signed-package validation complete: no.
 - Phase 9 merged, pushed, or opened as a PR: no.
 - Remaining implementation phases: **1** — Phase 10 production hardening and release.
+
+## Phase 10 starting instructions
+
+Create `codex/phase-10-production-release` from `ff33f32` plus this handoff update, not from `main` or an earlier phase branch.
+
+Phase 10 must close the production-release gates from the accepted roadmap:
+
+1. Expand CI across unit, integration, Playwright, Electron smoke, migration, packaging, and security regression checks.
+2. Add backup/restore, migration preflight, rollback guidance, and corrupted-run recovery.
+3. Add rate and request-size limits, webhook replay protection, CSP, dependency scanning, and audit export.
+4. Verify accessibility, keyboard navigation, reduced motion, and large-data performance.
+5. Produce signed installers, update channels, upgrade compatibility checks, release notes, and complete operator/security/ACP/workflow/plugin troubleshooting documentation.
+6. Run the full acceptance path spanning webhook, API, script, approval, Codex/Claude agent, remote action, notification, plugin node, and audit export.
+
+Preserve the Phase 9 security boundary: third-party plugins must remain capability-scoped, workspace-authorized, unable to import core persistence/Electron internals, and unable to resolve raw secret plaintext.
