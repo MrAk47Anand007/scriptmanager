@@ -3,15 +3,15 @@
 ## Truth source
 
 - Repository: `scriptmanager`
-- Active worktree: `.worktrees/phase-5-secret-vault`
-- Active branch: `codex/phase-5-secret-vault`
+- Active worktree: `.worktrees/p8`
+- Active branch: `codex/phase-8-teams-rbac`
 - Base commit on `main`: `b204cda`
-- Phase 5 base commit: `87506bd` (`feat: add notifications and approval inbox`)
-- Phase 5 implementation head: `0f6049f` (`feat: complete vault credential migrations`)
-- Working-tree state: clean after the final Phase 5 verification pass.
-- Integration state: Phase 5 is committed locally but not merged, pushed, or opened as a pull request.
+- Phase 8 base commit: `5d54d48` (`feat: add phase 7 git-backed projects`)
+- Phase 8 implementation head: `8d78ad9` (`feat: add phase 8 teams and workspace RBAC`)
+- Working-tree state at Phase 8 completion: clean after the final build, test, and diff-hygiene pass; this session-handoff update is the only subsequent intentional documentation change.
+- Integration state: Phases 1–8 are preserved in sequential local feature-branch ancestry. Phase 8 is committed locally but not merged, pushed, or opened as a pull request.
 
-Use this worktree as the source of truth for Phases 1–5 and as the baseline for Phase 6 planning. The root `main` checkout does not contain these phase branches and has unrelated local/divergent state that must not be overwritten.
+Use `.worktrees/p8` as the source of truth for Phases 1–8 and as the baseline for Phase 9 planning. The root `main` checkout does not contain these sequential phase branches and has unrelated local/divergent state that must not be overwritten.
 
 ## Completed phases
 
@@ -351,3 +351,106 @@ Read these files first for Phase 6:
 - `electron/main.ts`
 - `electron/preload.ts`
 - `src/types/electron.d.ts`
+
+## Phase 7 implementation — Git-backed projects
+
+Phase 7 is complete in the ancestry of the active Phase 8 branch at commit `5d54d48`.
+
+Delivered scope:
+
+- Repository root, default branch, remote metadata, and workspace policy on projects.
+- Argument-safe Git status, diff, branch, checkout, commit, fetch, pull, push, and cleanup operations using `spawn('git', args, { shell: false })`.
+- Source-control workbench with project connection, conflict/status groups, diff inspection, commit, branch context, and remote actions.
+- Repository selection for workflows and agent profiles; ACP providers launch at the selected repository root.
+- Phase 4 approval routing for push, force operations, and cleanup, with unified audit events for human and agent Git actions.
+
+Phase 7 verification evidence:
+
+- Vitest: 48 test files passed, 121 tests passed, 0 failures.
+- `npm run build`: passed, including Prisma generation, TypeScript, Next.js compilation, and route generation.
+- `git diff --check`: passed.
+- Manual desktop validation remains pending for a real multi-file diff, disposable-branch commit, and approved push.
+
+Detailed handoff: `docs/superpowers/handoffs/2026-07-13-phase-7-git-backed-projects.md`.
+
+## Phase 8 implementation — teams, RBAC, and workspace policy
+
+Phase 8 is complete and committed on `codex/phase-8-teams-rbac` at `8d78ad9`, based directly on the verified Phase 7 tip.
+
+Delivered scope:
+
+- Persisted `User`, `Workspace`, `Membership`, `Role`, `RolePermission`, `WorkspaceInvitation`, and `UserSession` models.
+- Deterministic, idempotent local bootstrap with a default administrator-owned workspace and owner, admin, developer, operator, approver, and viewer role presets.
+- Workspace ownership for scripts, workflows, projects, Ops profiles, secrets, agents, approvals, and Git-backed resources, with existing data migrated into the default workspace.
+- Deny-by-default `resource:action` authorization with exact and wildcard grants, enforced in Node middleware and workspace-administration routes.
+- Cross-workspace checks for client-requested workspace IDs and ID-addressed scripts, workflows, secrets, agents, approvals, Ops profiles, and Git projects.
+- Hashed, expiring, individually revocable sessions; invitation, member, custom-role, session, grant-revocation, and audit APIs.
+- Agent authority intersection across the initiating user's RBAC, agent access profile, workspace policy, and protected-action approval rules.
+- **Settings → Workspace Access** for invitations, members, preset/custom roles, sessions, reusable-grant revocation, and workspace audit history.
+- Final-owner protection prevents removal or demotion of the last active workspace owner.
+
+Phase 8 verification evidence:
+
+```powershell
+Copy-Item -LiteralPath '..\p7\prisma\p7-test.db' -Destination 'prisma\p8-test.db' -Force
+$env:DATABASE_URL='file:./p8-test.db'
+npx prisma db execute --file prisma/migrations/20260713190000_phase8_teams_rbac/migration.sql --schema prisma/schema.prisma
+npm run build
+npm test
+git diff --check
+```
+
+Results from the final post-fix verification pass:
+
+- Phase 8 migration applied successfully to a fresh copy of the verified Phase 7 SQLite database.
+- Next.js production build passed; all 50 static pages and all workspace-administration routes were generated.
+- Vitest: 54 test files passed, 132 tests passed, 0 failures.
+- Diff hygiene passed; Git emitted Windows line-ending conversion notices only.
+
+Known Phase 8 validation limits:
+
+- Manual multi-user validation from separate browsers/devices is not recorded.
+- Preset-role walkthroughs in a deployed server instance are not recorded.
+- API bearer tokens remain legacy administrator-level machine access; scoped machine identities are deferred to Phase 10 hardening.
+
+Detailed plan and handoff:
+
+- `docs/superpowers/plans/2026-07-13-phase-8-teams-rbac.md`
+- `docs/superpowers/handoffs/2026-07-13-phase-8-teams-rbac.md`
+
+## Current completion and integration state
+
+- Phases 1–8 code complete: yes.
+- Phases 1–8 automated verification complete: yes.
+- Phase 8 commit: `8d78ad9`.
+- Phase 8 manual multi-user/device validation complete: no.
+- Phase 8 merged, pushed, or opened as a pull request: no.
+- Root `main` reconciled with the sequential phase branches: no; inspect its divergent/unrelated state before any integration action.
+
+## Phase 9 starting instructions
+
+Proceed to Phase 9: plugin SDK and integration marketplace. Create `codex/phase-9-plugin-sdk` from the committed Phase 8 tip, not from `main` or an earlier phase branch.
+
+The first Phase 9 slice should:
+
+1. Define a versioned plugin manifest with compatibility version, declared capabilities, settings schema, node/provider contributions, and lifecycle hooks.
+2. Map every plugin host capability to Phase 8 `resource:action` authorization and the authenticated workspace context; never trust a workspace ID supplied only by plugin code.
+3. Expose narrow host APIs for HTTP, execution events, vault references, storage, workflow nodes, notifications, and approved desktop capabilities.
+4. Prevent plugins from importing Prisma, reading raw secret plaintext, or accessing Electron internals directly.
+5. Add explicit local trust/install/enable/disable/uninstall flows and contract tests before building marketplace UI.
+
+Read these files first for Phase 9:
+
+- `docs/superpowers/handoffs/2026-07-13-session-handoff.md`
+- `docs/superpowers/handoffs/2026-07-13-phase-8-teams-rbac.md`
+- `docs/superpowers/plans/2026-07-13-phase-8-teams-rbac.md`
+- `src/lib/rbac/catalog.ts`
+- `src/lib/rbac/authorization.ts`
+- `src/lib/rbac/requestContext.ts`
+- `src/lib/rbac/agentAuthority.ts`
+- `src/lib/secrets/references.ts`
+- `src/lib/workflows/types.ts`
+- `src/lib/workflows/nodeExecutors.ts`
+- `src/lib/notifications/adapters.ts`
+- `electron/main.ts`
+- `electron/preload.ts`
