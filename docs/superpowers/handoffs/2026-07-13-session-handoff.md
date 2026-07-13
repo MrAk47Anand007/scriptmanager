@@ -3,15 +3,15 @@
 ## Truth source
 
 - Repository: `scriptmanager`
-- Active worktree: `.worktrees/p9`
-- Active branch: `codex/phase-9-plugin-sdk`
+- Active worktree: `.worktrees/p10`
+- Active branch: `codex/phase-10-production-release`
 - Base commit on `main`: `b204cda`
-- Phase 9 base commit: `d392c4b` (`docs: update session handoff through phase 8`)
-- Phase 9 implementation head: `ff33f32` (`feat: add phase 9 plugin SDK and marketplace`)
-- Working-tree state at Phase 9 completion: clean after migration replay, application and Electron typechecks, 145 tests, production build, diff-hygiene verification, and the implementation commit.
-- Integration state: Phases 1–9 are preserved in sequential local feature-branch ancestry. Phase 9 is committed locally but not merged, pushed, or opened as a pull request.
+- Phase 10 base commit: `c476fcf` (`docs: update session handoff through phase 9`)
+- Phase 10 implementation head: `2908279` (`feat: harden production release pipeline`)
+- Working-tree state before this handoff update: clean after the Phase 10 implementation commit.
+- Integration state: Phases 1–10 are preserved in sequential local feature-branch ancestry. Phase 10 is committed locally but not merged, pushed, or opened as a pull request.
 
-Use `.worktrees/p9` at commit `ff33f32` as the source of truth for Phases 1–9 and as the baseline for Phase 10 planning. The root `main` checkout does not contain these sequential phase branches and has unrelated local/divergent state that must not be overwritten.
+Use `.worktrees/p10` at commit `2908279` plus the latest handoff commit as the source of truth for Phases 1–10. The root `main` checkout does not contain these sequential phase branches and has unrelated local/divergent state that must not be overwritten.
 
 ## Completed phases
 
@@ -502,3 +502,85 @@ Phase 10 must close the production-release gates from the accepted roadmap:
 6. Run the full acceptance path spanning webhook, API, script, approval, Codex/Claude agent, remote action, notification, plugin node, and audit export.
 
 Preserve the Phase 9 security boundary: third-party plugins must remain capability-scoped, workspace-authorized, unable to import core persistence/Electron internals, and unable to resolve raw secret plaintext.
+
+## Phase 10 implementation — production hardening and release
+
+Phase 10 is implemented and committed on `codex/phase-10-production-release` at `2908279`, based directly on the Phase 9 handoff tip `c476fcf`.
+
+Delivered scope:
+
+- Split CI gates for unit/security/accessibility, integration/migration/acceptance/performance, application and Electron typechecks, production build, and Electron package-directory smoke.
+- Tag-driven desktop release workflow for Windows, macOS, and Linux with signing-secret gates, artifact checksums, and GitHub release publication.
+- Atomic SQLite backup, checksum-verified restore, production preflight, release compatibility metadata, and interrupted-run recovery planning.
+- Public-webhook rate and 1 MiB body limits, signed script-webhook replay timestamps, workflow delivery idempotency, CSP/browser security headers, dependency audit threshold, and workspace audit JSONL export.
+- Visible keyboard focus, reduced-motion and forced-colors styles, plus a 2,000-node performance regression budget.
+- ScriptManager 1.0 metadata, changelog, operator/backup/upgrade/ACP/workflow/plugin/security/troubleshooting guides, and deterministic cross-subsystem acceptance evidence.
+
+Verification evidence:
+
+- Vitest: 65 files, 156 tests, 0 failures.
+- Application and Electron TypeScript checks passed.
+- Next.js production build passed and generated 51 pages.
+- Backup/restore SHA-256 round trip passed.
+- Prisma reported all 28 migrations current after reconciling four historical migration-history records in the copied verification database.
+- Production dependency audit has zero high or critical advisories; four low/moderate transitive advisories remain without a safe non-breaking npm remediation.
+- `git diff --check` passed before the implementation commit.
+
+Detailed handoff: `docs/superpowers/handoffs/2026-07-13-phase-10-production-release.md`.
+
+## Current completion status after Phase 10
+
+- Phases 1–10 code complete: **yes**.
+- Automated unit, integration, security, accessibility, performance, acceptance, typecheck, migration-on-verified-database, backup/restore, and web-build evidence complete: **yes**.
+- Local Electron package-directory build complete: **no**; blocked by missing Visual Studio Spectre-mitigated C++ libraries (`MSB8040`) while rebuilding `node-pty`.
+- Signed/notarized installers produced: **no**; CI signing credentials and a release tag are still required.
+- Live Codex and Claude ACP provider validation complete: **no**; automated fake-provider contracts pass.
+- Live Slack, SMTP, Teams, generic webhook, Git remote, and remote-host validation complete: **no**.
+- Manual Electron visual, keyboard, screen-reader, and multi-user QA complete: **no**.
+- Fresh SQLite creation verified on this Windows/OneDrive machine: **no**; Linux CI remains the authoritative fresh migration gate.
+- Phase 10 merged, pushed, or opened as a pull request: **no**.
+
+## What remains — ordered next steps
+
+### Priority 1 — Prove packaging on a clean environment
+
+1. Run the new CI workflow on `codex/phase-10-production-release` or install the Visual Studio Spectre-mitigated C++ libraries locally.
+2. Confirm `npm run electron:pack` produces a usable unpacked Windows application with the rebuilt `node-pty` native module.
+3. Launch the packaged application and smoke-test login, terminal, script execution, settings, workflows, ACP history, and audit export.
+4. Retain the CI run URL, artifact names, checksums, and smoke-test evidence in `docs/releases/phase-10-acceptance.md`.
+
+### Priority 2 — Push and review the sequential branch
+
+1. Inspect root `main` and `origin/main`; do not overwrite its divergent or unrelated state.
+2. Push `codex/phase-10-production-release`, which contains the sequential Phase 1–10 ancestry.
+3. Open one review PR against the intended integration branch and let all Phase 10 CI gates run.
+4. Resolve any migration, Linux fresh-database, Windows packaging, or dependency-audit failures before merge.
+
+### Priority 3 — Run environment-specific acceptance
+
+1. Validate installed `codex-acp` and `claude-agent-acp` providers through Observe, Develop, approval, interrupt, and resume flows.
+2. Validate live Slack, SMTP, Teams, and generic webhook notifications with redacted payloads.
+3. Validate a disposable Git remote and a non-production remote execution target, including approval and audit records.
+4. Walk the complete webhook → API → script → approval → agent → remote action → notification → plugin → audit-export scenario.
+5. Perform Electron visual, keyboard-only, reduced-motion, forced-colors, screen-reader, and multi-user role checks.
+
+### Priority 4 — Produce the signed release candidate
+
+1. Configure Windows/macOS signing and Apple notarization secrets in the repository environment.
+2. Create a pre-release tag and run the release workflow on all three operating systems.
+3. Verify signatures, notarization, SHA-256 checksums, installer startup, upgrade from the previous build, backup, restore, and rollback.
+4. Record remaining low/moderate dependency advisories and the accepted risk or updated safe remediation.
+5. Only after all evidence is green, create the stable `v1.0.0` tag and publish the release notes.
+
+## Files to read first next session
+
+- `docs/superpowers/handoffs/2026-07-13-phase-10-production-release.md`
+- `docs/releases/phase-10-acceptance.md`
+- `docs/operator-guide.md`
+- `docs/upgrade-rollback.md`
+- `.github/workflows/ci.yml`
+- `.github/workflows/release.yml`
+- `config/production/compatibility.json`
+- `config/production/acceptance.json`
+- `scripts/release-preflight.mjs`
+- `scripts/release-data.mjs`

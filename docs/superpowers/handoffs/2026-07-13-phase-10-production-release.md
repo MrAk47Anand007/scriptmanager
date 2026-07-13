@@ -46,3 +46,13 @@ npx prisma migrate resolve --applied 20260713200000_phase9_plugin_sdk
 ```
 
 Use `migrate resolve` only after confirming the corresponding tables/columns already exist and a verified backup is available. New installations must use `npx prisma migrate deploy` normally.
+
+## What remains — next execution order
+
+1. **Packaging gate:** install the Visual Studio Spectre-mitigated C++ libraries or run the Windows CI packaging job, then prove the packaged Electron application launches with a working terminal.
+2. **Branch integration gate:** inspect divergent `main`, push `codex/phase-10-production-release`, open a PR, and require every new CI job to pass.
+3. **Live acceptance gate:** exercise real Codex/Claude ACP binaries, notification transports, a disposable Git remote, a non-production remote host, plugin execution, and audit export.
+4. **Manual QA gate:** perform Electron visual, keyboard-only, screen-reader, forced-colors, reduced-motion, and multi-user role walkthroughs.
+5. **Signing gate:** configure Windows/macOS signing and notarization secrets, create a pre-release tag, verify checksums/install/upgrade/rollback, then publish `v1.0.0` only when all evidence is recorded.
+
+The roadmap implementation is code-complete, but ScriptManager 1.0 is not release-complete until these five gates are green.
