@@ -57,7 +57,7 @@ CREATE TABLE "workflow_triggers" (
   "enabled" BOOLEAN NOT NULL DEFAULT true,
   "config_json" TEXT NOT NULL DEFAULT '{}',
   "webhook_token" TEXT,
-  "webhook_secret" TEXT,
+  "webhook_secret_encrypted" TEXT,
   "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" DATETIME NOT NULL,
   CONSTRAINT "workflow_triggers_workflow_id_fkey" FOREIGN KEY ("workflow_id") REFERENCES "workflows" ("id") ON DELETE CASCADE ON UPDATE CASCADE

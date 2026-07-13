@@ -416,7 +416,7 @@ model WorkflowTrigger {
   enabled        Boolean  @default(true)
   configJson     String   @default("{}") @map("config_json")
   webhookToken   String?  @unique @map("webhook_token")
-  webhookSecret  String?  @map("webhook_secret")
+  webhookSecretEncrypted String? @map("webhook_secret_encrypted")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
   workflow       Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
