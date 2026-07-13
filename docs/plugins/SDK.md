@@ -15,3 +15,6 @@ Declare only required capabilities: `http:request`, `events:emit`, `vault:refere
 Node types become `plugin:<plugin-id>:<node-type>`. The runtime receives config, input, and a restricted host. Supported hooks are `activate`, `deactivate`, and `healthCheck`. Health and optional `updateUrl` metadata appear in Settings → Plugins.
 
 Plugins must not import Prisma, Electron internals, application database modules, or secret-store implementations. See `examples/plugins/workflow-node` and `examples/plugins/notification`.
+# Production release checklist
+
+Production plugins must declare every host capability, pass compatibility checks, and carry a trusted Ed25519 signature. Unsigned packages are allowed only through the explicit local-development opt-in. Plugin code cannot import Prisma, Electron internals, or raw secret resolvers; opaque references and capability-scoped host calls are the supported interfaces. Disable a plugin before upgrade, validate health and node discovery, then re-enable it in a disposable workflow before production use.

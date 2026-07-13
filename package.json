@@ -1,6 +1,6 @@
 {
   "name": "scriptmanager",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "A standalone self-hosted script manager - write, run, schedule, and organize scripts",
   "main": "dist-electron/electron/main.js",
@@ -14,7 +14,14 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:coverage": "vitest run --coverage",
+    "test:security": "vitest run tests/unit/releaseHttpSecurity.test.ts tests/unit/releaseCompatibility.test.ts tests/unit/releaseRecovery.test.ts tests/unit/agentAccessPolicy.test.ts tests/unit/authorizationMatrix.test.ts tests/unit/pluginHost.test.ts tests/unit/secretStore.test.ts",
+    "test:accessibility": "vitest run tests/unit/accessibilityRelease.test.ts",
+    "test:performance": "vitest run tests/performance",
+    "test:acceptance": "vitest run tests/integration/releaseAcceptance.test.ts",
     "plugin:create": "node ./scripts/create-scriptmanager-plugin.mjs",
+    "release:backup": "node ./scripts/release-data.mjs backup",
+    "release:restore": "node ./scripts/release-data.mjs restore",
+    "release:preflight": "node ./scripts/release-preflight.mjs",
     "start": "NODE_ENV=production ts-node -r tsconfig-paths/register --project tsconfig.server.json server.ts",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
@@ -50,13 +57,17 @@
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "artifactName": "ScriptManager-${version}-${arch}-setup.${ext}"
     },
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "artifactName": "ScriptManager-${version}-${arch}.${ext}",
+      "hardenedRuntime": true
     },
     "linux": {
-      "target": "AppImage"
+      "target": "AppImage",
+      "artifactName": "ScriptManager-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,

@@ -3,11 +3,20 @@ import { decryptString } from '@/lib/storage/secretBox'
 import { resolveResourceSecret } from '@/lib/secrets/migration'
 import { createWorkflowRepository } from '@/lib/workflows/repository'
 import { createWorkflowTriggerService, verifyWorkflowWebhookSignature } from '@/lib/workflows/triggers'
+import { checkRateLimit, readBoundedBody, type RateLimitEntry } from '@/lib/production/httpSecurity'
+
+const webhookLimits = new Map<string, RateLimitEntry>()
+const MAX_WEBHOOK_BYTES = 1_048_576
 
 export async function POST(request: Request, { params }: { params: Promise<{ token: string }> }) {
-  const trigger = await prisma.workflowTrigger.findUnique({ where: { webhookToken: (await params).token }, include: { workflow: { include: { versions: true } } } })
+  const token = (await params).token
+  const rate = checkRateLimit(webhookLimits, token, Date.now(), { limit: 60, windowMs: 60_000 })
+  if (!rate.allowed) return Response.json({ error: 'Webhook rate limit exceeded' }, { status: 429, headers: { 'retry-after': String(Math.ceil(rate.retryAfterMs / 1_000)) } })
+  const trigger = await prisma.workflowTrigger.findUnique({ where: { webhookToken: token }, include: { workflow: { include: { versions: true } } } })
   if (!trigger?.enabled || trigger.type !== 'webhook' || !trigger.webhookSecretEncrypted) return Response.json({ error: 'Webhook not found' }, { status: 404 })
-  const rawBody = await request.text()
+  let rawBody: string
+  try { rawBody = new TextDecoder().decode(await readBoundedBody(request, MAX_WEBHOOK_BYTES)) }
+  catch { return Response.json({ error: 'Webhook body too large' }, { status: 413 }) }
   const signingSecret = trigger.webhookSecretEncrypted.startsWith('secretref:')
     ? await resolveResourceSecret(prisma, trigger.webhookSecretEncrypted, { resourceType: 'workflow-trigger', resourceId: trigger.id, field: 'webhook-signing' }, 'workflow-webhook-runtime') ?? ''
     : decryptString(trigger.webhookSecretEncrypted)

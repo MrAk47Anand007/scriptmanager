@@ -5,6 +5,10 @@ import type { ScriptParameter } from '@/lib/types'
 import crypto from 'crypto'
 import { executionTelemetry } from '@/lib/execution'
 import { resolveResourceSecret } from '@/lib/secrets/migration'
+import { checkRateLimit, readBoundedBody, verifyReplayWindow, type RateLimitEntry } from '@/lib/production/httpSecurity'
+
+const webhookLimits = new Map<string, RateLimitEntry>()
+const MAX_WEBHOOK_BYTES = 1_048_576
 
 /**
  * Verify an X-Hub-Signature-256 header against a shared secret.
@@ -26,6 +30,8 @@ export async function POST(
 ) {
   const { token } = await params
   const correlationId = executionTelemetry.correlationId(req)
+  const rate = checkRateLimit(webhookLimits, token, Date.now(), { limit: 60, windowMs: 60_000 })
+  if (!rate.allowed) return NextResponse.json({ error: 'Webhook rate limit exceeded' }, { status: 429, headers: { 'retry-after': String(Math.ceil(rate.retryAfterMs / 1_000)) } })
 
   const script = await prisma.script.findUnique({
     where: { webhookToken: token }
@@ -36,10 +42,14 @@ export async function POST(
   }
 
   // Read raw body text so we can validate the HMAC before parsing JSON
-  const rawBody = await req.text()
+  let rawBody: string
+  try { rawBody = new TextDecoder().decode(await readBoundedBody(req, MAX_WEBHOOK_BYTES)) }
+  catch { return NextResponse.json({ error: 'Webhook body too large' }, { status: 413 }) }
 
   // HMAC signature verification (optional per-script toggle)
   if (script.requireWebhookSignature && script.webhookSecret) {
+    try { verifyReplayWindow(req.headers.get('x-scriptmanager-timestamp')) }
+    catch { return NextResponse.json({ error: 'Invalid or stale webhook timestamp' }, { status: 401 }) }
     const signatureHeader = req.headers.get('x-hub-signature-256')
     const signingSecret = script.webhookSecret.startsWith('secretref:')
       ? await resolveResourceSecret(prisma, script.webhookSecret, { resourceType: 'script', resourceId: script.id, field: 'webhook-signing' }, 'script-webhook-runtime') ?? ''

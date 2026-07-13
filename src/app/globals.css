@@ -131,6 +131,10 @@
   textarea {
     font: inherit;
   }
+  :focus-visible {
+    outline: 3px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
   code,
   pre,
   kbd,
@@ -187,4 +191,18 @@
 @layer utilities {
   .font-logs { font-variant-numeric: tabular-nums; font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; }
   .wb-transition { transition: background-color 130ms ease-out, color 130ms ease-out, opacity 130ms ease-out; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :focus-visible { outline: 3px solid CanvasText; }
+  button, input, select, textarea { border: 1px solid ButtonText; }
 }

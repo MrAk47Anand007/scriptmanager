@@ -1,5 +1,7 @@
 # ScriptManager
 
+> **Release status:** The 1.0 production path supports signed desktop installers and self-hosted Node.js 22 deployments with migration preflight, verified backup/restore, upgrade compatibility, security regression, accessibility, performance, Electron packaging, and cross-subsystem acceptance gates. Start with [the operator guide](docs/operator-guide.md).
+
 A self-hosted, local-first script manager — write, run, schedule, and organize scripts with a professional web UI. Think of it as **n8n for scripts**: automation without the complexity.
 
 ![ScriptManager UI](https://github.com/MrAk47Anand007/scriptmanager/blob/main/Screenshot%202026-02-17%20145941.png)

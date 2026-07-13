@@ -1,0 +1,4 @@
+{
+  "appVersion": "1.0.0", "channel": "stable", "minSchemaVersion": 28, "maxSchemaVersion": 28,
+  "minimumNodeVersion": "22.0.0", "backupFormat": 1
+}
