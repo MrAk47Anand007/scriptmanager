@@ -14,6 +14,7 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:coverage": "vitest run --coverage",
+    "plugin:create": "node ./scripts/create-scriptmanager-plugin.mjs",
     "start": "NODE_ENV=production ts-node -r tsconfig-paths/register --project tsconfig.server.json server.ts",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",

@@ -44,6 +44,14 @@ A self-hosted, local-first script manager — write, run, schedule, and organize
 
 ## Features
 
+### Plugin SDK and local marketplace
+
+- Versioned manifests with declared capabilities, settings schemas, workflow-node contributions, lifecycle hooks, compatibility metadata, and optional update URLs.
+- Explicit workspace-scoped install, trust, enable, disable, settings, health, update-check, and uninstall flows.
+- Ed25519 signature verification; unsigned packages require a visible local-development opt-in.
+- Restricted host APIs for HTTP, execution events, opaque vault references, storage, notifications, and approved desktop capabilities—never Prisma, Electron internals, or raw secret plaintext.
+- Namespaced `plugin:<plugin-id>:<node-type>` workflow nodes, public SDK types, a plugin generator, and tested workflow-node and notification examples. See [Plugin SDK](docs/plugins/SDK.md).
+
 ### Reliability foundation
 - **Correlated execution events** — Script, API, webhook, scheduled, and remote runs emit redacted durable lifecycle events under one correlation ID.
 - **Automated verification** — Vitest security/regression tests and GitHub Actions run unit tests and production builds.

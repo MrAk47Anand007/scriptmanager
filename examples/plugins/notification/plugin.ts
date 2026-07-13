@@ -1,0 +1,3 @@
+import type { PluginManifestV1, PluginRuntime } from '../../../sdk/plugin'
+export const manifest: PluginManifestV1 = { manifestVersion: 1, id: 'example.notification', name: 'Example Notification', version: '1.0.0', compatibility: '^1.0.0', capabilities: ['notifications:send'], settingsSchema: { type: 'object', properties: {}, additionalProperties: false }, nodes: [{ type: 'notify', name: 'Notify', inputSchema: { type: 'object' }, outputSchema: { type: 'object' } }], lifecycle: ['healthCheck'] }
+export const plugin: PluginRuntime = { async executeNode(_type, config, input, host) { return host.notify({ title: config.title ?? 'Plugin notification', input }) }, async healthCheck() { return { healthy: true } } }

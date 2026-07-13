@@ -454,3 +454,34 @@ Read these files first for Phase 9:
 - `src/lib/notifications/adapters.ts`
 - `electron/main.ts`
 - `electron/preload.ts`
+
+## Phase 9 implementation — plugin SDK and integration marketplace
+
+Phase 9 is complete on `codex/phase-9-plugin-sdk`, based directly on the committed Phase 8 handoff tip `d392c4b`.
+
+Delivered scope:
+
+- Versioned plugin manifests, compatibility checks, declared capabilities, settings schemas, namespaced workflow nodes, lifecycle hooks, health, and update metadata.
+- Explicit workspace-scoped local install, trust, enable, disable, settings, health, update-check, and uninstall flows.
+- Ed25519 signature verification and explicit unsigned local-development opt-in.
+- Restricted plugin host APIs with RBAC and manifest-capability enforcement; plugins receive opaque secret references but no Prisma, Electron internals, or raw secret resolver.
+- Enabled plugin workflow-node execution through `plugin:<plugin-id>:<node-type>`.
+- Settings → Plugins UI, SDK types, generator, documentation, and tested workflow-node/notification examples.
+
+Verification evidence:
+
+- Phase 9 migration replay from the verified Phase 8 database passed.
+- Application and Electron TypeScript checks passed.
+- Vitest: 59 files and 145 tests passed with 0 failures.
+- Next.js production build passed and generated all plugin routes.
+- Diff hygiene passed with Windows line-ending conversion notices only.
+
+Detailed handoff: `docs/superpowers/handoffs/2026-07-13-phase-9-plugin-sdk.md`.
+
+## Current completion state after Phase 9
+
+- Phases 1–9 code complete: yes.
+- Phases 1–9 automated verification complete: yes.
+- Phase 9 manual Electron UI and external signed-package validation complete: no.
+- Phase 9 merged, pushed, or opened as a PR: no.
+- Remaining implementation phases: **1** — Phase 10 production hardening and release.

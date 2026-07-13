@@ -5,7 +5,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchSettings } from '@/features/settings/settingsSlice'
 import { selectSettings, selectSettingsStatus, selectSettingsError } from '@/features/settings/selectors'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Bell, KeyRound, Loader2, Settings2, Palette, Cloud, Github, Lock, Monitor, Users } from 'lucide-react'
+import { Bell, Boxes, KeyRound, Loader2, Settings2, Palette, Cloud, Github, Lock, Monitor, Users } from 'lucide-react'
 import { isDesktop } from '@/lib/runtime'
 import { cn } from '@/lib/utils'
 import { GeneralSection } from './GeneralSection'
@@ -17,8 +17,9 @@ import { DesktopSection } from './DesktopSection'
 import { NotificationsSection } from './NotificationsSection'
 import { SecretsSection } from './SecretsSection'
 import { WorkspaceAccessSection } from './WorkspaceAccessSection'
+import { PluginsSection } from './PluginsSection'
 
-type SectionId = 'general' | 'appearance' | 'cloud-storage' | 'github-gist' | 'security' | 'secrets' | 'notifications' | 'workspace-access' | 'desktop'
+type SectionId = 'general' | 'appearance' | 'cloud-storage' | 'github-gist' | 'security' | 'secrets' | 'notifications' | 'plugins' | 'workspace-access' | 'desktop'
 
 const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ className?: string }>; desktopOnly?: boolean }[] = [
     { id: 'general', label: 'General', icon: Settings2 },
@@ -28,6 +29,7 @@ const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ clas
     { id: 'security', label: 'Security', icon: Lock },
     { id: 'secrets', label: 'Secret Vault', icon: KeyRound },
     { id: 'notifications', label: 'Notifications', icon: Bell },
+    { id: 'plugins', label: 'Plugins', icon: Boxes },
     { id: 'workspace-access', label: 'Workspace Access', icon: Users },
     { id: 'desktop', label: 'Desktop', icon: Monitor, desktopOnly: true },
 ]
@@ -115,6 +117,7 @@ export const SettingsLayout = () => {
                     {activeSection === 'security' && <SecuritySection />}
                     {activeSection === 'secrets' && <SecretsSection />}
                     {activeSection === 'notifications' && <NotificationsSection />}
+                    {activeSection === 'plugins' && <PluginsSection />}
                     {activeSection === 'workspace-access' && <WorkspaceAccessSection />}
                     {activeSection === 'desktop' && showDesktopSettings && <DesktopSection />}
                 </div>

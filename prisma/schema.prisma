@@ -835,3 +835,42 @@ model UserSession {
   @@index([userId, workspaceId, revokedAt])
   @@map("user_sessions")
 }
+
+model PluginPackage {
+  id             String               @id @default(uuid())
+  pluginId       String               @map("plugin_id")
+  version        String
+  manifestJson   String               @map("manifest_json")
+  source         String
+  sourceHash     String               @map("source_hash")
+  signature      String?
+  publicKey      String?              @map("public_key")
+  signatureValid Boolean              @default(false) @map("signature_valid")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  installations  PluginInstallation[]
+
+  @@unique([pluginId, version, sourceHash])
+  @@index([pluginId, version])
+  @@map("plugin_packages")
+}
+
+model PluginInstallation {
+  id              String        @id @default(uuid())
+  packageId       String        @map("package_id")
+  workspaceId     String        @map("workspace_id")
+  enabled         Boolean       @default(false)
+  trusted         Boolean       @default(false)
+  allowUnsigned   Boolean       @default(false) @map("allow_unsigned")
+  settingsJson    String        @default("{}") @map("settings_json")
+  healthStatus    String        @default("unknown") @map("health_status")
+  healthMessage   String?       @map("health_message")
+  lastCheckedAt   DateTime?     @map("last_checked_at")
+  installedBy     String        @map("installed_by")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  package         PluginPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, packageId])
+  @@index([workspaceId, enabled])
+  @@map("plugin_installations")
+}

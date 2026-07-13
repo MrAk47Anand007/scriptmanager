@@ -57,7 +57,14 @@ export async function executeWorkflowNode(node: WorkflowNode, input: unknown, ad
       const result = await adapters.runAgent({ ...node.config, prompt: renderPrompt(String(node.config.prompt), input) }, input, signal)
       return result
     }
-    default: throw new UnsupportedWorkflowNodeError(`Unsupported workflow node: ${(node as WorkflowNode).type}`)
+    default: {
+      if (node.type.startsWith('plugin:')) {
+        if (!adapters.runPluginNode) throw new UnsupportedWorkflowNodeError('Plugin workflow nodes require the Phase 9 plugin runtime')
+        output = await adapters.runPluginNode(node.type as `plugin:${string}:${string}`, node.config, input, signal)
+        break
+      }
+      throw new UnsupportedWorkflowNodeError(`Unsupported workflow node: ${(node as WorkflowNode).type}`)
+    }
   }
   return { status: 'succeeded', output }
 }
