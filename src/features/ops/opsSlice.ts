@@ -22,6 +22,10 @@ export interface Project {
     description: string
     environment: 'development' | 'qa' | 'uat' | 'production'
     color: string
+    repository_root: string | null
+    default_branch: string
+    remote_url: string | null
+    workspace_policy: import('@/lib/git/types').WorkspacePolicy
     collection_ids: string[]
     created_at: string
     updated_at: string
@@ -119,14 +123,14 @@ export const fetchProjects = createAsyncThunk('ops/fetchProjects', async () => {
 
 export const createProject = createAsyncThunk(
     'ops/createProject',
-    async (payload: { name: string; description?: string; environment?: string; color?: string }) => {
+    async (payload: { name: string; description?: string; environment?: string; color?: string; repository_root?: string; default_branch?: string }) => {
         return await saveProjectRuntime(payload) as Project
     }
 )
 
 export const updateProject = createAsyncThunk(
     'ops/updateProject',
-    async ({ id, ...fields }: { id: string; name?: string; description?: string; environment?: string; color?: string }) => {
+    async ({ id, ...fields }: { id: string; name?: string; description?: string; environment?: string; color?: string; repository_root?: string | null; default_branch?: string }) => {
         return await saveProjectRuntime({ id, ...fields }) as Project
     }
 )

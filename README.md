@@ -1,5 +1,7 @@
 # ScriptManager
 
+> **Release status:** The 1.0 production path supports signed desktop installers and self-hosted Node.js 22 deployments with migration preflight, verified backup/restore, upgrade compatibility, security regression, accessibility, performance, Electron packaging, and cross-subsystem acceptance gates. Start with [the operator guide](docs/operator-guide.md).
+
 A self-hosted, local-first script manager — write, run, schedule, and organize scripts with a professional web UI. Think of it as **n8n for scripts**: automation without the complexity.
 
 ![ScriptManager UI](https://github.com/MrAk47Anand007/scriptmanager/blob/main/Screenshot%202026-02-17%20145941.png)
@@ -44,6 +46,19 @@ A self-hosted, local-first script manager — write, run, schedule, and organize
 
 ## Features
 
+### Plugin SDK and local marketplace
+
+- Versioned manifests with declared capabilities, settings schemas, workflow-node contributions, lifecycle hooks, compatibility metadata, and optional update URLs.
+- Explicit workspace-scoped install, trust, enable, disable, settings, health, update-check, and uninstall flows.
+- Ed25519 signature verification; unsigned packages require a visible local-development opt-in.
+- Restricted host APIs for HTTP, execution events, opaque vault references, storage, notifications, and approved desktop capabilities—never Prisma, Electron internals, or raw secret plaintext.
+- Namespaced `plugin:<plugin-id>:<node-type>` workflow nodes, public SDK types, a plugin generator, and tested workflow-node and notification examples. See [Plugin SDK](docs/plugins/SDK.md).
+
+### Reliability foundation
+- **Correlated execution events** — Script, API, webhook, scheduled, and remote runs emit redacted durable lifecycle events under one correlation ID.
+- **Automated verification** — Vitest security/regression tests and GitHub Actions run unit tests and production builds.
+- **Production encryption guard** — Production credential encryption requires an administrator-supplied secret and will not silently use the development fallback.
+
 ### Core
 - **Monaco Editor** — Full VS Code-powered editor with syntax highlighting, autocomplete, and multi-language support (Python, JavaScript/Node.js, Shell/Bash, and custom interpreters).
 - **Real-time Output Streaming** — Script output streams live to the console via Server-Sent Events (SSE) and WebSockets; no page refresh needed.
@@ -57,10 +72,20 @@ A self-hosted, local-first script manager — write, run, schedule, and organize
 - **Script Duplication** — Clone any script with one click.
 
 ### Automation
+- **Visual Workflows** — Build versioned DAG workflows from scripts, API requests, conditions, transforms, delays, approvals, parallel branches, remote operations, and notifications.
+- **Durable Workflow Runs** — Database-backed runs persist node attempts, outputs, retries, cancellation, approval pauses, and restart reconciliation.
+- **Workflow Triggers** — Start published workflows manually, with cron schedules, or through encrypted HMAC-signed webhooks with replay protection.
+- **Workflow Templates** — Start from script pipeline, API-to-script, approval deploy, or remote maintenance templates.
 - **Webhooks** — Every script gets a unique HTTP POST endpoint. Send a request from IFTTT, Zapier, GitHub Actions, or any HTTP client to trigger execution. Supports optional HMAC-SHA256 signature verification (GitHub-compatible).
 - **Cron Scheduling** — Built-in cron scheduler. Enter any standard cron expression and the server executes your script automatically. Next-run time displayed in the UI.
+- **Execution Observability** — One operational dashboard for workflow, script, API, and remote runs with health metrics, filters, redacted causal timelines, correlation IDs, cancellation, targeted failed-node retry, and configurable execution-event retention.
+- **Approval Inbox** — Review actor, risk, exact redacted operation, affected resource, expiry, and audit history; decide with Allow once, Allow for run, Always for workspace, or Reject.
+- **Event Notifications** — Route typed execution and approval events to desktop, generic webhook, Slack, SMTP, or Teams channels using filters, templates, throttling, deduplication, audited delivery, and bounded retry state.
+- **Shared Secret Vault** — Store versioned ciphertext behind opaque references with rotation, disable, scoped bindings, reveal-once access, audit history, server master-key encryption, and Electron OS-backed encryption. Script environments, Ops SSH, storage providers, API authentication, webhook signing, and notification transports resolve credentials only inside their authorized runtimes.
+- **ACP Agent Workbench** — Run provider-neutral Codex or Claude agents from the Electron desktop, choose Observe, Develop, or Full access on first connection, inspect redacted transcripts and artifacts, interrupt/resume sessions, and use the same agent contract inside workflows.
+- **Agent Approval Boundary** — Commands, file writes, Git operations, secret reads, remote execution, and deployments route through scoped approvals. Protected actions require a fresh decision even with Full access; browser-only sessions remain inspect-only.
 - **Script Parameters** — Define typed, named parameters per script. Parameters are injected as environment variables at runtime and can be supplied via the UI, CLI, or webhook payload.
-- **Environment Variables** — Per-script environment variables (with optional secret masking) stored securely in the database.
+- **Environment Variables** — Per-script environment variables; secret values are vault-backed and resolve only for the bound script at execution time.
 - **Execution Timeout** — Configurable timeout per script (or global default) to prevent runaway processes.
 
 ### Sync & Backup
@@ -484,6 +509,15 @@ ScriptManager uses **SQLite** via Prisma with the following models:
 - **`ScriptVersion`** — Snapshot of script content at save time. Keeps last 10 per script.
 - **`ScriptTemplate`** — Reusable starter templates (built-in and user-created).
 - **`Setting`** — Key/value store for global application settings.
+- **`User`**, **`Workspace`**, and **`Membership`** — Optional multi-user identity and workspace tenancy. Local desktop installs bootstrap one administrator-owned default workspace.
+- **`Role`** / **`RolePermission`** — Server-enforced `resource:action` permissions with owner, admin, developer, operator, approver, and viewer presets plus custom roles.
+- **`WorkspaceInvitation`** / **`UserSession`** — Expiring invitations and hashed, expiring, individually revocable sessions.
+
+### Workspace access and RBAC
+
+Authenticated API requests are checked in the Node middleware against the current membership before protected routes run. Script, workflow, secret, agent, approval, Ops, and Git resources are workspace-scoped; ID-based access rejects a resource owned by another workspace. Agent actions additionally intersect the initiating user's permissions, the selected agent access profile, workspace policy, and protected-action approval rules.
+
+Workspace owners and authorized administrators can manage members, invitations, custom roles, active sessions, reusable approval/agent grants, and workspace audit history from **Settings → Workspace Access**.
 
 ---
 

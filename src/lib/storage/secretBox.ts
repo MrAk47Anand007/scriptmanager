@@ -11,6 +11,9 @@ let warnedFallback = false
 function getKey(): Buffer {
   let secret = process.env.DESKTOP_AUTH_SECRET ?? process.env.AUTH_SECRET
   if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Storage encryption requires AUTH_SECRET or DESKTOP_AUTH_SECRET in production')
+    }
     if (!warnedFallback) {
       warnedFallback = true
       console.warn(

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, ipcMain, dialog, OpenDialogOptions, shell, clipboard, Menu, Tray, nativeImage, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, session, ipcMain, dialog, OpenDialogOptions, shell, clipboard, Menu, Tray, nativeImage, Notification, type MenuItemConstructorOptions } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
 import path from 'path'
 import http from 'http'
@@ -14,6 +14,8 @@ import {
 } from './desktopRuntime'
 import { OAUTH_ENDPOINTS, runOAuthFlow } from './oauthFlow'
 import { getDefaultClientId } from './oauthDefaults'
+import { registerAgentRuntimeIpc } from './agentRuntime'
+import { getPackagedServerLaunch } from './serverLaunch'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
 // In production (packaged), Electron spawns the standalone server itself.
@@ -29,6 +31,10 @@ let serverProcess: ChildProcess | null = null
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+
+registerAgentRuntimeIpc(ipcMain, (sessionId, event) => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scriptmanager:agents:event', { sessionId, event })
+})
 
 // 16x16 terracotta rounded square, embedded so the tray works without bundled assets.
 const TRAY_ICON_DATA_URL =
@@ -507,13 +513,12 @@ function startServer() {
   }
 
   // Production: spawn the compiled standalone server
-  const nodeExe = process.platform === 'win32' ? 'node.exe' : 'node'
-  const nodePath = path.join(path.dirname(process.execPath), nodeExe)
-  const serverScript = path.join(process.resourcesPath, 'app', 'server.js')
+  const serverLaunch = getPackagedServerLaunch(process.execPath, process.resourcesPath)
 
-  serverProcess = spawn(nodePath, [serverScript], {
+  serverProcess = spawn(serverLaunch.executable, serverLaunch.args, {
     env: {
       ...process.env,
+      ...serverLaunch.env,
       PORT: String(PORT),
       NODE_ENV: 'production',
       DESKTOP_AUTH_SECRET: DESKTOP_SECRET,
@@ -701,6 +706,18 @@ app.whenReady().then(() => {
 
 ipcMain.handle('scriptmanager:set-notifications-enabled', (_event, enabled: boolean) => {
   setDesktopNotificationsEnabled(enabled !== false)
+  return true
+})
+
+ipcMain.handle('scriptmanager:show-notification', (_event, payload: { title: string; body: string; deepLink?: string }) => {
+  if (!Notification.isSupported()) return false
+  const deepLink = payload.deepLink?.startsWith('/approvals') ? payload.deepLink : undefined
+  const notification = new Notification({ title: String(payload.title).slice(0, 120), body: String(payload.body).slice(0, 1000) })
+  notification.on('click', () => {
+    showMainWindow()
+    if (deepLink) mainWindow?.webContents.send('scriptmanager:notification-deep-link', deepLink)
+  })
+  notification.show()
   return true
 })
 

@@ -1,9 +1,11 @@
 import { Client as SshClient, ConnectConfig, SFTPWrapper } from 'ssh2'
 import { EventEmitter } from 'events'
+import { createCorrelationId, executionTelemetry, lifecycleEventType, type ExecutionContext } from '@/lib/execution'
 import fs from 'fs'
 import path from 'path'
 import { prisma } from './db'
 import { revealOpsSecret } from './opsSecretStore'
+import { resolveResourceSecret } from './secrets/migration'
 import { getScriptResolvedFilePath } from './scriptRunner'
 
 // Module-level map: remoteExecId -> EventEmitter (mirrors buildEmitters in scriptRunner.ts)
@@ -30,7 +32,9 @@ async function buildConnectConfig(profileId: string): Promise<ConnectConfig> {
     } else {
         // Password auth — decrypt stored secret
         if (profile.encryptedSecret) {
-            config.password = await revealOpsSecret(profile.encryptedSecret) ?? undefined
+            config.password = profile.encryptedSecret.startsWith('secretref:')
+                ? await resolveResourceSecret(prisma, profile.encryptedSecret, { resourceType: 'server-profile', resourceId: profile.id, field: 'password' }, 'ssh-runtime') ?? undefined
+                : await revealOpsSecret(profile.encryptedSecret) ?? undefined
         }
     }
 
@@ -131,8 +135,14 @@ export async function execRemote(opts: {
     profileId: string
     command: string
     remoteExecId: string
+    context?: ExecutionContext
 }): Promise<void> {
     const { profileId, command, remoteExecId } = opts
+    const context = opts.context ?? {
+        correlationId: createCorrelationId(),
+        actor: { type: 'system' as const, id: 'remote-runner' },
+        trigger: 'remote' as const,
+    }
 
     const emitter = new EventEmitter()
     remoteExecEmitters.set(remoteExecId, emitter)
@@ -142,6 +152,11 @@ export async function execRemote(opts: {
         where: { id: remoteExecId },
         data: { status: 'running', startedAt: new Date() },
     }).catch(() => { /* record may not exist in stub mode */ })
+    await executionTelemetry.emit({
+        type: lifecycleEventType('running'), executionKind: 'remote', correlationId: context.correlationId,
+        actor: context.actor, target: { type: 'remote_execution', id: remoteExecId },
+        data: { profileId, trigger: context.trigger },
+    })
 
     let client: SshClient | null = null
     const outputLines: string[] = []
@@ -187,6 +202,11 @@ export async function execRemote(opts: {
                 logOutput: fullOutput.slice(0, 100000), // cap to 100KB
             },
         }).catch(() => { })
+        await executionTelemetry.emit({
+            type: lifecycleEventType(exitCode === 0 ? 'success' : 'failure'),
+            executionKind: 'remote', correlationId: context.correlationId, actor: context.actor,
+            target: { type: 'remote_execution', id: remoteExecId }, data: { profileId, exitCode },
+        })
     } catch (err) {
         const errMsg = `\n[Error] ${(err as Error).message}\n`
         outputLines.push(errMsg)
@@ -203,6 +223,11 @@ export async function execRemote(opts: {
                 logOutput: outputLines.join('').slice(0, 100000),
             },
         }).catch(() => { })
+        await executionTelemetry.emit({
+            type: lifecycleEventType('failure'), executionKind: 'remote', correlationId: context.correlationId,
+            actor: context.actor, target: { type: 'remote_execution', id: remoteExecId },
+            data: { profileId, exitCode, error: (err as Error).message },
+        })
     } finally {
         client?.end()
         remoteExecEmitters.delete(remoteExecId)

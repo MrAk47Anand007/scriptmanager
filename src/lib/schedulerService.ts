@@ -2,9 +2,13 @@ import { Cron } from 'croner'
 import { prisma } from '@/lib/db'
 import { executeScriptAsync } from '@/lib/scriptRunner'
 import type { ScriptParameter } from '@/lib/types'
+import { createCorrelationId } from '@/lib/execution'
+import { createWorkflowRepository } from '@/lib/workflows/repository'
+import { createWorkflowTriggerService } from '@/lib/workflows/triggers'
 
 // Module-level map: scriptId -> Cron instance
 const scheduledJobs = new Map<string, Cron>()
+const workflowScheduledJobs = new Map<string, Cron>()
 
 interface ScriptScheduleInfo {
   id: string
@@ -30,6 +34,17 @@ export async function initScheduler(): Promise<void> {
         console.error(`[Scheduler] Failed to register job for script ${script.name}:`, err)
       }
     }
+  }
+
+  const workflowTriggers = await prisma.workflowTrigger.findMany({ where: { type: 'cron', enabled: true }, include: { workflow: { include: { versions: true } } } })
+  for (const trigger of workflowTriggers) {
+    const config = JSON.parse(trigger.configJson) as { cron?: string }
+    const version = trigger.workflow.versions.find((item) => item.version === trigger.workflow.publishedVersion)
+    if (!config.cron || !version) continue
+    const job = new Cron(config.cron, async () => {
+      await createWorkflowTriggerService(createWorkflowRepository(prisma)).cron({ workflowId: trigger.workflowId, versionId: version.id, triggerId: trigger.id, scheduledAt: new Date() })
+    })
+    workflowScheduledJobs.set(trigger.id, job)
   }
 
   console.log(`[Scheduler] Initialized with ${registered} active job(s)`)
@@ -72,7 +87,11 @@ export function registerSchedule(script: ScriptScheduleInfo): void {
           }
         }
 
-        await executeScriptAsync(build.id, freshScript, paramValues)
+        await executeScriptAsync(build.id, freshScript, paramValues, {
+          correlationId: createCorrelationId(),
+          actor: { type: 'schedule', id: freshScript.id },
+          trigger: 'scheduler',
+        })
       } catch (err) {
         console.error(`[Scheduler] Error running scheduled script ${script.id}:`, err)
       }

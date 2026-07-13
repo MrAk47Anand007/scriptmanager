@@ -1,6 +1,8 @@
 import type { PrismaClient } from '@prisma/client'
 import { createProviderClient, deserializeProviderConfig, serializeProviderConfig } from './index'
 import type { ProviderType } from './types'
+import { randomUUID } from 'node:crypto'
+import { resolveResourceSecret, storeResourceSecret } from '../secrets/migration'
 
 export const SECRET_MASK = '•••'
 
@@ -87,6 +89,12 @@ export async function saveStorageProvider(
     }
   }
 
+  const providerId = existing?.id ?? randomUUID()
+  for (const [key, value] of Object.entries(incoming)) {
+    if (!SECRET_FIELDS.has(key) || typeof value !== 'string' || value.length === 0 || value === SECRET_MASK || value.startsWith('secretref:')) continue
+    incoming[key] = await storeResourceSecret(prisma, { resourceType: 'storage-provider', resourceId: providerId, field: key, name: `storage:${providerId}:${key}` }, value)
+  }
+
   const configJson = serializeProviderConfig(incoming)
 
   const row = existing
@@ -95,7 +103,7 @@ export async function saveStorageProvider(
         data: { name: payload.name, type: payload.type, configJson },
       })
     : await prisma.storageProvider.create({
-        data: { name: payload.name, type: payload.type, configJson },
+        data: { id: providerId, name: payload.name, type: payload.type, configJson },
       })
 
   return toRecord(row)
@@ -116,11 +124,17 @@ export async function getDecryptedStorageProvider(
 ): Promise<{ id: string; name: string; type: ProviderType; config: Record<string, unknown> } | null> {
   const row = await prisma.storageProvider.findUnique({ where: { id } })
   if (!row) return null
+  const config = deserializeProviderConfig(row.configJson)
+  for (const [key, value] of Object.entries(config)) {
+    if (SECRET_FIELDS.has(key) && typeof value === 'string' && value.startsWith('secretref:')) {
+      config[key] = await resolveResourceSecret(prisma, value, { resourceType: 'storage-provider', resourceId: row.id, field: key }, 'storage-runtime')
+    }
+  }
   return {
     id: row.id,
     name: row.name,
     type: row.type as ProviderType,
-    config: deserializeProviderConfig(row.configJson),
+    config,
   }
 }
 

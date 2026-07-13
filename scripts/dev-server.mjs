@@ -3,10 +3,12 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { getDevServerEnvironment } from './dev-server-environment.mjs'
 
 const projectRoot = process.cwd()
 const nextDir = path.join(projectRoot, '.next')
 const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+const devEnvironment = getDevServerEnvironment(process.env)
 
 async function removeNextDir() {
   try {
@@ -42,7 +44,7 @@ async function main() {
     const child = spawn(process.execPath, [path.join(projectRoot, 'scripts', 'ensure-prisma-client.mjs')], {
       cwd: projectRoot,
       stdio: 'inherit',
-      env: process.env,
+      env: devEnvironment,
     })
 
     child.on('exit', (code) => {
@@ -64,7 +66,7 @@ async function main() {
       {
         cwd: projectRoot,
         stdio: 'inherit',
-        env: process.env,
+        env: devEnvironment,
       }
     )
     : spawn(
@@ -73,7 +75,7 @@ async function main() {
       {
         cwd: projectRoot,
         stdio: 'inherit',
-        env: process.env,
+        env: devEnvironment,
       }
     )
 

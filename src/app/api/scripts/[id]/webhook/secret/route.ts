@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import crypto from 'crypto'
+import { storeResourceSecret } from '@/lib/secrets/migration'
 
 // POST /api/scripts/[id]/webhook/secret — regenerate webhook HMAC secret
 export async function POST(
@@ -16,10 +17,11 @@ export async function POST(
 
   // Generate a 32-byte random hex secret
   const newSecret = crypto.randomBytes(32).toString('hex')
+  const secretReference = await storeResourceSecret(prisma, { resourceType: 'script', resourceId: id, field: 'webhook-signing', name: `script:${id}:webhook-signing` }, newSecret)
 
   await prisma.script.update({
     where: { id },
-    data: { webhookSecret: newSecret }
+    data: { webhookSecret: secretReference }
   })
 
   // Return secret once — after this it won't be shown again in plaintext
@@ -41,8 +43,12 @@ export async function PUT(
 
   // If enabling signature and no secret exists yet, generate one automatically
   let newSecret = script.webhookSecret
+  let revealedSecret: string | null = null
   if (require_signature && !script.webhookSecret) {
-    newSecret = crypto.randomBytes(32).toString('hex')
+    revealedSecret = crypto.randomBytes(32).toString('hex')
+    newSecret = await storeResourceSecret(prisma, { resourceType: 'script', resourceId: id, field: 'webhook-signing', name: `script:${id}:webhook-signing` }, revealedSecret)
+  } else if (require_signature && script.webhookSecret && !script.webhookSecret.startsWith('secretref:')) {
+    newSecret = await storeResourceSecret(prisma, { resourceType: 'script', resourceId: id, field: 'webhook-signing', name: `script:${id}:webhook-signing` }, script.webhookSecret)
   }
 
   const updated = await prisma.script.update({
@@ -56,6 +62,6 @@ export async function PUT(
   return NextResponse.json({
     require_webhook_signature: updated.requireWebhookSignature,
     // Return new secret if it was just auto-generated
-    ...(newSecret !== script.webhookSecret ? { webhook_secret: newSecret } : {})
+    ...(revealedSecret ? { webhook_secret: revealedSecret } : {})
   })
 }

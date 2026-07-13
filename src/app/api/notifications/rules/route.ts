@@ -1,0 +1,3 @@
+import { NextResponse } from 'next/server';import { prisma } from '@/lib/db'
+export async function GET(){return NextResponse.json(await prisma.notificationRule.findMany({include:{channel:true},orderBy:{createdAt:'desc'}}))}
+export async function POST(request:Request){const body=await request.json() as {channelId:string;name:string;eventTypes:string;filter?:unknown;template?:unknown;throttleSeconds?:number};return NextResponse.json(await prisma.notificationRule.create({data:{channelId:body.channelId,name:body.name,eventTypes:body.eventTypes,filterJson:JSON.stringify(body.filter??{}),templateJson:JSON.stringify(body.template??{}),throttleSeconds:Math.max(0,Math.min(body.throttleSeconds??0,86400))}}),{status:201})}

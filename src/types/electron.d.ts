@@ -27,6 +27,8 @@ declare global {
       copyText: (value: string) => Promise<boolean>
       readClipboardText: () => Promise<string>
       setNotificationsEnabled?: (enabled: boolean) => Promise<boolean>
+      showNotification?: (payload: { title: string; body: string; deepLink?: string }) => Promise<boolean>
+      onNotificationDeepLink?: (listener: (deepLink: string) => void) => () => void
       oauthConnect?: (payload: { provider: 'gdrive' | 'onedrive'; clientId?: string; fullAccess?: boolean }) => Promise<{
         ok: boolean
         refreshToken?: string
@@ -36,6 +38,15 @@ declare global {
         error?: string
       }>
       oauthDefaults?: () => Promise<{ gdrive: boolean; onedrive: boolean }>
+      agents?: {
+        discover: () => Promise<unknown[]>
+        launch: (payload: { provider: 'codex' | 'claude'; sessionId: string; profileId: string; cwd: string }) => Promise<unknown>
+        input: (payload: { sessionId: string; message: unknown }) => Promise<{ ok: boolean }>
+        permissionDecision: (payload: { sessionId: string; requestId: string; allowed: boolean }) => Promise<{ ok: boolean }>
+        interrupt: (sessionId: string) => Promise<{ ok: boolean }>
+        terminate: (sessionId: string) => Promise<{ ok: boolean }>
+        onEvent: (listener: (payload: { sessionId: string; event: unknown }) => void) => () => void
+      }
       runtime?: {
         listScripts: () => Promise<unknown[]>
         listCollections: () => Promise<unknown[]>

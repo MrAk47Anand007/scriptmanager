@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      channel:
+        type: choice
+        options: [beta, nightly]
+        default: beta
+
+permissions:
+  contents: write
+
+jobs:
+  signed-desktop:
+    strategy:
+      matrix: { os: [windows-latest, macos-latest, ubuntu-latest] }
+    runs-on: ${{ matrix.os }}
+    env:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      DATABASE_URL: file:./release.db
+      AUTH_SECRET: release-build-only-secret
+      SESSION_SECRET: release-build-only-session
+      SCRIPTMANAGER_MASTER_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm test
+      - run: npm run electron:build -- --publish never
+      - name: Require signing credentials for stable tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: test -n "$CSC_LINK" || { echo 'Stable releases require CSC_LINK'; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with: { name: desktop-${{ matrix.os }}, path: 'release/**', if-no-files-found: error }
+
+  publish:
+    needs: signed-desktop
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - run: find artifacts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with: { files: "artifacts/**\nSHA256SUMS.txt", generate_release_notes: true }

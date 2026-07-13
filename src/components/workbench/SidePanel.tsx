@@ -6,6 +6,7 @@ import { selectActiveActivity, selectSidePanelVisible } from '@/features/workben
 import { ScriptsSidebar } from '@/components/ScriptsSidebar'
 import { ApiSidebar } from '@/components/api/ApiSidebar'
 import { OpsSidebar } from './OpsSidebar'
+import { WorkflowSidebar } from '@/components/workflows/WorkflowSidebar'
 import { cn } from '@/lib/utils'
 
 const MIN_WIDTH = 200
@@ -36,6 +37,7 @@ export function SidePanel() {
   const [width, setWidth] = useState(DEFAULT_WIDTH)
   const [isDragging, setIsDragging] = useState(false)
   const [apiMounted, setApiMounted] = useState(false)
+  const [workflowsMounted, setWorkflowsMounted] = useState(false)
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const widthRef = useRef(width)
   widthRef.current = width
@@ -46,6 +48,7 @@ export function SidePanel() {
 
   useEffect(() => {
     if (activeActivity === 'api') setApiMounted(true)
+    if (activeActivity === 'workflows') setWorkflowsMounted(true)
   }, [activeActivity])
 
   useEffect(() => {
@@ -87,17 +90,18 @@ export function SidePanel() {
   }, [])
 
   // Settings and Schedules have no sidebar — the panel collapses to width 0 there too.
-  const collapsed = !sidePanelVisible || activeActivity === 'settings' || activeActivity === 'schedules'
+  const collapsed = !sidePanelVisible || activeActivity === 'settings' || activeActivity === 'schedules' || activeActivity === 'executions' || activeActivity === 'agents' || activeActivity === 'git' || activeActivity === 'approvals'
   const scriptsActive = activeActivity === 'scripts'
   const apiActive = activeActivity === 'api'
   const opsActive = activeActivity === 'ops'
+  const workflowsActive = activeActivity === 'workflows'
 
   return (
     <div className="flex h-full shrink-0">
       <div
         className={cn(
           'h-full overflow-hidden bg-wb-sidepanel border-r border-wb-border',
-          // Arbitrary-property syntax avoids the Tailwind `duration-[130ms]`
+          // Arbitrary-property syntax avoids an ambiguous Tailwind duration utility.
           // ambiguity warning while keeping the 130ms width collapse.
           !isDragging && '[transition:width_130ms_ease-out]'
         )}
@@ -118,6 +122,7 @@ export function SidePanel() {
               <OpsSidebar />
             </div>
           )}
+          {workflowsMounted && <div className={cn('h-full', !workflowsActive && 'hidden')}><WorkflowSidebar /></div>}
         </div>
       </div>
       {!collapsed && (

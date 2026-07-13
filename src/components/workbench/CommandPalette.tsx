@@ -182,7 +182,7 @@ export function CommandPalette() {
       className="fixed inset-0 z-[90] flex items-start justify-center pt-[12vh]"
       onMouseDown={(e) => { if (e.target === e.currentTarget) close() }}
     >
-      <div className="wb-transition w-full max-w-xl animate-in fade-in zoom-in-95 duration-[130ms] overflow-hidden rounded-lg border border-wb-border bg-popover text-popover-foreground shadow-2xl">
+      <div className="wb-transition w-full max-w-xl animate-in fade-in zoom-in-95 [animation-duration:130ms] overflow-hidden rounded-lg border border-wb-border bg-popover text-popover-foreground shadow-2xl">
         <div className="flex items-center gap-2 border-b border-wb-border px-3 py-2">
           <input
             ref={inputRef}

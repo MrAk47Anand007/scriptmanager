@@ -6,6 +6,7 @@ import crypto from 'crypto'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { resolveScriptEnvironment } from '../src/lib/secrets/runtime'
 import { getDesktopWorkspaceLayout, ensureDesktopWorkspaceLayout, sanitizeWorkspaceName } from '../src/lib/workspaceLayout'
 import {
   deleteStorageProvider as deleteDesktopStorageProvider,
@@ -2045,10 +2046,7 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
     scriptPath,
   )
   const runtime = getRuntime(window.id)
-  const scriptEnv: Record<string, string> = {}
-  for (const entry of envVars) {
-    scriptEnv[entry.key] = entry.value
-  }
+  const scriptEnv = await resolveScriptEnvironment(prisma, script.id, envVars)
 
   const paramEnv: Record<string, string> = {}
   if (payload.paramValues) {

@@ -5,7 +5,8 @@ import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { buildRemoteCommand } from '../src/lib/executionSafety'
-import { hasStoredOpsSecret, revealOpsSecret, sealOpsSecret } from '../src/lib/opsSecretStore'
+import { hasStoredOpsSecret, revealOpsSecret } from '../src/lib/opsSecretStore'
+import { resolveResourceSecret, storeResourceSecret } from '../src/lib/secrets/migration'
 import { getDesktopWorkspaceLayout } from '../src/lib/workspaceLayout'
 
 const prisma = new PrismaClient({
@@ -152,7 +153,9 @@ async function buildConnectConfig(profileId: string): Promise<ConnectConfig> {
     if (!profile.keyPath) throw new Error('Key path is required for key-based authentication')
     config.privateKey = fs.readFileSync(profile.keyPath)
   } else if (profile.encryptedSecret) {
-    config.password = await revealOpsSecret(profile.encryptedSecret) ?? undefined
+    config.password = profile.encryptedSecret.startsWith('secretref:')
+      ? await resolveResourceSecret(prisma, profile.encryptedSecret, { resourceType: 'server-profile', resourceId: profile.id, field: 'password' }, 'desktop-ssh-runtime') ?? undefined
+      : await revealOpsSecret(profile.encryptedSecret) ?? undefined
   }
 
   return config
@@ -326,12 +329,13 @@ export async function saveServerProfile(payload: {
   if (!payload.id && (!payload.name?.trim() || !payload.host?.trim() || !payload.username?.trim())) {
     throw new Error('Name, host, and username are required')
   }
+  const profileId = payload.id ?? crypto.randomUUID()
   let encryptedSecretJson: string | null | undefined
   if (payload.secret !== undefined) {
     if (!payload.secret) {
       encryptedSecretJson = null
     } else {
-      encryptedSecretJson = await sealOpsSecret(payload.secret)
+      encryptedSecretJson = await storeResourceSecret(prisma, { resourceType: 'server-profile', resourceId: profileId, field: 'password', name: `ops:${profileId}:password` }, payload.secret)
     }
   }
 
@@ -352,6 +356,7 @@ export async function saveServerProfile(payload: {
     })
     : await prisma.serverProfile.create({
       data: {
+        id: profileId,
         name: payload.name!.trim(),
         host: payload.host!.trim(),
         port: payload.port ?? 22,

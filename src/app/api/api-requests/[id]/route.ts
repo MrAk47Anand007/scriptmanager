@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { vaultApiAuthConfig } from '@/lib/secrets/apiAuth'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -56,7 +57,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       bodyType: body_type ?? 'none',
       body: body ?? '',
       authType: auth_type ?? 'none',
-      authConfig: auth_config ?? '{}',
+      authConfig: await vaultApiAuthConfig(prisma, id, auth_config ?? '{}'),
       collectionId: collection_id ?? null
     }
   })

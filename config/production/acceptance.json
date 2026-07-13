@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "release": "1.0.0",
+  "subsystems": ["webhook", "api", "script", "approval", "codex", "claude", "remote", "notification", "plugin", "audit-export"],
+  "security": ["redaction", "rbac", "replay-protection", "request-limits", "vault-references", "protected-action-approval"],
+  "operatorDocs": ["docs/operator-guide.md", "docs/backup-restore.md", "docs/upgrade-rollback.md", "docs/acp-providers.md", "docs/workflows.md", "docs/plugins/SDK.md", "docs/troubleshooting.md", "docs/security.md"]
+}

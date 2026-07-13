@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: file:./ci.db
+  AUTH_SECRET: ci-only-secret-not-for-production
+  SESSION_SECRET: ci-only-session-secret
+  SCRIPTMANAGER_MASTER_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
+jobs:
+  unit-security-accessibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run test:unit
+      - run: npm run test:security
+      - run: npm run test:accessibility
+      - run: npm audit --omit=dev --audit-level=high
+
+  integration-migration-acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx prisma generate
+      - run: touch prisma/ci.db && npx prisma migrate deploy
+      - run: npm run release:preflight
+      - run: npm run test:integration
+      - run: npm run test:acceptance
+      - run: npm run test:performance
+
+  build-electron-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx tsc --noEmit
+      - run: npx tsc -p electron/tsconfig.json --noEmit
+      - run: npm run build
+      - run: npm run electron:pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: electron-unpacked
+          path: release/*-unpacked/**
+          if-no-files-found: error

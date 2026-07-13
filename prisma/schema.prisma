@@ -8,70 +8,71 @@ datasource db {
 }
 
 model Script {
-  id              String      @id @default(uuid())
-  name            String
-  filename        String
-  sourcePath      String?     @map("source_path")
-  description     String      @default("")
-  language        String      @default("python")
-  interpreter     String?
-  webhookToken    String?     @unique @map("webhook_token")
-  webhookSecret   String?     @map("webhook_secret")
-  requireWebhookSignature Boolean @default(false) @map("require_webhook_signature")
-  scheduleCron    String?     @map("schedule_cron")
-  scheduleEnabled Boolean     @default(false) @map("schedule_enabled")
-  parameters      String      @default("[]")
-  gistId          String?     @map("gist_id")
-  gistUrl         String?     @map("gist_url")
-  syncToGist      Boolean     @default(false) @map("sync_to_gist")
-  gistFilename    String?     @map("gist_filename")
-  collectionId    String?     @map("collection_id")
-  timeoutMs       Int?        @map("timeout_ms")
-  remoteEtag      String?     @map("remote_etag")
-  remoteSyncedAt  DateTime?   @map("remote_synced_at")
-  createdAt       DateTime    @default(now()) @map("created_at")
-  updatedAt       DateTime    @updatedAt @map("updated_at")
-  lastRun         DateTime?   @map("last_run")
+  id                      String    @id @default(uuid())
+  workspaceId             String    @default("default") @map("workspace_id")
+  name                    String
+  filename                String
+  sourcePath              String?   @map("source_path")
+  description             String    @default("")
+  language                String    @default("python")
+  interpreter             String?
+  webhookToken            String?   @unique @map("webhook_token")
+  webhookSecret           String?   @map("webhook_secret")
+  requireWebhookSignature Boolean   @default(false) @map("require_webhook_signature")
+  scheduleCron            String?   @map("schedule_cron")
+  scheduleEnabled         Boolean   @default(false) @map("schedule_enabled")
+  parameters              String    @default("[]")
+  gistId                  String?   @map("gist_id")
+  gistUrl                 String?   @map("gist_url")
+  syncToGist              Boolean   @default(false) @map("sync_to_gist")
+  gistFilename            String?   @map("gist_filename")
+  collectionId            String?   @map("collection_id")
+  timeoutMs               Int?      @map("timeout_ms")
+  remoteEtag              String?   @map("remote_etag")
+  remoteSyncedAt          DateTime? @map("remote_synced_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+  lastRun                 DateTime? @map("last_run")
 
-  collection      Collection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
-  builds          Build[]
-  tags            ScriptTag[]
-  envVars         ScriptEnvVar[]
-  versions        ScriptVersion[]
+  collection Collection?     @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  builds     Build[]
+  tags       ScriptTag[]
+  envVars    ScriptEnvVar[]
+  versions   ScriptVersion[]
 
   @@map("scripts")
 }
 
 model Tag {
-  id        String      @id @default(uuid())
-  name      String      @unique
-  color     String      @default("#6366f1")
-  createdAt DateTime    @default(now()) @map("created_at")
+  id        String   @id @default(uuid())
+  name      String   @unique
+  color     String   @default("#6366f1")
+  createdAt DateTime @default(now()) @map("created_at")
 
-  scripts   ScriptTag[]
+  scripts ScriptTag[]
 
   @@map("tags")
 }
 
 model ScriptTag {
-  scriptId  String  @map("script_id")
-  tagId     String  @map("tag_id")
+  scriptId String @map("script_id")
+  tagId    String @map("tag_id")
 
-  script    Script  @relation(fields: [scriptId], references: [id], onDelete: Cascade)
-  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  script Script @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([scriptId, tagId])
   @@map("script_tags")
 }
 
 model ScriptEnvVar {
-  id        String  @id @default(uuid())
-  scriptId  String  @map("script_id")
-  key       String
-  value     String  @default("")
-  isSecret  Boolean @default(false) @map("is_secret")
+  id       String  @id @default(uuid())
+  scriptId String  @map("script_id")
+  key      String
+  value    String  @default("")
+  isSecret Boolean @default(false) @map("is_secret")
 
-  script    Script  @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  script Script @relation(fields: [scriptId], references: [id], onDelete: Cascade)
 
   @@unique([scriptId, key])
   @@map("script_env_vars")
@@ -84,48 +85,48 @@ model ScriptVersion {
   snapshotNumber Int      @map("snapshot_number")
   savedAt        DateTime @default(now()) @map("saved_at")
 
-  script         Script   @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  script Script @relation(fields: [scriptId], references: [id], onDelete: Cascade)
 
   @@map("script_versions")
 }
 
 model Build {
-  id              String    @id @default(uuid())
-  scriptId        String    @map("script_id")
-  status          String    @default("pending")
-  triggeredBy     String    @default("manual") @map("triggered_by")
-  logFile         String?   @map("log_file")
-  startedAt       DateTime? @map("started_at")
-  finishedAt      DateTime? @map("finished_at")
-  exitCode        Int?      @map("exit_code")
-  webhookPayload  String?   @map("webhook_payload")
-  createdAt       DateTime  @default(now()) @map("created_at")
+  id             String    @id @default(uuid())
+  scriptId       String    @map("script_id")
+  status         String    @default("pending")
+  triggeredBy    String    @default("manual") @map("triggered_by")
+  logFile        String?   @map("log_file")
+  startedAt      DateTime? @map("started_at")
+  finishedAt     DateTime? @map("finished_at")
+  exitCode       Int?      @map("exit_code")
+  webhookPayload String?   @map("webhook_payload")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
-  script          Script    @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  script Script @relation(fields: [scriptId], references: [id], onDelete: Cascade)
 
   @@map("builds")
 }
 
 model Collection {
-  id          String    @id @default(uuid())
-  name        String
-  description String    @default("")
-  folderPath  String?   @map("folder_path")
-  isTemporary Boolean   @default(false) @map("is_temporary")
-  runtimePreset String  @default("general") @map("runtime_preset")
-  pythonToolchainEnabled Boolean @default(false) @map("python_toolchain_enabled")
-  pythonVenvPath String? @map("python_venv_path")
-  pythonInterpreterPath String? @map("python_interpreter_path")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  projectId   String?   @map("project_id")
-  parentId    String?   @map("parent_id")
-  storageProviderId String? @map("storage_provider_id")
-  remotePrefix String?  @map("remote_prefix")
+  id                     String   @id @default(uuid())
+  name                   String
+  description            String   @default("")
+  folderPath             String?  @map("folder_path")
+  isTemporary            Boolean  @default(false) @map("is_temporary")
+  runtimePreset          String   @default("general") @map("runtime_preset")
+  pythonToolchainEnabled Boolean  @default(false) @map("python_toolchain_enabled")
+  pythonVenvPath         String?  @map("python_venv_path")
+  pythonInterpreterPath  String?  @map("python_interpreter_path")
+  createdAt              DateTime @default(now()) @map("created_at")
+  projectId              String?  @map("project_id")
+  parentId               String?  @map("parent_id")
+  storageProviderId      String?  @map("storage_provider_id")
+  remotePrefix           String?  @map("remote_prefix")
 
-  scripts     Script[]
-  project     Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  parent      Collection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  children    Collection[] @relation("CollectionHierarchy")
+  scripts         Script[]
+  project         Project?         @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  parent          Collection?      @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children        Collection[]     @relation("CollectionHierarchy")
   storageProvider StorageProvider? @relation(fields: [storageProviderId], references: [id], onDelete: SetNull)
 
   @@map("collections")
@@ -145,22 +146,30 @@ model StorageProvider {
 }
 
 model Project {
-  id          String       @id @default(uuid())
-  name        String
-  description String       @default("")
-  environment String       @default("development")
-  color       String       @default("#6366f1")
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
+  id              String   @id @default(uuid())
+  workspaceId     String   @default("default") @map("workspace_id")
+  name            String
+  description     String   @default("")
+  environment     String   @default("development")
+  color           String   @default("#6366f1")
+  repositoryRoot  String?  @map("repository_root")
+  defaultBranch   String   @default("main") @map("default_branch")
+  remoteUrl       String?  @map("remote_url")
+  workspacePolicy String   @default("{}") @map("workspace_policy")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   collections    Collection[]
   serverProfiles ServerProfile[]
+  workflows      Workflow[]
+  agentProfiles  AgentProfile[]
 
   @@map("projects")
 }
 
 model ServerProfile {
   id              String   @id @default(uuid())
+  workspaceId     String   @default("default") @map("workspace_id")
   name            String
   host            String
   port            Int      @default(22)
@@ -198,15 +207,15 @@ model RemoteExecution {
   startedAt   DateTime? @map("started_at")
   finishedAt  DateTime? @map("finished_at")
 
-  profile     ServerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profile ServerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@map("remote_executions")
 }
 
 model Setting {
-  key       String    @id
+  key       String   @id
   value     String?
-  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("settings")
 }
@@ -227,12 +236,12 @@ model ScriptTemplate {
 }
 
 model ApiCollection {
-  id          String       @id @default(cuid())
+  id          String             @id @default(cuid())
   name        String
-  description String       @default("")
-  variables   String       @default("[]")
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
+  description String             @default("")
+  variables   String             @default("[]")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
   requests    ApiRequest[]
   runs        ApiCollectionRun[]
 
@@ -240,45 +249,45 @@ model ApiCollection {
 }
 
 model ApiRequest {
-  id           String         @id @default(cuid())
-  name         String
-  method       String         @default("GET")
-  url          String         @default("")
-  headers      String         @default("[]")
-  queryParams  String         @default("[]") @map("query_params")
-  variables    String         @default("[]")
-  requestOptions String       @default("{}") @map("request_options")
-  preRequestScript String     @default("") @map("pre_request_script")
-  testScript   String         @default("") @map("test_script")
-  responseMappings String     @default("[]") @map("response_mappings")
-  bodyType     String         @default("none") @map("body_type")
-  body         String         @default("")
-  authType     String         @default("none") @map("auth_type")
-  authConfig   String         @default("{}") @map("auth_config")
-  collectionId String?        @map("collection_id")
-  collection   ApiCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
-  createdAt    DateTime       @default(now()) @map("created_at")
-  updatedAt    DateTime       @updatedAt @map("updated_at")
+  id               String         @id @default(cuid())
+  name             String
+  method           String         @default("GET")
+  url              String         @default("")
+  headers          String         @default("[]")
+  queryParams      String         @default("[]") @map("query_params")
+  variables        String         @default("[]")
+  requestOptions   String         @default("{}") @map("request_options")
+  preRequestScript String         @default("") @map("pre_request_script")
+  testScript       String         @default("") @map("test_script")
+  responseMappings String         @default("[]") @map("response_mappings")
+  bodyType         String         @default("none") @map("body_type")
+  body             String         @default("")
+  authType         String         @default("none") @map("auth_type")
+  authConfig       String         @default("{}") @map("auth_config")
+  collectionId     String?        @map("collection_id")
+  collection       ApiCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
 
   @@map("api_requests")
 }
 
 model ApiCollectionRun {
-  id             String        @id @default(cuid())
-  collectionId   String        @map("collection_id")
-  collectionName String        @map("collection_name")
-  environmentId  String?       @map("environment_id")
-  environmentName String?      @map("environment_name")
-  status         String        @default("running")
-  totalRequests  Int           @default(0) @map("total_requests")
-  passedRequests Int           @default(0) @map("passed_requests")
-  failedRequests Int           @default(0) @map("failed_requests")
-  results        String        @default("[]")
-  startedAt      DateTime      @default(now()) @map("started_at")
-  finishedAt     DateTime?     @map("finished_at")
-  durationMs     Int?          @map("duration_ms")
+  id              String    @id @default(cuid())
+  collectionId    String    @map("collection_id")
+  collectionName  String    @map("collection_name")
+  environmentId   String?   @map("environment_id")
+  environmentName String?   @map("environment_name")
+  status          String    @default("running")
+  totalRequests   Int       @default(0) @map("total_requests")
+  passedRequests  Int       @default(0) @map("passed_requests")
+  failedRequests  Int       @default(0) @map("failed_requests")
+  results         String    @default("[]")
+  startedAt       DateTime  @default(now()) @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+  durationMs      Int?      @map("duration_ms")
 
-  collection     ApiCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  collection ApiCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
 
   @@map("api_collection_runs")
 }
@@ -311,4 +320,557 @@ model ApiHistory {
   createdAt       DateTime @default(now()) @map("created_at")
 
   @@map("api_history")
+}
+
+model ExecutionEvent {
+  id            String   @id
+  schemaVersion Int      @default(1) @map("schema_version")
+  type          String
+  executionKind String   @map("execution_kind")
+  correlationId String   @map("correlation_id")
+  occurredAt    DateTime @map("occurred_at")
+  actorType     String   @map("actor_type")
+  actorId       String   @map("actor_id")
+  actorName     String?  @map("actor_name")
+  targetType    String   @map("target_type")
+  targetId      String   @map("target_id")
+  targetName    String?  @map("target_name")
+  dataJson      String   @default("{}") @map("data_json")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([correlationId, occurredAt])
+  @@index([executionKind, occurredAt])
+  @@index([targetType, targetId, occurredAt])
+  @@map("execution_events")
+}
+
+model Workflow {
+  id               String            @id @default(uuid())
+  workspaceId      String            @default("default") @map("workspace_id")
+  name             String
+  description      String            @default("")
+  draftDefinition  String            @map("draft_definition")
+  publishedVersion Int?              @map("published_version")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  projectId        String?           @map("project_id")
+  project          Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  versions         WorkflowVersion[]
+  runs             WorkflowRun[]
+  triggers         WorkflowTrigger[]
+
+  @@map("workflows")
+}
+
+model WorkflowVersion {
+  id             String        @id @default(uuid())
+  workflowId     String        @map("workflow_id")
+  version        Int
+  definitionJson String        @map("definition_json")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  workflow       Workflow      @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  runs           WorkflowRun[]
+
+  @@unique([workflowId, version])
+  @@map("workflow_versions")
+}
+
+model WorkflowRun {
+  id                String            @id @default(uuid())
+  workflowId        String            @map("workflow_id")
+  versionId         String            @map("version_id")
+  status            String            @default("queued")
+  triggerType       String            @map("trigger_type")
+  actorId           String            @map("actor_id")
+  correlationId     String            @unique @map("correlation_id")
+  idempotencyKey    String?           @unique @map("idempotency_key")
+  inputJson         String            @default("{}") @map("input_json")
+  outputJson        String?           @map("output_json")
+  errorJson         String?           @map("error_json")
+  workerId          String?           @map("worker_id")
+  claimedAt         DateTime?         @map("claimed_at")
+  cancelRequestedAt DateTime?         @map("cancel_requested_at")
+  startedAt         DateTime?         @map("started_at")
+  finishedAt        DateTime?         @map("finished_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  workflow          Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  version           WorkflowVersion   @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  nodeRuns          WorkflowNodeRun[]
+
+  @@index([status, createdAt])
+  @@index([workflowId, createdAt])
+  @@map("workflow_runs")
+}
+
+model WorkflowNodeRun {
+  id         String      @id @default(uuid())
+  runId      String      @map("run_id")
+  nodeId     String      @map("node_id")
+  nodeType   String      @map("node_type")
+  status     String      @default("pending")
+  attempt    Int         @default(0)
+  inputJson  String?     @map("input_json")
+  outputJson String?     @map("output_json")
+  errorJson  String?     @map("error_json")
+  startedAt  DateTime?   @map("started_at")
+  finishedAt DateTime?   @map("finished_at")
+  run        WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, nodeId])
+  @@index([runId, status])
+  @@map("workflow_node_runs")
+}
+
+model WorkflowTrigger {
+  id                     String   @id @default(uuid())
+  workflowId             String   @map("workflow_id")
+  type                   String
+  enabled                Boolean  @default(true)
+  configJson             String   @default("{}") @map("config_json")
+  webhookToken           String?  @unique @map("webhook_token")
+  webhookSecretEncrypted String?  @map("webhook_secret_encrypted")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+  workflow               Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId, enabled])
+  @@map("workflow_triggers")
+}
+
+model NotificationChannel {
+  id         String                 @id @default(uuid())
+  name       String
+  kind       String
+  enabled    Boolean                @default(true)
+  configJson String                 @default("{}") @map("config_json")
+  createdAt  DateTime               @default(now()) @map("created_at")
+  updatedAt  DateTime               @updatedAt @map("updated_at")
+  rules      NotificationRule[]
+  deliveries NotificationDelivery[]
+
+  @@map("notification_channels")
+}
+
+model NotificationRule {
+  id              String                 @id @default(uuid())
+  channelId       String                 @map("channel_id")
+  name            String
+  enabled         Boolean                @default(true)
+  eventTypes      String                 @map("event_types")
+  filterJson      String                 @default("{}") @map("filter_json")
+  templateJson    String                 @default("{}") @map("template_json")
+  throttleSeconds Int                    @default(0) @map("throttle_seconds")
+  createdAt       DateTime               @default(now()) @map("created_at")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+  channel         NotificationChannel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  deliveries      NotificationDelivery[]
+
+  @@index([enabled, channelId])
+  @@map("notification_rules")
+}
+
+model NotificationDelivery {
+  id            String              @id @default(uuid())
+  channelId     String              @map("channel_id")
+  ruleId        String?             @map("rule_id")
+  eventId       String?             @map("event_id")
+  dedupeKey     String              @unique @map("dedupe_key")
+  status        String              @default("pending")
+  attemptCount  Int                 @default(0) @map("attempt_count")
+  payloadJson   String              @default("{}") @map("payload_json")
+  lastError     String?             @map("last_error")
+  nextAttemptAt DateTime?           @map("next_attempt_at")
+  deliveredAt   DateTime?           @map("delivered_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+  channel       NotificationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  rule          NotificationRule?   @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextAttemptAt])
+  @@map("notification_deliveries")
+}
+
+model ApprovalRequest {
+  id              String             @id @default(uuid())
+  status          String             @default("pending")
+  actorType       String             @map("actor_type")
+  actorId         String             @map("actor_id")
+  actorName       String?            @map("actor_name")
+  workspaceId     String             @map("workspace_id")
+  runId           String?            @map("run_id")
+  nodeId          String?            @map("node_id")
+  capability      String
+  operation       String
+  resource        String
+  risk            String
+  reason          String             @default("")
+  previewJson     String             @default("{}") @map("preview_json")
+  protectedAction Boolean            @default(false) @map("protected_action")
+  policyVersion   Int                @default(1) @map("policy_version")
+  correlationId   String             @map("correlation_id")
+  expiresAt       DateTime           @map("expires_at")
+  decidedAt       DateTime?          @map("decided_at")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  decisions       ApprovalDecision[]
+
+  @@index([status, expiresAt])
+  @@index([runId, nodeId])
+  @@map("approval_requests")
+}
+
+model ApprovalDecision {
+  id        String          @id @default(uuid())
+  requestId String          @map("request_id")
+  decision  String
+  decidedBy String          @map("decided_by")
+  note      String          @default("")
+  createdAt DateTime        @default(now()) @map("created_at")
+  request   ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
+  @@map("approval_decisions")
+}
+
+model ApprovalGrant {
+  id            String    @id @default(uuid())
+  actorId       String    @map("actor_id")
+  workspaceId   String    @map("workspace_id")
+  runId         String?   @map("run_id")
+  capability    String
+  resource      String
+  policyVersion Int       @default(1) @map("policy_version")
+  expiresAt     DateTime? @map("expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+  createdBy     String    @map("created_by")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([actorId, workspaceId, capability])
+  @@map("approval_grants")
+}
+
+model Secret {
+  id             String              @id @default(uuid())
+  name           String
+  description    String              @default("")
+  scope          String              @default("workspace")
+  workspaceId    String              @default("default") @map("workspace_id")
+  status         String              @default("active")
+  currentVersion Int                 @default(1) @map("current_version")
+  createdBy      String              @map("created_by")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  disabledAt     DateTime?           @map("disabled_at")
+  versions       SecretVersion[]
+  bindings       SecretBinding[]
+  accessEvents   SecretAccessEvent[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, status])
+  @@map("secrets")
+}
+
+model SecretVersion {
+  id         String   @id @default(uuid())
+  secretId   String   @map("secret_id")
+  version    Int
+  ciphertext String
+  storeKind  String   @default("server") @map("store_kind")
+  createdBy  String   @map("created_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+  secret     Secret   @relation(fields: [secretId], references: [id], onDelete: Cascade)
+
+  @@unique([secretId, version])
+  @@map("secret_versions")
+}
+
+model SecretBinding {
+  id           String   @id @default(uuid())
+  secretId     String   @map("secret_id")
+  workspaceId  String   @default("default") @map("workspace_id")
+  resourceType String   @map("resource_type")
+  resourceId   String   @map("resource_id")
+  field        String
+  createdBy    String   @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+  secret       Secret   @relation(fields: [secretId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceType, resourceId, field])
+  @@index([secretId])
+  @@map("secret_bindings")
+}
+
+model SecretAccessEvent {
+  id          String   @id @default(uuid())
+  secretId    String   @map("secret_id")
+  version     Int?
+  actorType   String   @map("actor_type")
+  actorId     String   @map("actor_id")
+  workspaceId String   @map("workspace_id")
+  capability  String
+  resource    String
+  operation   String
+  reason      String   @default("")
+  outcome     String
+  createdAt   DateTime @default(now()) @map("created_at")
+  secret      Secret   @relation(fields: [secretId], references: [id], onDelete: Cascade)
+
+  @@index([secretId, createdAt])
+  @@index([actorId, createdAt])
+  @@map("secret_access_events")
+}
+
+model AgentProviderConfig {
+  id            String         @id @default(uuid())
+  provider      String
+  name          String
+  executable    String
+  credentialRef String?        @map("credential_ref")
+  enabled       Boolean        @default(true)
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  profiles      AgentProfile[]
+
+  @@index([provider, enabled])
+  @@map("agent_provider_configs")
+}
+
+model AgentProfile {
+  id               String               @id @default(uuid())
+  name             String
+  provider         String
+  providerConfigId String?              @map("provider_config_id")
+  accessLevel      String               @default("observe") @map("access_level")
+  workspaceId      String               @default("default") @map("workspace_id")
+  projectId        String?              @map("project_id")
+  model            String?
+  systemPrompt     String               @default("") @map("system_prompt")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+  providerConfig   AgentProviderConfig? @relation(fields: [providerConfigId], references: [id], onDelete: SetNull)
+  project          Project?             @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  runs             AgentRun[]
+
+  @@index([workspaceId, provider])
+  @@map("agent_profiles")
+}
+
+model AgentRun {
+  id                String            @id @default(uuid())
+  profileId         String            @map("profile_id")
+  provider          String
+  status            String            @default("queued")
+  workspaceId       String            @default("default") @map("workspace_id")
+  initiatedBy       String            @default("local-admin") @map("initiated_by")
+  correlationId     String            @unique @map("correlation_id")
+  inputJson         String            @default("{}") @map("input_json")
+  outputJson        String?           @map("output_json")
+  usageJson         String?           @map("usage_json")
+  providerSessionId String?           @map("provider_session_id")
+  errorJson         String?           @map("error_json")
+  startedAt         DateTime?         @map("started_at")
+  finishedAt        DateTime?         @map("finished_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  profile           AgentProfile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  messages          AgentMessage[]
+  artifacts         AgentArtifact[]
+  permissionGrants  PermissionGrant[]
+
+  @@index([status, createdAt])
+  @@index([profileId, createdAt])
+  @@map("agent_runs")
+}
+
+model AgentMessage {
+  id           String   @id @default(uuid())
+  runId        String   @map("run_id")
+  role         String
+  content      String
+  metadataJson String   @default("{}") @map("metadata_json")
+  createdAt    DateTime @default(now()) @map("created_at")
+  run          AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, createdAt])
+  @@map("agent_messages")
+}
+
+model AgentArtifact {
+  id           String   @id @default(uuid())
+  runId        String   @map("run_id")
+  kind         String
+  name         String
+  content      String?
+  path         String?
+  metadataJson String   @default("{}") @map("metadata_json")
+  createdAt    DateTime @default(now()) @map("created_at")
+  run          AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, createdAt])
+  @@map("agent_artifacts")
+}
+
+model PermissionGrant {
+  id                String   @id @default(uuid())
+  runId             String   @map("run_id")
+  capability        String
+  resource          String
+  decision          String
+  decidedBy         String   @map("decided_by")
+  approvalRequestId String?  @map("approval_request_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  revokedAt         DateTime? @map("revoked_at")
+  run               AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, capability])
+  @@map("agent_permission_grants")
+}
+
+model User {
+  id           String                @id @default(uuid())
+  email        String                @unique
+  name         String
+  status       String                @default("active")
+  passwordHash String?               @map("password_hash")
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @updatedAt @map("updated_at")
+  memberships  Membership[]
+  sessions     UserSession[]
+  invitations  WorkspaceInvitation[] @relation("InvitedBy")
+
+  @@map("users")
+}
+
+model Workspace {
+  id          String                @id @default(uuid())
+  name        String
+  slug        String                @unique
+  policyJson  String                @default("{}") @map("policy_json")
+  createdBy   String                @map("created_by")
+  createdAt   DateTime              @default(now()) @map("created_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
+  memberships Membership[]
+  roles       Role[]
+  invitations WorkspaceInvitation[]
+  sessions    UserSession[]
+
+  @@map("workspaces")
+}
+
+model Membership {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  workspaceId String    @map("workspace_id")
+  roleId      String    @map("role_id")
+  status      String    @default("active")
+  joinedAt    DateTime  @default(now()) @map("joined_at")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role        Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId, status])
+  @@map("memberships")
+}
+
+model Role {
+  id          String                @id @default(uuid())
+  workspaceId String                @map("workspace_id")
+  key         String
+  name        String
+  description String                @default("")
+  preset      Boolean               @default(false)
+  createdAt   DateTime              @default(now()) @map("created_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
+  workspace   Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  permissions RolePermission[]
+  memberships Membership[]
+  invitations WorkspaceInvitation[]
+
+  @@unique([workspaceId, key])
+  @@map("roles")
+}
+
+model RolePermission {
+  id         String @id @default(uuid())
+  roleId     String @map("role_id")
+  permission String
+  role       Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permission])
+  @@map("role_permissions")
+}
+
+model WorkspaceInvitation {
+  id          String    @id @default(uuid())
+  workspaceId String    @map("workspace_id")
+  email       String
+  roleId      String    @map("role_id")
+  tokenHash   String    @unique @map("token_hash")
+  status      String    @default("pending")
+  invitedById String    @map("invited_by_id")
+  expiresAt   DateTime  @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role        Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  invitedBy   User      @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, status])
+  @@map("workspace_invitations")
+}
+
+model UserSession {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  workspaceId String    @map("workspace_id")
+  tokenHash   String    @unique @map("token_hash")
+  userAgent   String?   @map("user_agent")
+  ipAddress   String?   @map("ip_address")
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, workspaceId, revokedAt])
+  @@map("user_sessions")
+}
+
+model PluginPackage {
+  id             String               @id @default(uuid())
+  pluginId       String               @map("plugin_id")
+  version        String
+  manifestJson   String               @map("manifest_json")
+  source         String
+  sourceHash     String               @map("source_hash")
+  signature      String?
+  publicKey      String?              @map("public_key")
+  signatureValid Boolean              @default(false) @map("signature_valid")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  installations  PluginInstallation[]
+
+  @@unique([pluginId, version, sourceHash])
+  @@index([pluginId, version])
+  @@map("plugin_packages")
+}
+
+model PluginInstallation {
+  id              String        @id @default(uuid())
+  packageId       String        @map("package_id")
+  workspaceId     String        @map("workspace_id")
+  enabled         Boolean       @default(false)
+  trusted         Boolean       @default(false)
+  allowUnsigned   Boolean       @default(false) @map("allow_unsigned")
+  settingsJson    String        @default("{}") @map("settings_json")
+  healthStatus    String        @default("unknown") @map("health_status")
+  healthMessage   String?       @map("health_message")
+  lastCheckedAt   DateTime?     @map("last_checked_at")
+  installedBy     String        @map("installed_by")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  package         PluginPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, packageId])
+  @@index([workspaceId, enabled])
+  @@map("plugin_installations")
 }

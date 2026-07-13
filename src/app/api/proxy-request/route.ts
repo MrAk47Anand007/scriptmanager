@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server'
 import { executeApiRequest } from '@/lib/executeApiRequest'
 import type { ApiResponseMappingRow, ApiVariableRow } from '@/lib/apiRequestMaterialization'
+import { executionTelemetry } from '@/lib/execution'
+import { prisma } from '@/lib/db'
+import { resolveApiAuthConfig } from '@/lib/secrets/apiAuth'
 
 export async function POST(req: Request) {
+  const correlationId = executionTelemetry.correlationId(req)
+  let targetId = 'draft'
   try {
     const {
       requestId,
@@ -22,10 +27,18 @@ export async function POST(req: Request) {
       authType,
       authConfig
     } = await req.json()
+    targetId = requestId ?? 'draft'
 
     if (!url) {
       return NextResponse.json({ error: 'URL is required' }, { status: 400 })
     }
+
+    await executionTelemetry.emit({
+      type: 'execution.started', executionKind: 'api', correlationId,
+      actor: { type: 'user', id: 'session-user' },
+      target: { type: 'api_request', id: targetId },
+      data: { method: method ?? 'GET', trigger: 'manual' },
+    })
 
     const result = await executeApiRequest({
       requestId: requestId ?? null,
@@ -43,16 +56,32 @@ export async function POST(req: Request) {
       bodyType: bodyType ?? 'none',
       body: body ?? '',
       authType: authType ?? 'none',
-      authConfig: (authConfig ?? {}) as Record<string, string>,
+      authConfig: requestId ? await resolveApiAuthConfig(prisma, requestId, authConfig ?? {}) : (authConfig ?? {}) as Record<string, string>,
     })
 
     if (!result.ok) {
+      await executionTelemetry.emit({
+        type: 'execution.failed', executionKind: 'api', correlationId,
+        actor: { type: 'user', id: 'session-user' }, target: { type: 'api_request', id: targetId },
+        data: { status: result.status },
+      })
       return NextResponse.json(result, { status: result.status })
     }
 
-    return NextResponse.json(result)
+    await executionTelemetry.emit({
+      type: 'execution.succeeded', executionKind: 'api', correlationId,
+      actor: { type: 'user', id: 'session-user' }, target: { type: 'api_request', id: targetId },
+      data: { status: result.status },
+    })
+
+    return NextResponse.json(result, { headers: { 'x-correlation-id': correlationId } })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
+    await executionTelemetry.emit({
+      type: 'execution.failed', executionKind: 'api', correlationId,
+      actor: { type: 'user', id: 'session-user' }, target: { type: 'api_request', id: targetId },
+      data: { error: message },
+    })
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

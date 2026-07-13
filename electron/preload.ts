@@ -9,6 +9,13 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
   readClipboardText: () => ipcRenderer.invoke('scriptmanager:read-text') as Promise<string>,
   setNotificationsEnabled: (enabled: boolean) =>
     ipcRenderer.invoke('scriptmanager:set-notifications-enabled', enabled) as Promise<boolean>,
+  showNotification: (payload: { title: string; body: string; deepLink?: string }) =>
+    ipcRenderer.invoke('scriptmanager:show-notification', payload) as Promise<boolean>,
+  onNotificationDeepLink: (listener: (deepLink: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, deepLink: string) => listener(deepLink)
+    ipcRenderer.on('scriptmanager:notification-deep-link', handler)
+    return () => ipcRenderer.removeListener('scriptmanager:notification-deep-link', handler)
+  },
   oauthConnect: (payload: { provider: 'gdrive' | 'onedrive'; clientId?: string; fullAccess?: boolean }) =>
     ipcRenderer.invoke('scriptmanager:oauth-connect', payload) as Promise<{
       ok: boolean
@@ -20,6 +27,19 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     }>,
   oauthDefaults: () =>
     ipcRenderer.invoke('scriptmanager:oauth-defaults') as Promise<{ gdrive: boolean; onedrive: boolean }>,
+  agents: {
+    discover: () => ipcRenderer.invoke('scriptmanager:agents:discover') as Promise<unknown[]>,
+    launch: (payload: { provider: 'codex' | 'claude'; sessionId: string; profileId: string; cwd: string }) => ipcRenderer.invoke('scriptmanager:agents:launch', payload) as Promise<unknown>,
+    input: (payload: { sessionId: string; message: unknown }) => ipcRenderer.invoke('scriptmanager:agents:input', payload) as Promise<{ ok: boolean }>,
+    permissionDecision: (payload: { sessionId: string; requestId: string; allowed: boolean }) => ipcRenderer.invoke('scriptmanager:agents:permission', payload) as Promise<{ ok: boolean }>,
+    interrupt: (sessionId: string) => ipcRenderer.invoke('scriptmanager:agents:interrupt', sessionId) as Promise<{ ok: boolean }>,
+    terminate: (sessionId: string) => ipcRenderer.invoke('scriptmanager:agents:terminate', sessionId) as Promise<{ ok: boolean }>,
+    onEvent: (listener: (payload: { sessionId: string; event: unknown }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: { sessionId: string; event: unknown }) => listener(payload)
+      ipcRenderer.on('scriptmanager:agents:event', handler)
+      return () => ipcRenderer.removeListener('scriptmanager:agents:event', handler)
+    },
+  },
   runtime: {
     listScripts: () => ipcRenderer.invoke('scriptmanager:runtime:list-scripts') as Promise<unknown[]>,
     listCollections: () => ipcRenderer.invoke('scriptmanager:runtime:list-collections') as Promise<unknown[]>,
