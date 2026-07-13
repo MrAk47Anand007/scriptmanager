@@ -3,14 +3,15 @@
 ## Truth source
 
 - Repository: `scriptmanager`
-- Active worktree: `.worktrees/phase-4-notifications-approvals`
-- Active branch: `codex/phase-4-notifications-approvals`
+- Active worktree: `.worktrees/phase-5-secret-vault`
+- Active branch: `codex/phase-5-secret-vault`
 - Base commit on `main`: `b204cda`
-- Phase 4 base/head commit: `6d6cc3c` (`feat: add phase 3 execution observability`)
-- Working-tree state: Phase 4 implementation and documentation are present but uncommitted.
-- Integration state: not merged, pushed, or opened as a pull request.
+- Phase 5 base commit: `87506bd` (`feat: add notifications and approval inbox`)
+- Phase 5 implementation head: `0f6049f` (`feat: complete vault credential migrations`)
+- Working-tree state: clean after the final Phase 5 verification pass.
+- Integration state: Phase 5 is committed locally but not merged, pushed, or opened as a pull request.
 
-Use this worktree as the source of truth for Phases 1–4. The root `main` checkout does not contain these changes, and the Phase 4 files exist only as uncommitted changes in this worktree.
+Use this worktree as the source of truth for Phases 1–5 and as the baseline for Phase 6 planning. The root `main` checkout does not contain these phase branches and has unrelated local/divergent state that must not be overwritten.
 
 ## Completed phases
 
@@ -197,7 +198,7 @@ Known validation limits:
 
 Before switching branches, removing this worktree, or starting Phase 5, first commit the intentional Phase 4 source, migration, tests, plan, README, and this handoff together.
 
-## Honest completion status after Phase 4
+## Historical completion status after Phase 4
 
 - Phase 1 code and automated verification complete: yes.
 - Phase 2 code and automated verification complete: yes.
@@ -286,3 +287,38 @@ Next phase after preserving the verified completion commit:
 1. Proceed to Phase 6 provider-neutral ACP agents with Codex and Claude.
 2. Reuse vault references for provider credentials and agent tool inputs; never add an agent-specific plaintext secret store.
 3. Route agent secret reads and protected actions through Phase 4 approvals and Phase 5 access auditing.
+
+## Current Phase 5 git and integration state
+
+- Branch: `codex/phase-5-secret-vault`.
+- Worktree: `.worktrees/phase-5-secret-vault`.
+- Base: committed Phase 4 head `87506bd`.
+- Head: `0f6049f` (`feat: complete vault credential migrations`).
+- Working tree: clean after fresh migration, test, typecheck, build, and diff-hygiene verification.
+- Merge, push, and pull request: not performed.
+- Phase 6 must branch from the current `codex/phase-5-secret-vault` tip so this handoff is included, not from `main` or an earlier phase branch.
+
+## Phase 6 starting instructions
+
+Create a dedicated `codex/phase-6-acp-agents` branch and `.worktrees/phase-6-acp-agents` worktree from the current `codex/phase-5-secret-vault` tip. Implement the provider-neutral ACP layer with Codex and Claude adapters while preserving the established security boundaries:
+
+1. Reuse Phase 4 approvals for permission requests and every protected action, including under Full access.
+2. Reuse Phase 5 vault references for provider credentials and agent tool inputs; plaintext may exist only ephemerally inside trusted runtime boundaries.
+3. Keep provider processes desktop-hosted through typed Electron IPC; browser-only mode may inspect runs but cannot silently launch local providers.
+4. Persist redacted transcripts, artifacts, permission decisions, and provider usage metadata with execution correlation IDs.
+5. Add fake-provider contract tests before connecting real Codex or Claude processes.
+
+Read these files first for Phase 6:
+
+- `docs/superpowers/plans/2026-07-11-scriptmanager-platform-master-roadmap.md`
+- `docs/superpowers/plans/2026-07-13-phase5-secret-vault.md`
+- `src/lib/approvals/service.ts`
+- `src/lib/approvals/policy.ts`
+- `src/lib/secrets/service.ts`
+- `src/lib/secrets/references.ts`
+- `src/lib/secrets/runtime.ts`
+- `src/lib/workflows/types.ts`
+- `src/lib/workflows/nodeExecutors.ts`
+- `electron/main.ts`
+- `electron/preload.ts`
+- `src/types/electron.d.ts`
