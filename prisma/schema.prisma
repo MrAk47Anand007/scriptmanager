@@ -336,27 +336,27 @@ model ExecutionEvent {
 }
 
 model Workflow {
-  id                String            @id @default(uuid())
-  name              String
-  description       String            @default("")
-  draftDefinition   String            @map("draft_definition")
-  publishedVersion Int?               @map("published_version")
-  createdAt         DateTime          @default(now()) @map("created_at")
-  updatedAt         DateTime          @updatedAt @map("updated_at")
-  versions          WorkflowVersion[]
-  runs              WorkflowRun[]
-  triggers          WorkflowTrigger[]
+  id               String            @id @default(uuid())
+  name             String
+  description      String            @default("")
+  draftDefinition  String            @map("draft_definition")
+  publishedVersion Int?              @map("published_version")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  versions         WorkflowVersion[]
+  runs             WorkflowRun[]
+  triggers         WorkflowTrigger[]
 
   @@map("workflows")
 }
 
 model WorkflowVersion {
-  id             String            @id @default(uuid())
-  workflowId     String            @map("workflow_id")
+  id             String        @id @default(uuid())
+  workflowId     String        @map("workflow_id")
   version        Int
-  definitionJson String            @map("definition_json")
-  createdAt      DateTime          @default(now()) @map("created_at")
-  workflow       Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  definitionJson String        @map("definition_json")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  workflow       Workflow      @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   runs           WorkflowRun[]
 
   @@unique([workflowId, version])
@@ -364,26 +364,26 @@ model WorkflowVersion {
 }
 
 model WorkflowRun {
-  id                  String            @id @default(uuid())
-  workflowId          String            @map("workflow_id")
-  versionId           String            @map("version_id")
-  status              String            @default("queued")
-  triggerType         String            @map("trigger_type")
-  actorId             String            @map("actor_id")
-  correlationId       String            @unique @map("correlation_id")
-  idempotencyKey      String?           @unique @map("idempotency_key")
-  inputJson           String            @default("{}") @map("input_json")
-  outputJson          String?           @map("output_json")
-  errorJson           String?           @map("error_json")
-  workerId            String?           @map("worker_id")
-  claimedAt           DateTime?         @map("claimed_at")
-  cancelRequestedAt   DateTime?         @map("cancel_requested_at")
-  startedAt           DateTime?         @map("started_at")
-  finishedAt          DateTime?         @map("finished_at")
-  createdAt           DateTime          @default(now()) @map("created_at")
-  workflow            Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  version             WorkflowVersion   @relation(fields: [versionId], references: [id], onDelete: Restrict)
-  nodeRuns            WorkflowNodeRun[]
+  id                String            @id @default(uuid())
+  workflowId        String            @map("workflow_id")
+  versionId         String            @map("version_id")
+  status            String            @default("queued")
+  triggerType       String            @map("trigger_type")
+  actorId           String            @map("actor_id")
+  correlationId     String            @unique @map("correlation_id")
+  idempotencyKey    String?           @unique @map("idempotency_key")
+  inputJson         String            @default("{}") @map("input_json")
+  outputJson        String?           @map("output_json")
+  errorJson         String?           @map("error_json")
+  workerId          String?           @map("worker_id")
+  claimedAt         DateTime?         @map("claimed_at")
+  cancelRequestedAt DateTime?         @map("cancel_requested_at")
+  startedAt         DateTime?         @map("started_at")
+  finishedAt        DateTime?         @map("finished_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  workflow          Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  version           WorkflowVersion   @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  nodeRuns          WorkflowNodeRun[]
 
   @@index([status, createdAt])
   @@index([workflowId, createdAt])
@@ -391,18 +391,18 @@ model WorkflowRun {
 }
 
 model WorkflowNodeRun {
-  id          String      @id @default(uuid())
-  runId       String      @map("run_id")
-  nodeId      String      @map("node_id")
-  nodeType    String      @map("node_type")
-  status      String      @default("pending")
-  attempt     Int         @default(0)
-  inputJson   String?     @map("input_json")
-  outputJson  String?     @map("output_json")
-  errorJson   String?     @map("error_json")
-  startedAt   DateTime?   @map("started_at")
-  finishedAt  DateTime?   @map("finished_at")
-  run         WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  id         String      @id @default(uuid())
+  runId      String      @map("run_id")
+  nodeId     String      @map("node_id")
+  nodeType   String      @map("node_type")
+  status     String      @default("pending")
+  attempt    Int         @default(0)
+  inputJson  String?     @map("input_json")
+  outputJson String?     @map("output_json")
+  errorJson  String?     @map("error_json")
+  startedAt  DateTime?   @map("started_at")
+  finishedAt DateTime?   @map("finished_at")
+  run        WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@unique([runId, nodeId])
   @@index([runId, status])
@@ -410,138 +410,144 @@ model WorkflowNodeRun {
 }
 
 model WorkflowTrigger {
-  id             String   @id @default(uuid())
-  workflowId     String   @map("workflow_id")
-  type           String
-  enabled        Boolean  @default(true)
-  configJson     String   @default("{}") @map("config_json")
-  webhookToken   String?  @unique @map("webhook_token")
-  webhookSecretEncrypted String? @map("webhook_secret_encrypted")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-  workflow       Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  id                     String   @id @default(uuid())
+  workflowId             String   @map("workflow_id")
+  type                   String
+  enabled                Boolean  @default(true)
+  configJson             String   @default("{}") @map("config_json")
+  webhookToken           String?  @unique @map("webhook_token")
+  webhookSecretEncrypted String?  @map("webhook_secret_encrypted")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+  workflow               Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
   @@index([workflowId, enabled])
   @@map("workflow_triggers")
 }
 
 model NotificationChannel {
-  id          String   @id @default(uuid())
-  name        String
-  kind        String
-  enabled     Boolean  @default(true)
-  configJson  String   @default("{}") @map("config_json")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  rules       NotificationRule[]
-  deliveries  NotificationDelivery[]
+  id         String                 @id @default(uuid())
+  name       String
+  kind       String
+  enabled    Boolean                @default(true)
+  configJson String                 @default("{}") @map("config_json")
+  createdAt  DateTime               @default(now()) @map("created_at")
+  updatedAt  DateTime               @updatedAt @map("updated_at")
+  rules      NotificationRule[]
+  deliveries NotificationDelivery[]
+
   @@map("notification_channels")
 }
 
 model NotificationRule {
-  id          String   @id @default(uuid())
-  channelId   String   @map("channel_id")
-  name        String
-  enabled     Boolean  @default(true)
-  eventTypes  String   @map("event_types")
-  filterJson  String   @default("{}") @map("filter_json")
-  templateJson String  @default("{}") @map("template_json")
-  throttleSeconds Int  @default(0) @map("throttle_seconds")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  channel     NotificationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  deliveries  NotificationDelivery[]
+  id              String                 @id @default(uuid())
+  channelId       String                 @map("channel_id")
+  name            String
+  enabled         Boolean                @default(true)
+  eventTypes      String                 @map("event_types")
+  filterJson      String                 @default("{}") @map("filter_json")
+  templateJson    String                 @default("{}") @map("template_json")
+  throttleSeconds Int                    @default(0) @map("throttle_seconds")
+  createdAt       DateTime               @default(now()) @map("created_at")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+  channel         NotificationChannel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  deliveries      NotificationDelivery[]
+
   @@index([enabled, channelId])
   @@map("notification_rules")
 }
 
 model NotificationDelivery {
-  id             String   @id @default(uuid())
-  channelId      String   @map("channel_id")
-  ruleId         String?  @map("rule_id")
-  eventId        String?  @map("event_id")
-  dedupeKey      String   @unique @map("dedupe_key")
-  status         String   @default("pending")
-  attemptCount   Int      @default(0) @map("attempt_count")
-  payloadJson    String   @default("{}") @map("payload_json")
-  lastError      String?  @map("last_error")
-  nextAttemptAt  DateTime? @map("next_attempt_at")
-  deliveredAt    DateTime? @map("delivered_at")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-  channel        NotificationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  rule           NotificationRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  id            String              @id @default(uuid())
+  channelId     String              @map("channel_id")
+  ruleId        String?             @map("rule_id")
+  eventId       String?             @map("event_id")
+  dedupeKey     String              @unique @map("dedupe_key")
+  status        String              @default("pending")
+  attemptCount  Int                 @default(0) @map("attempt_count")
+  payloadJson   String              @default("{}") @map("payload_json")
+  lastError     String?             @map("last_error")
+  nextAttemptAt DateTime?           @map("next_attempt_at")
+  deliveredAt   DateTime?           @map("delivered_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+  channel       NotificationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  rule          NotificationRule?   @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
   @@index([status, nextAttemptAt])
   @@map("notification_deliveries")
 }
 
 model ApprovalRequest {
-  id              String   @id @default(uuid())
-  status          String   @default("pending")
-  actorType       String   @map("actor_type")
-  actorId         String   @map("actor_id")
-  actorName       String?  @map("actor_name")
-  workspaceId     String   @map("workspace_id")
-  runId           String?  @map("run_id")
-  nodeId          String?  @map("node_id")
+  id              String             @id @default(uuid())
+  status          String             @default("pending")
+  actorType       String             @map("actor_type")
+  actorId         String             @map("actor_id")
+  actorName       String?            @map("actor_name")
+  workspaceId     String             @map("workspace_id")
+  runId           String?            @map("run_id")
+  nodeId          String?            @map("node_id")
   capability      String
   operation       String
   resource        String
   risk            String
-  reason          String   @default("")
-  previewJson     String   @default("{}") @map("preview_json")
-  protectedAction Boolean  @default(false) @map("protected_action")
-  policyVersion   Int      @default(1) @map("policy_version")
-  correlationId   String   @map("correlation_id")
-  expiresAt       DateTime @map("expires_at")
-  decidedAt       DateTime? @map("decided_at")
-  createdAt       DateTime @default(now()) @map("created_at")
+  reason          String             @default("")
+  previewJson     String             @default("{}") @map("preview_json")
+  protectedAction Boolean            @default(false) @map("protected_action")
+  policyVersion   Int                @default(1) @map("policy_version")
+  correlationId   String             @map("correlation_id")
+  expiresAt       DateTime           @map("expires_at")
+  decidedAt       DateTime?          @map("decided_at")
+  createdAt       DateTime           @default(now()) @map("created_at")
   decisions       ApprovalDecision[]
+
   @@index([status, expiresAt])
   @@index([runId, nodeId])
   @@map("approval_requests")
 }
 
 model ApprovalDecision {
-  id          String   @id @default(uuid())
-  requestId   String   @map("request_id")
-  decision    String
-  decidedBy   String   @map("decided_by")
-  note        String   @default("")
-  createdAt   DateTime @default(now()) @map("created_at")
-  request     ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  id        String          @id @default(uuid())
+  requestId String          @map("request_id")
+  decision  String
+  decidedBy String          @map("decided_by")
+  note      String          @default("")
+  createdAt DateTime        @default(now()) @map("created_at")
+  request   ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
   @@index([requestId, createdAt])
   @@map("approval_decisions")
 }
 
 model ApprovalGrant {
-  id            String   @id @default(uuid())
-  actorId       String   @map("actor_id")
-  workspaceId   String   @map("workspace_id")
-  runId         String?  @map("run_id")
+  id            String    @id @default(uuid())
+  actorId       String    @map("actor_id")
+  workspaceId   String    @map("workspace_id")
+  runId         String?   @map("run_id")
   capability    String
   resource      String
-  policyVersion Int      @default(1) @map("policy_version")
+  policyVersion Int       @default(1) @map("policy_version")
   expiresAt     DateTime? @map("expires_at")
   revokedAt     DateTime? @map("revoked_at")
-  createdBy     String   @map("created_by")
-  createdAt     DateTime @default(now()) @map("created_at")
+  createdBy     String    @map("created_by")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
   @@index([actorId, workspaceId, capability])
   @@map("approval_grants")
 }
 
 model Secret {
-  id             String   @id @default(uuid())
+  id             String              @id @default(uuid())
   name           String
-  description    String   @default("")
-  scope          String   @default("workspace")
-  workspaceId    String   @default("default") @map("workspace_id")
-  status         String   @default("active")
-  currentVersion Int      @default(1) @map("current_version")
-  createdBy      String   @map("created_by")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-  disabledAt     DateTime? @map("disabled_at")
+  description    String              @default("")
+  scope          String              @default("workspace")
+  workspaceId    String              @default("default") @map("workspace_id")
+  status         String              @default("active")
+  currentVersion Int                 @default(1) @map("current_version")
+  createdBy      String              @map("created_by")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  disabledAt     DateTime?           @map("disabled_at")
   versions       SecretVersion[]
   bindings       SecretBinding[]
   accessEvents   SecretAccessEvent[]
@@ -599,4 +605,106 @@ model SecretAccessEvent {
   @@index([secretId, createdAt])
   @@index([actorId, createdAt])
   @@map("secret_access_events")
+}
+
+model AgentProviderConfig {
+  id            String         @id @default(uuid())
+  provider      String
+  name          String
+  executable    String
+  credentialRef String?        @map("credential_ref")
+  enabled       Boolean        @default(true)
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  profiles      AgentProfile[]
+
+  @@index([provider, enabled])
+  @@map("agent_provider_configs")
+}
+
+model AgentProfile {
+  id               String               @id @default(uuid())
+  name             String
+  provider         String
+  providerConfigId String?              @map("provider_config_id")
+  accessLevel      String               @default("observe") @map("access_level")
+  workspaceId      String               @default("default") @map("workspace_id")
+  model            String?
+  systemPrompt     String               @default("") @map("system_prompt")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+  providerConfig   AgentProviderConfig? @relation(fields: [providerConfigId], references: [id], onDelete: SetNull)
+  runs             AgentRun[]
+
+  @@index([workspaceId, provider])
+  @@map("agent_profiles")
+}
+
+model AgentRun {
+  id                String            @id @default(uuid())
+  profileId         String            @map("profile_id")
+  provider          String
+  status            String            @default("queued")
+  workspaceId       String            @default("default") @map("workspace_id")
+  correlationId     String            @unique @map("correlation_id")
+  inputJson         String            @default("{}") @map("input_json")
+  outputJson        String?           @map("output_json")
+  usageJson         String?           @map("usage_json")
+  providerSessionId String?           @map("provider_session_id")
+  errorJson         String?           @map("error_json")
+  startedAt         DateTime?         @map("started_at")
+  finishedAt        DateTime?         @map("finished_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  profile           AgentProfile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  messages          AgentMessage[]
+  artifacts         AgentArtifact[]
+  permissionGrants  PermissionGrant[]
+
+  @@index([status, createdAt])
+  @@index([profileId, createdAt])
+  @@map("agent_runs")
+}
+
+model AgentMessage {
+  id           String   @id @default(uuid())
+  runId        String   @map("run_id")
+  role         String
+  content      String
+  metadataJson String   @default("{}") @map("metadata_json")
+  createdAt    DateTime @default(now()) @map("created_at")
+  run          AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, createdAt])
+  @@map("agent_messages")
+}
+
+model AgentArtifact {
+  id           String   @id @default(uuid())
+  runId        String   @map("run_id")
+  kind         String
+  name         String
+  content      String?
+  path         String?
+  metadataJson String   @default("{}") @map("metadata_json")
+  createdAt    DateTime @default(now()) @map("created_at")
+  run          AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, createdAt])
+  @@map("agent_artifacts")
+}
+
+model PermissionGrant {
+  id                String   @id @default(uuid())
+  runId             String   @map("run_id")
+  capability        String
+  resource          String
+  decision          String
+  decidedBy         String   @map("decided_by")
+  approvalRequestId String?  @map("approval_request_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  run               AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, capability])
+  @@map("agent_permission_grants")
 }

@@ -14,6 +14,7 @@ import {
 } from './desktopRuntime'
 import { OAUTH_ENDPOINTS, runOAuthFlow } from './oauthFlow'
 import { getDefaultClientId } from './oauthDefaults'
+import { registerAgentRuntimeIpc } from './agentRuntime'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
 // In production (packaged), Electron spawns the standalone server itself.
@@ -29,6 +30,10 @@ let serverProcess: ChildProcess | null = null
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+
+registerAgentRuntimeIpc(ipcMain, (sessionId, event) => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scriptmanager:agents:event', { sessionId, event })
+})
 
 // 16x16 terracotta rounded square, embedded so the tray works without bundled assets.
 const TRAY_ICON_DATA_URL =

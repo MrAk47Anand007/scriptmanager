@@ -237,6 +237,35 @@ Recommended first slice:
 - `electron/preload.ts`
 - `src/types/electron.d.ts`
 
+## Phase 6 implementation — ACP agents with Codex and Claude
+
+Phase 6 work is on `codex/phase-6-acp-agents`, based directly on the committed Phase 5 handoff tip.
+
+Implemented scope:
+
+- Provider-neutral ACP contracts and replayable sessions with Codex and Claude provider identities.
+- Allowlisted Electron provider discovery and lifecycle IPC for `codex-acp` and `claude-agent-acp`; renderer requests cannot inject arbitrary executables.
+- Durable provider configurations, profiles, runs, redacted messages, artifacts, permission records, usage/cost metadata, and correlation IDs.
+- Observe, Develop, and Full access profiles. Commands, writes, Git, secrets, remote actions, and deployment route through Phase 4 approvals; protected actions never consume workspace grants.
+- Agent orchestration with launch, stream persistence, interrupt, resume, recoverable errors, and browser-only launch refusal.
+- Agents workbench with first-connection access selection, provider/profile setup, context folder picker, activity history, transcript, artifacts, usage, interrupt/resume, and desktop-required guidance.
+- Executable workflow `agent` nodes with provider/profile selection, prompt interpolation, structured input, timeout through the existing node policy, artifact output, and approval pause propagation.
+- Fake-provider contract and acceptance coverage proving the same workflow node operates through Codex and Claude identities and pauses protected deployment requests.
+
+Security boundaries:
+
+- Provider credentials are opaque `secret://` vault references; agent-specific plaintext credential storage is rejected.
+- Browser mode can inspect durable run history but cannot launch, interrupt, or resume a local provider.
+- Provider processes run only in Electron and are restricted to the two allowlisted ACP adapter executable names.
+- Transcripts, artifacts, run inputs/errors, approvals, and usage records use durable correlation and redaction paths.
+
+Known live-validation limits:
+
+- Automated tests use deterministic fake providers. A live installed `codex-acp` and `claude-agent-acp` round trip is not recorded on this machine.
+- Manual visual QA of the Agents workbench in a running Electron window is not recorded.
+
+Next phase after preserving the verified Phase 6 completion commit: Phase 7 Git-backed projects. Branch from the Phase 6 tip, not `main`, so repository actions inherit agent policy, approvals, vault references, and audit correlation.
+
 ## Phase 5 implementation — shared encrypted secret vault
 
 Phase 5 work is on `codex/phase-5-secret-vault`, based directly on committed Phase 4 commit `87506bd`.

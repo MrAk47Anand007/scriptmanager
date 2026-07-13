@@ -35,6 +35,9 @@ export const productionWorkflowAdapters: WorkflowAdapters = {
     return { remoteExecutionId: completed.id, exitCode: completed.exitCode }
   },
   async sendNotification(config) { return { queued: true, channel: config.channel, message: config.message } },
+  async runAgent() {
+    return { status: 'waiting_approval', output: { desktopHostRequired: true, message: 'Open ScriptManager Desktop to run this agent workflow node.' } }
+  },
 }
 
 export async function processWorkflowQueueOnce(workerId = `server-${process.pid}`) {

@@ -31,6 +31,11 @@ function delay(durationMs: number, signal?: AbortSignal) {
   })
 }
 
+function renderPrompt(template: string, input: unknown) {
+  const values = input && typeof input === 'object' ? input as Record<string, unknown> : {}
+  return template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_match, key: string) => String(values[key] ?? ''))
+}
+
 export async function executeWorkflowNode(node: WorkflowNode, input: unknown, adapters: WorkflowAdapters, signal?: AbortSignal): Promise<WorkflowNodeResult> {
   let output: unknown
   switch (node.type) {
@@ -47,7 +52,11 @@ export async function executeWorkflowNode(node: WorkflowNode, input: unknown, ad
     case 'approval': return { status: 'waiting_approval', output: { prompt: node.config.prompt, input } }
     case 'parallel':
     case 'join': output = input; break
-    case 'agent': throw new UnsupportedWorkflowNodeError('Agent workflow nodes require the Phase 6 ACP runtime')
+    case 'agent': {
+      if (!adapters.runAgent) throw new UnsupportedWorkflowNodeError('Agent workflow nodes require the Phase 6 ACP runtime')
+      const result = await adapters.runAgent({ ...node.config, prompt: renderPrompt(String(node.config.prompt), input) }, input, signal)
+      return result
+    }
     default: throw new UnsupportedWorkflowNodeError(`Unsupported workflow node: ${(node as WorkflowNode).type}`)
   }
   return { status: 'succeeded', output }

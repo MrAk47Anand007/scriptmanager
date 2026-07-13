@@ -31,6 +31,9 @@ function validateNodeConfig(type: WorkflowNodeType, config: Record<string, unkno
   if (type === 'delay' && (!Number.isInteger(config.durationMs) || (config.durationMs as number) < 0)) {
     throw new WorkflowSchemaError(`${path}.durationMs must be a non-negative integer`)
   }
+  if (type === 'agent' && config.provider !== undefined && config.provider !== 'codex' && config.provider !== 'claude') {
+    throw new WorkflowSchemaError(`${path}.provider must be codex or claude`)
+  }
 }
 
 function parseNode(value: unknown, index: number): WorkflowNode {
