@@ -9,8 +9,10 @@ const projectJson = (p: any) => ({
   created_at: p.createdAt.toISOString(), updated_at: p.updatedAt.toISOString(),
 })
 
-export async function GET() {
+export async function GET(req: Request) {
+  const workspaceId = (req as Request | undefined)?.headers.get('x-scriptmanager-workspace-id') ?? 'default'
   const projects = await prisma.project.findMany({
+    where: { workspaceId },
     orderBy: { name: 'asc' },
     include: {
       collections: { select: { id: true } }
@@ -21,6 +23,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const workspaceId = req.headers.get('x-scriptmanager-workspace-id') ?? 'default'
   const { name, description, environment, color, repository_root, default_branch, remote_url, workspace_policy } = await req.json()
 
   if (!name?.trim()) {
@@ -32,6 +35,7 @@ export async function POST(req: Request) {
 
   const project = await prisma.project.create({
     data: {
+      workspaceId,
       name: name.trim(),
       description: description ?? '',
       environment: env,

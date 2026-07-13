@@ -9,6 +9,7 @@ datasource db {
 
 model Script {
   id                      String    @id @default(uuid())
+  workspaceId             String    @default("default") @map("workspace_id")
   name                    String
   filename                String
   sourcePath              String?   @map("source_path")
@@ -145,17 +146,18 @@ model StorageProvider {
 }
 
 model Project {
-  id          String   @id @default(uuid())
-  name        String
-  description String   @default("")
-  environment String   @default("development")
-  color       String   @default("#6366f1")
-  repositoryRoot String? @map("repository_root")
-  defaultBranch  String  @default("main") @map("default_branch")
-  remoteUrl      String? @map("remote_url")
-  workspacePolicy String @default("{}") @map("workspace_policy")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(uuid())
+  workspaceId     String   @default("default") @map("workspace_id")
+  name            String
+  description     String   @default("")
+  environment     String   @default("development")
+  color           String   @default("#6366f1")
+  repositoryRoot  String?  @map("repository_root")
+  defaultBranch   String   @default("main") @map("default_branch")
+  remoteUrl       String?  @map("remote_url")
+  workspacePolicy String   @default("{}") @map("workspace_policy")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   collections    Collection[]
   serverProfiles ServerProfile[]
@@ -167,6 +169,7 @@ model Project {
 
 model ServerProfile {
   id              String   @id @default(uuid())
+  workspaceId     String   @default("default") @map("workspace_id")
   name            String
   host            String
   port            Int      @default(22)
@@ -343,6 +346,7 @@ model ExecutionEvent {
 
 model Workflow {
   id               String            @id @default(uuid())
+  workspaceId      String            @default("default") @map("workspace_id")
   name             String
   description      String            @default("")
   draftDefinition  String            @map("draft_definition")
@@ -656,6 +660,7 @@ model AgentRun {
   provider          String
   status            String            @default("queued")
   workspaceId       String            @default("default") @map("workspace_id")
+  initiatedBy       String            @default("local-admin") @map("initiated_by")
   correlationId     String            @unique @map("correlation_id")
   inputJson         String            @default("{}") @map("input_json")
   outputJson        String?           @map("output_json")
@@ -713,8 +718,120 @@ model PermissionGrant {
   decidedBy         String   @map("decided_by")
   approvalRequestId String?  @map("approval_request_id")
   createdAt         DateTime @default(now()) @map("created_at")
+  revokedAt         DateTime? @map("revoked_at")
   run               AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@index([runId, capability])
   @@map("agent_permission_grants")
+}
+
+model User {
+  id           String                @id @default(uuid())
+  email        String                @unique
+  name         String
+  status       String                @default("active")
+  passwordHash String?               @map("password_hash")
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @updatedAt @map("updated_at")
+  memberships  Membership[]
+  sessions     UserSession[]
+  invitations  WorkspaceInvitation[] @relation("InvitedBy")
+
+  @@map("users")
+}
+
+model Workspace {
+  id          String                @id @default(uuid())
+  name        String
+  slug        String                @unique
+  policyJson  String                @default("{}") @map("policy_json")
+  createdBy   String                @map("created_by")
+  createdAt   DateTime              @default(now()) @map("created_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
+  memberships Membership[]
+  roles       Role[]
+  invitations WorkspaceInvitation[]
+  sessions    UserSession[]
+
+  @@map("workspaces")
+}
+
+model Membership {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  workspaceId String    @map("workspace_id")
+  roleId      String    @map("role_id")
+  status      String    @default("active")
+  joinedAt    DateTime  @default(now()) @map("joined_at")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role        Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId, status])
+  @@map("memberships")
+}
+
+model Role {
+  id          String                @id @default(uuid())
+  workspaceId String                @map("workspace_id")
+  key         String
+  name        String
+  description String                @default("")
+  preset      Boolean               @default(false)
+  createdAt   DateTime              @default(now()) @map("created_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
+  workspace   Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  permissions RolePermission[]
+  memberships Membership[]
+  invitations WorkspaceInvitation[]
+
+  @@unique([workspaceId, key])
+  @@map("roles")
+}
+
+model RolePermission {
+  id         String @id @default(uuid())
+  roleId     String @map("role_id")
+  permission String
+  role       Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permission])
+  @@map("role_permissions")
+}
+
+model WorkspaceInvitation {
+  id          String    @id @default(uuid())
+  workspaceId String    @map("workspace_id")
+  email       String
+  roleId      String    @map("role_id")
+  tokenHash   String    @unique @map("token_hash")
+  status      String    @default("pending")
+  invitedById String    @map("invited_by_id")
+  expiresAt   DateTime  @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role        Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  invitedBy   User      @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, status])
+  @@map("workspace_invitations")
+}
+
+model UserSession {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  workspaceId String    @map("workspace_id")
+  tokenHash   String    @unique @map("token_hash")
+  userAgent   String?   @map("user_agent")
+  ipAddress   String?   @map("ip_address")
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, workspaceId, revokedAt])
+  @@map("user_sessions")
 }

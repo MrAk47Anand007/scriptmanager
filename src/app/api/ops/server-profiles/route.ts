@@ -34,8 +34,10 @@ function serializeProfile(p: {
     }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+    const workspaceId = (req as Request | undefined)?.headers.get('x-scriptmanager-workspace-id') ?? 'default'
     const profiles = await prisma.serverProfile.findMany({
+        where: { workspaceId },
         orderBy: { name: 'asc' },
     })
 
@@ -43,6 +45,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+    const workspaceId = req.headers.get('x-scriptmanager-workspace-id') ?? 'default'
     const body = await req.json()
     const { name, host, port, username, auth_method, secret, key_path, project_id, notes } = body
 
@@ -59,12 +62,13 @@ export async function POST(req: Request) {
     const profileId = randomUUID()
     let encryptedSecretJson: string | null = null
     if (secret) {
-        encryptedSecretJson = await storeResourceSecret(prisma, { resourceType: 'server-profile', resourceId: profileId, field: 'password', name: `ops:${profileId}:password` }, secret)
+        encryptedSecretJson = await storeResourceSecret(prisma, { resourceType: 'server-profile', resourceId: profileId, field: 'password', name: `ops:${profileId}:password`, workspaceId }, secret, req.headers.get('x-scriptmanager-user-id') ?? 'current-user')
     }
 
     const profile = await prisma.serverProfile.create({
         data: {
             id: profileId,
+            workspaceId,
             name: name.trim(),
             host: host.trim(),
             port: port ?? 22,

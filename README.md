@@ -499,6 +499,15 @@ ScriptManager uses **SQLite** via Prisma with the following models:
 - **`ScriptVersion`** — Snapshot of script content at save time. Keeps last 10 per script.
 - **`ScriptTemplate`** — Reusable starter templates (built-in and user-created).
 - **`Setting`** — Key/value store for global application settings.
+- **`User`**, **`Workspace`**, and **`Membership`** — Optional multi-user identity and workspace tenancy. Local desktop installs bootstrap one administrator-owned default workspace.
+- **`Role`** / **`RolePermission`** — Server-enforced `resource:action` permissions with owner, admin, developer, operator, approver, and viewer presets plus custom roles.
+- **`WorkspaceInvitation`** / **`UserSession`** — Expiring invitations and hashed, expiring, individually revocable sessions.
+
+### Workspace access and RBAC
+
+Authenticated API requests are checked in the Node middleware against the current membership before protected routes run. Script, workflow, secret, agent, approval, Ops, and Git resources are workspace-scoped; ID-based access rejects a resource owned by another workspace. Agent actions additionally intersect the initiating user's permissions, the selected agent access profile, workspace policy, and protected-action approval rules.
+
+Workspace owners and authorized administrators can manage members, invitations, custom roles, active sessions, reusable approval/agent grants, and workspace audit history from **Settings → Workspace Access**.
 
 ---
 

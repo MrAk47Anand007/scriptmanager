@@ -7,22 +7,23 @@ type Database = PrismaClient
 
 export function createWorkflowRepository(database: Database) {
   return {
-    listWorkflows() {
-      return database.workflow.findMany({ orderBy: { updatedAt: 'desc' }, include: { _count: { select: { versions: true, runs: true } } } })
+    listWorkflows(workspaceId = 'default') {
+      return database.workflow.findMany({ where: { workspaceId }, orderBy: { updatedAt: 'desc' }, include: { _count: { select: { versions: true, runs: true } } } })
     },
 
     getWorkflow(id: string) {
       return database.workflow.findUnique({ where: { id }, include: { versions: { orderBy: { version: 'desc' } }, triggers: true } })
     },
 
-    async createDraft(input: { name: string; description?: string; definition: WorkflowDefinition; projectId?: string | null }) {
+    async createDraft(input: { name: string; description?: string; definition: WorkflowDefinition; projectId?: string | null; workspaceId?: string }) {
       const definition = parseWorkflowDefinition(input.definition)
+      const workspaceId = input.workspaceId ?? 'default'
       if (input.projectId) {
-        const project = await database.project.findUnique({ where: { id: input.projectId } })
+        const project = await database.project.findFirst({ where: { id: input.projectId, workspaceId } })
         if (!project?.repositoryRoot) throw new Error('Selected project is not connected to a repository')
       }
       return database.workflow.create({
-        data: { name: input.name, description: input.description ?? '', draftDefinition: JSON.stringify(definition), projectId: input.projectId },
+        data: { name: input.name, description: input.description ?? '', draftDefinition: JSON.stringify(definition), projectId: input.projectId, workspaceId },
       })
     },
 

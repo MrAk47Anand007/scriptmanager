@@ -42,24 +42,30 @@ function sign(data: string): string {
   return crypto.createHmac('sha256', SESSION_SECRET).update(data).digest('base64url')
 }
 
-export function createSessionToken(): string {
+export type SessionPayload = { expiry: number; userId?: string; workspaceId?: string; sessionId?: string }
+
+export function createSessionToken(identity: Omit<SessionPayload, 'expiry'> = {}): string {
   const expiry = Date.now() + SESSION_TTL_MS
-  const payload = Buffer.from(JSON.stringify({ expiry })).toString('base64url')
+  const payload = Buffer.from(JSON.stringify({ expiry, ...identity })).toString('base64url')
   const sig = sign(payload)
   return `${payload}.${sig}`
 }
 
 export function validateSessionToken(token: string | undefined): boolean {
-  if (!token) return false
+  return parseSessionToken(token) !== null
+}
+
+export function parseSessionToken(token: string | undefined): SessionPayload | null {
+  if (!token) return null
   try {
     const [payload, sig] = token.split('.')
-    if (!payload || !sig) return false
+    if (!payload || !sig) return null
     const expectedSig = sign(payload)
-    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) return false
-    const { expiry } = JSON.parse(Buffer.from(payload, 'base64url').toString())
-    return Date.now() < expiry
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) return null
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString()) as SessionPayload
+    return Date.now() < parsed.expiry ? parsed : null
   } catch {
-    return false
+    return null
   }
 }
 

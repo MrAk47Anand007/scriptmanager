@@ -10,13 +10,16 @@ import { v4 as uuidv4 } from 'uuid'
 import { cache } from '@/lib/cache'
 import { sanitizeScriptFilename } from '@/lib/executionSafety'
 
-export async function GET() {
-  const cachedScripts = await cache.get('all_scripts')
+export async function GET(req: Request) {
+  const workspaceId = (req as Request | undefined)?.headers.get('x-scriptmanager-workspace-id') ?? 'default'
+  const cacheKey = `all_scripts:${workspaceId}`
+  const cachedScripts = await cache.get(cacheKey)
   if (cachedScripts) {
     return NextResponse.json(cachedScripts)
   }
 
   const scripts = await prisma.script.findMany({
+    where: { workspaceId },
     orderBy: { name: 'asc' },
     include: { collection: true, tags: { include: { tag: true } } }
   })
@@ -47,15 +50,16 @@ export async function GET() {
     source_path: s.sourcePath,
   }))
 
-  await cache.set('all_scripts', result, 60 * 5) // Cache for 5 mins
+  await cache.set(cacheKey, result, 60 * 5) // Cache for 5 mins
 
   return NextResponse.json(result)
 }
 
 export async function POST(req: Request) {
+  const workspaceId = req.headers.get('x-scriptmanager-workspace-id') ?? 'default'
   const data = await req.json()
   // Invalidate cache on create/update
-  await cache.del('all_scripts')
+  await cache.del(`all_scripts:${workspaceId}`)
 
   const { id, name, description, content, sync_to_gist, language, interpreter, parameters, timeout_ms, collection_id } = data
 
@@ -71,7 +75,7 @@ export async function POST(req: Request) {
 
   await ensureScriptsDirExists()
 
-  let script = id ? await prisma.script.findUnique({ where: { id }, include: { collection: true } }) : null
+  let script = id ? await prisma.script.findFirst({ where: { id, workspaceId }, include: { collection: true } }) : null
 
   if (script) {
     // Update existing script
@@ -106,6 +110,7 @@ export async function POST(req: Request) {
     script = await prisma.script.update({
       where: { id },
       data: {
+        workspaceId,
         name,
         description: description !== undefined ? description : script.description,
         language: language ?? script.language,

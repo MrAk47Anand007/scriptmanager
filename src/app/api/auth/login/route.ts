@@ -1,6 +1,9 @@
+import crypto from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { verifyPassword, hashPassword, createSessionToken, SESSION_COOKIE } from '@/lib/auth'
+import { ensureDefaultWorkspace } from '@/lib/rbac/bootstrap'
+import { hashSessionToken } from '@/lib/rbac/requestContext'
 
 function isLoopbackValue(value: string | null | undefined): boolean {
   if (!value) return false
@@ -74,7 +77,14 @@ export async function POST(req: Request) {
     }
   }
 
-  const token = createSessionToken()
+  const identity = await ensureDefaultWorkspace(prisma)
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+  const session = await prisma.userSession.create({ data: {
+    ...identity, tokenHash: `pending-${crypto.randomUUID()}`, expiresAt,
+    userAgent: req.headers.get('user-agent'), ipAddress: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? req.headers.get('x-real-ip'),
+  } })
+  const token = createSessionToken({ ...identity, sessionId: session.id })
+  await prisma.userSession.update({ where: { id: session.id }, data: { tokenHash: hashSessionToken(token) } })
   const res = NextResponse.json({ ok: true })
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
