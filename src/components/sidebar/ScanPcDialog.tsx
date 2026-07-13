@@ -159,7 +159,7 @@ export function ScanPcDialog({ open, onOpenChange }: ScanPcDialogProps) {
 
     return (
         <Dialog open={open} onOpenChange={(nextOpen) => !isImporting && step !== 'scanning' && onOpenChange(nextOpen)}>
-            <DialogContent className="sm:max-w-xl">
+            <DialogContent className="w-full max-w-[min(42rem,calc(100vw-2rem))]">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <ScanSearch className="h-4 w-4 text-blue-500" />
@@ -241,7 +241,7 @@ export function ScanPcDialog({ open, onOpenChange }: ScanPcDialogProps) {
                 )}
 
                 {step === 'results' && scanResult && (
-                    <div className="flex flex-col gap-3 py-2 text-[13px]">
+                    <div className="flex min-w-0 flex-col gap-3 py-2 text-[13px]">
                         <div className="text-slate-600 dark:text-slate-300">
                             Found {scanResult.files.length} script{scanResult.files.length === 1 ? '' : 's'} in {groupedFiles.length} folder{groupedFiles.length === 1 ? '' : 's'}
                             {scanResult.truncated && (
@@ -251,26 +251,26 @@ export function ScanPcDialog({ open, onOpenChange }: ScanPcDialogProps) {
                             )}
                         </div>
 
-                        <div className="max-h-64 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-700">
+                        <div className="max-h-64 overflow-x-hidden overflow-y-auto rounded-md border border-slate-200 dark:border-slate-700">
                             {groupedFiles.map(([dir, files]) => {
                                 const allChecked = files.every((file) => selectedPaths.has(file.path));
                                 return (
                                     <div key={dir} className="border-b border-slate-100 last:border-b-0 dark:border-slate-800">
-                                        <div className="flex items-center gap-2 bg-slate-50 px-2 py-1.5 dark:bg-slate-900">
+                                        <div className="flex min-w-0 items-center gap-2 bg-slate-50 px-2 py-1.5 dark:bg-slate-900">
                                             <Checkbox
                                                 checked={allChecked}
                                                 onCheckedChange={(checked) => toggleGroup(files, Boolean(checked))}
                                             />
-                                            <span className="truncate font-medium text-slate-700 dark:text-slate-200" title={dir}>{dir}</span>
+                                            <span className="min-w-0 truncate font-medium text-slate-700 dark:text-slate-200" title={dir}>{dir}</span>
                                             <span className="ml-auto shrink-0 text-xs text-slate-400">{files.length}</span>
                                         </div>
                                         {files.map((file) => (
-                                            <div key={file.path} className="flex items-center gap-2 px-2 py-1 pl-7">
+                                            <div key={file.path} className="flex min-w-0 items-center gap-2 px-2 py-1 pl-7">
                                                 <Checkbox
                                                     checked={selectedPaths.has(file.path)}
                                                     onCheckedChange={(checked) => togglePath(file.path, Boolean(checked))}
                                                 />
-                                                <span className="truncate text-slate-600 dark:text-slate-300" title={file.path}>{file.name}</span>
+                                                <span className="min-w-0 truncate text-slate-600 dark:text-slate-300" title={file.path}>{file.name}</span>
                                             </div>
                                         ))}
                                     </div>
