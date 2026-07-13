@@ -3,13 +3,14 @@
 ## Truth source
 
 - Repository: `scriptmanager`
-- Active worktree: `.worktrees/phase-1-quality-security`
-- Active branch: `codex/phase-2-workflow-engine`
+- Active worktree: `.worktrees/phase-4-notifications-approvals`
+- Active branch: `codex/phase-4-notifications-approvals`
 - Base commit on `main`: `b204cda`
-- Current head before this handoff update: `5b23cf8` (`feat: complete phase 2 workflow platform`)
-- Integration state: committed locally; not merged into `main`, pushed, or opened as a pull request.
+- Phase 4 base/head commit: `6d6cc3c` (`feat: add phase 3 execution observability`)
+- Working-tree state: Phase 4 implementation and documentation are present but uncommitted.
+- Integration state: not merged, pushed, or opened as a pull request.
 
-Use this feature branch as the source of truth for Phase 1 and Phase 2. The root `main` checkout does not contain these changes.
+Use this worktree as the source of truth for Phases 1–4. The root `main` checkout does not contain these changes, and the Phase 4 files exist only as uncommitted changes in this worktree.
 
 ## Completed phases
 
@@ -85,7 +86,7 @@ Prisma 6.19.2's Windows schema engine failed with only `Schema engine error` whe
 
 Do not treat a failed fresh-file `prisma db push` on this machine as proof that the Phase 2 migration is invalid. Before release or CI handoff, reproduce database creation outside this Windows/OneDrive environment or investigate the local Prisma engine/antivirus/file-lock interaction.
 
-## Current git state and integration choices
+## Historical Phase 2 integration choices
 
 The completed branch is intentionally preserved. No merge or remote mutation was performed.
 
@@ -97,7 +98,7 @@ Available next actions:
 
 The root `main` checkout was previously ahead of and behind `origin/main`, so inspect and reconcile its state before choosing a local merge. Do not overwrite unrelated root or `.claude/worktrees` changes.
 
-## Recommended next phase
+## Historical recommendation after Phase 2
 
 Proceed to Phase 3: unified execution dashboard and observability.
 
@@ -111,7 +112,7 @@ Recommended first slice:
 
 Phase 3 should deliver active-run visibility, failure trends, schedule health, redacted event timelines, node attempts, correlation IDs, cancellation, and targeted retry actions. Preserve the Phase 2 runtime contracts rather than duplicating execution-specific state in the dashboard.
 
-## Files to read first next session
+## Historical Phase 3 starting files
 
 - `docs/superpowers/handoffs/2026-07-13-session-handoff.md`
 - `docs/superpowers/plans/2026-07-13-phase2-workflow-engine-builder.md`
@@ -123,7 +124,7 @@ Phase 3 should deliver active-run visibility, failure trends, schedule health, r
 - `src/components/workflows/WorkflowBuilder.tsx`
 - `prisma/schema.prisma`
 
-## Honest completion status
+## Historical completion status after Phase 2
 
 - Phase 1 code complete: yes.
 - Phase 1 automated verification complete: yes.
@@ -156,3 +157,81 @@ Final verification from the completed Phase 3 state:
 - Route integration coverage proves dashboard aggregation, redaction across run/node/event values, and targeted retry preserving a completed node.
 
 Known validation limit: manual visual QA of the execution dashboard in a running Electron window was not performed in this implementation session.
+
+## Phase 4 implementation — notifications and approval inbox
+
+Phase 4 work is on `codex/phase-4-notifications-approvals`, based directly on the verified Phase 3 commit `6d6cc3c`.
+
+Implemented scope:
+
+- Durable notification channels, rules, deliveries, approval requests, decisions, and scoped grants with migration coverage.
+- Shared approval policy and service with expiry, protected-action restrictions, immutable decisions, execution-event audit, and workflow pause/resume integration.
+- Exactly four decisions: `allow_once`, `allow_run`, `allow_workspace`, and `reject`; persistent grants retain actor, workspace, run, capability, resource, and policy-version scope.
+- Event matching, bounded templates, redaction, throttling, event/rule deduplication, retry audit state, and provider-neutral adapters for desktop, generic webhook, Slack, SMTP, and Teams.
+- Approval list/detail/decision APIs plus notification channel, rule, and delivery-history APIs.
+- Workbench approval inbox with risk, actor, exact operation, affected resource, expiry, preview, history, and decision controls.
+- Notification settings surface and typed Electron native-notification/deep-link bridge.
+- Existing workflow approval endpoint now delegates to the shared approval service instead of bypassing its audit and scope rules.
+
+Final verification evidence from the complete Phase 4 working tree:
+
+- Vitest: 30 test files passed, 84 tests passed, 0 failures.
+- Application TypeScript: `npx tsc --noEmit` passed.
+- Electron TypeScript: `npx tsc -p electron/tsconfig.json --noEmit` passed.
+- Next.js production build passed and included all approval and notification routes.
+- Diff hygiene: `git diff --check` passed; Git emitted line-ending conversion notices only.
+
+Known validation limits:
+
+- Manual visual QA in a running Electron window is not recorded.
+- Live delivery to external Slack, SMTP, Teams, and webhook endpoints is not recorded; adapters are covered through deterministic injected transports and delivery-audit integration tests.
+
+## Current Phase 4 git and integration state
+
+- Branch: `codex/phase-4-notifications-approvals`.
+- Worktree: `.worktrees/phase-4-notifications-approvals`.
+- Base: verified Phase 3 commit `6d6cc3c`.
+- Phase 4 changes: implemented and automatically verified, but not committed.
+- Merge, push, and pull request: not performed.
+- Root `main` remains a separate checkout with previously observed unrelated state; do not merge or overwrite it without inspecting it again.
+
+Before switching branches, removing this worktree, or starting Phase 5, first commit the intentional Phase 4 source, migration, tests, plan, README, and this handoff together.
+
+## Honest completion status after Phase 4
+
+- Phase 1 code and automated verification complete: yes.
+- Phase 2 code and automated verification complete: yes.
+- Phase 3 code and automated verification complete: yes.
+- Phase 4 code complete: yes, in the current uncommitted working tree.
+- Phase 4 automated verification complete: yes.
+- Phase 4 manual Electron visual QA complete: no.
+- Live Slack, SMTP, Teams, and generic webhook validation complete: no.
+- Phase 4 committed, merged, pushed, or opened as a PR: no.
+- Fresh SQLite creation verified on this Windows/OneDrive machine: no; the previously documented Prisma schema-engine environment limitation remains.
+
+## Recommended next phase
+
+After committing and preserving Phase 4, proceed to Phase 5: shared encrypted secret vault.
+
+Recommended first slice:
+
+1. Branch Phase 5 from the committed Phase 4 head, not from `main` or the Phase 3 commit.
+2. Add `Secret`, `SecretVersion`, `SecretBinding`, and `SecretAccessEvent` models that persist ciphertext and metadata only.
+3. Define a provider-neutral `SecretStore` interface with Electron OS-backed and server master-key implementations.
+4. Add redaction regression tests before migrating script environment values, API credentials, SSH credentials, storage-provider credentials, workflow references, or future ACP configuration.
+5. Preserve opaque secret references across workflow definitions, notification configuration, logs, Redux, API responses, and approval previews.
+
+## Files to read first next session
+
+- `docs/superpowers/handoffs/2026-07-13-session-handoff.md`
+- `docs/superpowers/plans/2026-07-13-phase4-notifications-approvals.md`
+- `docs/superpowers/plans/2026-07-11-scriptmanager-platform-master-roadmap.md`
+- `prisma/schema.prisma`
+- `src/lib/approvals/service.ts`
+- `src/lib/approvals/policy.ts`
+- `src/lib/notifications/dispatcher.ts`
+- `src/lib/notifications/adapters.ts`
+- `src/lib/execution/eventRepository.ts`
+- `src/lib/storageEncryption.ts`
+- `electron/preload.ts`
+- `src/types/electron.d.ts`

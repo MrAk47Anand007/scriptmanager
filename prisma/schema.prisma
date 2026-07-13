@@ -424,3 +424,108 @@ model WorkflowTrigger {
   @@index([workflowId, enabled])
   @@map("workflow_triggers")
 }
+
+model NotificationChannel {
+  id          String   @id @default(uuid())
+  name        String
+  kind        String
+  enabled     Boolean  @default(true)
+  configJson  String   @default("{}") @map("config_json")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  rules       NotificationRule[]
+  deliveries  NotificationDelivery[]
+  @@map("notification_channels")
+}
+
+model NotificationRule {
+  id          String   @id @default(uuid())
+  channelId   String   @map("channel_id")
+  name        String
+  enabled     Boolean  @default(true)
+  eventTypes  String   @map("event_types")
+  filterJson  String   @default("{}") @map("filter_json")
+  templateJson String  @default("{}") @map("template_json")
+  throttleSeconds Int  @default(0) @map("throttle_seconds")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  channel     NotificationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  deliveries  NotificationDelivery[]
+  @@index([enabled, channelId])
+  @@map("notification_rules")
+}
+
+model NotificationDelivery {
+  id             String   @id @default(uuid())
+  channelId      String   @map("channel_id")
+  ruleId         String?  @map("rule_id")
+  eventId        String?  @map("event_id")
+  dedupeKey      String   @unique @map("dedupe_key")
+  status         String   @default("pending")
+  attemptCount   Int      @default(0) @map("attempt_count")
+  payloadJson    String   @default("{}") @map("payload_json")
+  lastError      String?  @map("last_error")
+  nextAttemptAt  DateTime? @map("next_attempt_at")
+  deliveredAt    DateTime? @map("delivered_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  channel        NotificationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  rule           NotificationRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  @@index([status, nextAttemptAt])
+  @@map("notification_deliveries")
+}
+
+model ApprovalRequest {
+  id              String   @id @default(uuid())
+  status          String   @default("pending")
+  actorType       String   @map("actor_type")
+  actorId         String   @map("actor_id")
+  actorName       String?  @map("actor_name")
+  workspaceId     String   @map("workspace_id")
+  runId           String?  @map("run_id")
+  nodeId          String?  @map("node_id")
+  capability      String
+  operation       String
+  resource        String
+  risk            String
+  reason          String   @default("")
+  previewJson     String   @default("{}") @map("preview_json")
+  protectedAction Boolean  @default(false) @map("protected_action")
+  policyVersion   Int      @default(1) @map("policy_version")
+  correlationId   String   @map("correlation_id")
+  expiresAt       DateTime @map("expires_at")
+  decidedAt       DateTime? @map("decided_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  decisions       ApprovalDecision[]
+  @@index([status, expiresAt])
+  @@index([runId, nodeId])
+  @@map("approval_requests")
+}
+
+model ApprovalDecision {
+  id          String   @id @default(uuid())
+  requestId   String   @map("request_id")
+  decision    String
+  decidedBy   String   @map("decided_by")
+  note        String   @default("")
+  createdAt   DateTime @default(now()) @map("created_at")
+  request     ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  @@index([requestId, createdAt])
+  @@map("approval_decisions")
+}
+
+model ApprovalGrant {
+  id            String   @id @default(uuid())
+  actorId       String   @map("actor_id")
+  workspaceId   String   @map("workspace_id")
+  runId         String?  @map("run_id")
+  capability    String
+  resource      String
+  policyVersion Int      @default(1) @map("policy_version")
+  expiresAt     DateTime? @map("expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+  createdBy     String   @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  @@index([actorId, workspaceId, capability])
+  @@map("approval_grants")
+}

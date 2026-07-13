@@ -9,6 +9,13 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
   readClipboardText: () => ipcRenderer.invoke('scriptmanager:read-text') as Promise<string>,
   setNotificationsEnabled: (enabled: boolean) =>
     ipcRenderer.invoke('scriptmanager:set-notifications-enabled', enabled) as Promise<boolean>,
+  showNotification: (payload: { title: string; body: string; deepLink?: string }) =>
+    ipcRenderer.invoke('scriptmanager:show-notification', payload) as Promise<boolean>,
+  onNotificationDeepLink: (listener: (deepLink: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, deepLink: string) => listener(deepLink)
+    ipcRenderer.on('scriptmanager:notification-deep-link', handler)
+    return () => ipcRenderer.removeListener('scriptmanager:notification-deep-link', handler)
+  },
   oauthConnect: (payload: { provider: 'gdrive' | 'onedrive'; clientId?: string; fullAccess?: boolean }) =>
     ipcRenderer.invoke('scriptmanager:oauth-connect', payload) as Promise<{
       ok: boolean

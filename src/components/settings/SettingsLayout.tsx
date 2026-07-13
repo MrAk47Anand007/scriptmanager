@@ -5,7 +5,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchSettings } from '@/features/settings/settingsSlice'
 import { selectSettings, selectSettingsStatus, selectSettingsError } from '@/features/settings/selectors'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Loader2, Settings2, Palette, Cloud, Github, Lock, Monitor } from 'lucide-react'
+import { Bell, Loader2, Settings2, Palette, Cloud, Github, Lock, Monitor } from 'lucide-react'
 import { isDesktop } from '@/lib/runtime'
 import { cn } from '@/lib/utils'
 import { GeneralSection } from './GeneralSection'
@@ -14,8 +14,9 @@ import { CloudStorageSection } from './CloudStorageSection'
 import { GitHubGistSection } from './GitHubGistSection'
 import { SecuritySection } from './SecuritySection'
 import { DesktopSection } from './DesktopSection'
+import { NotificationsSection } from './NotificationsSection'
 
-type SectionId = 'general' | 'appearance' | 'cloud-storage' | 'github-gist' | 'security' | 'desktop'
+type SectionId = 'general' | 'appearance' | 'cloud-storage' | 'github-gist' | 'security' | 'notifications' | 'desktop'
 
 const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ className?: string }>; desktopOnly?: boolean }[] = [
     { id: 'general', label: 'General', icon: Settings2 },
@@ -23,6 +24,7 @@ const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ clas
     { id: 'cloud-storage', label: 'Cloud Storage', icon: Cloud },
     { id: 'github-gist', label: 'GitHub Gist', icon: Github },
     { id: 'security', label: 'Security', icon: Lock },
+    { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'desktop', label: 'Desktop', icon: Monitor, desktopOnly: true },
 ]
 
@@ -107,6 +109,7 @@ export const SettingsLayout = () => {
                     {activeSection === 'cloud-storage' && <CloudStorageSection />}
                     {activeSection === 'github-gist' && <GitHubGistSection />}
                     {activeSection === 'security' && <SecuritySection />}
+                    {activeSection === 'notifications' && <NotificationsSection />}
                     {activeSection === 'desktop' && showDesktopSettings && <DesktopSection />}
                 </div>
             </div>

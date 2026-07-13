@@ -27,6 +27,8 @@ declare global {
       copyText: (value: string) => Promise<boolean>
       readClipboardText: () => Promise<string>
       setNotificationsEnabled?: (enabled: boolean) => Promise<boolean>
+      showNotification?: (payload: { title: string; body: string; deepLink?: string }) => Promise<boolean>
+      onNotificationDeepLink?: (listener: (deepLink: string) => void) => () => void
       oauthConnect?: (payload: { provider: 'gdrive' | 'onedrive'; clientId?: string; fullAccess?: boolean }) => Promise<{
         ok: boolean
         refreshToken?: string

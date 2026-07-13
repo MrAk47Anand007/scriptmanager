@@ -5,6 +5,8 @@ import { executeWorkflowNode } from './nodeExecutors'
 import { normalizeExecutionPolicy, nextFailureAction } from './policy'
 import type { WorkflowRepository } from './repository'
 import { parseWorkflowDefinition } from './schema'
+import { createApprovalService } from '@/lib/approvals/service'
+import { prisma } from '@/lib/db'
 
 type ClaimedRun = NonNullable<Awaited<ReturnType<WorkflowRepository['claimNextRun']>>>
 
@@ -63,6 +65,13 @@ export async function runClaimedWorkflow(run: ClaimedRun, repository: WorkflowRe
             await repository.finishNode(run.id, nodeId, attempt, result.status, result.output)
             if (result.status === 'waiting_approval') {
               await repository.setRunStatus(run.id, 'waiting_approval')
+              const existing = await prisma.approvalRequest.findFirst({ where: { runId: run.id, nodeId, status: 'pending' } })
+              if (!existing) await createApprovalService(prisma).create({
+                actorType: 'user', actorId: run.actorId, workspaceId: 'default', runId: run.id, nodeId,
+                capability: 'workflow.continue', operation: String(node.config.prompt), resource: `workflow:${run.workflowId}`,
+                risk: 'medium', reason: 'Workflow approval node', preview: result.output,
+                correlationId: run.correlationId, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+              })
               return
             }
             break

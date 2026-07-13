@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, ipcMain, dialog, OpenDialogOptions, shell, clipboard, Menu, Tray, nativeImage, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, session, ipcMain, dialog, OpenDialogOptions, shell, clipboard, Menu, Tray, nativeImage, Notification, type MenuItemConstructorOptions } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
 import path from 'path'
 import http from 'http'
@@ -701,6 +701,18 @@ app.whenReady().then(() => {
 
 ipcMain.handle('scriptmanager:set-notifications-enabled', (_event, enabled: boolean) => {
   setDesktopNotificationsEnabled(enabled !== false)
+  return true
+})
+
+ipcMain.handle('scriptmanager:show-notification', (_event, payload: { title: string; body: string; deepLink?: string }) => {
+  if (!Notification.isSupported()) return false
+  const deepLink = payload.deepLink?.startsWith('/approvals') ? payload.deepLink : undefined
+  const notification = new Notification({ title: String(payload.title).slice(0, 120), body: String(payload.body).slice(0, 1000) })
+  notification.on('click', () => {
+    showMainWindow()
+    if (deepLink) mainWindow?.webContents.send('scriptmanager:notification-deep-link', deepLink)
+  })
+  notification.show()
   return true
 })
 
