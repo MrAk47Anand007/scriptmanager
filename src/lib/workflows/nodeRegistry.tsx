@@ -2,7 +2,8 @@ import {
   Bell, Bot, Braces, CheckCircle2, Clock3, Code2, GitFork, GitMerge,
   Globe2, ServerCog, Split, type LucideIcon,
 } from 'lucide-react'
-import type { WorkflowNode, WorkflowNodeType } from './types'
+import type { ValidationIssue, WorkflowDefinition, WorkflowNode, WorkflowNodeType } from './types'
+import { validateWorkflowGraph } from './graph'
 
 export type WorkflowNodeCategory = 'triggers' | 'actions' | 'flow' | 'agents' | 'communication' | 'plugins'
 export type InspectorFieldKind = 'text' | 'textarea' | 'number' | 'select' | 'resource' | 'json'
@@ -84,6 +85,17 @@ export function validateNodeConfig(node: WorkflowNode): NodeConfigIssue[] {
     }
   }
   return issues
+}
+
+export function validateWorkflowEditor(definition: WorkflowDefinition): ValidationIssue[] {
+  return [
+    ...validateWorkflowGraph(definition),
+    ...definition.nodes.flatMap((node, index) => validateNodeConfig(node).map((issue) => ({
+      code: issue.code,
+      message: issue.message,
+      path: `nodes[${index}].config.${issue.field}`,
+    }))),
+  ]
 }
 
 const safe = (value: unknown) => typeof value === 'string' && value ? value : undefined

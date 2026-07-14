@@ -1,8 +1,17 @@
 'use client'
-import { Play, Save, Upload } from 'lucide-react'
+import { useEffect } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { publishWorkflow, runWorkflow, saveWorkflow, setValidation } from '@/features/workflows/workflowsSlice'
-import { selectActiveWorkflow, selectWorkflowValidation } from '@/features/workflows/selectors'
-import { validateWorkflowGraph } from '@/lib/workflows/graph'
-import { WorkflowPalette } from './WorkflowPalette'; import { WorkflowCanvas } from './WorkflowCanvas'; import { WorkflowInspector } from './WorkflowInspector'
-export function WorkflowBuilder(){const dispatch=useAppDispatch();const workflow=useAppSelector(selectActiveWorkflow);const issues=useAppSelector(selectWorkflowValidation);const validate=()=>{if(workflow)dispatch(setValidation(validateWorkflowGraph(workflow.definition)))};return <div className="flex h-full flex-col bg-background"><header className="flex h-12 shrink-0 items-center gap-3 border-b border-wb-border px-4"><div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{workflow?.name??'Workflow builder'}</div><div className="text-[10px] text-muted-foreground">{workflow?`${workflow.definition.nodes.length} nodes · ${workflow.publishedVersion?`published v${workflow.publishedVersion}`:'draft'}`:'Select a workflow from the sidebar'}</div></div>{workflow&&<><button onClick={()=>void dispatch(saveWorkflow())} className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs hover:bg-muted"><Save className="h-3.5 w-3.5"/>Save</button><button onClick={()=>{validate();if(validateWorkflowGraph(workflow.definition).length===0)void dispatch(publishWorkflow(workflow.id))}} className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs hover:bg-muted"><Upload className="h-3.5 w-3.5"/>Publish</button><button disabled={!workflow.publishedVersion} onClick={()=>void dispatch(runWorkflow(workflow.id))} className="flex items-center gap-1.5 rounded bg-accent-brand px-3 py-1.5 text-xs text-white disabled:opacity-40"><Play className="h-3.5 w-3.5"/>Run</button></>}</header>{issues.length>0&&<div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-600">{issues.map(i=>i.message).join(' · ')}</div>}<div className="flex min-h-0 flex-1"><WorkflowPalette/><WorkflowCanvas/><WorkflowInspector/></div></div>}
+import { selectActiveWorkflow } from '@/features/workflows/selectors'
+import { setValidation } from '@/features/workflows/workflowsSlice'
+import { validateWorkflowEditor } from '@/lib/workflows/nodeRegistry'
+import { WorkflowCanvas } from './WorkflowCanvas'
+import { WorkflowCommandBar } from './WorkflowCommandBar'
+import { WorkflowInspector } from './WorkflowInspector'
+import { WorkflowValidationPanel } from './WorkflowValidationPanel'
+
+export function WorkflowBuilder() {
+  const dispatch = useAppDispatch()
+  const workflow = useAppSelector(selectActiveWorkflow)
+  useEffect(()=>{if(!workflow)return;const timer=setTimeout(()=>dispatch(setValidation(validateWorkflowEditor(workflow.definition))),180);return()=>clearTimeout(timer)},[dispatch,workflow?.definition])
+  return <div className="flex h-full flex-col bg-background"><WorkflowCommandBar/><WorkflowValidationPanel/><div className="flex min-h-0 flex-1"><WorkflowCanvas/><WorkflowInspector/></div></div>
+}

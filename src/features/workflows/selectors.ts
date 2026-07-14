@@ -1,3 +1,4 @@
+import { createSelector } from '@reduxjs/toolkit'
 import type { RootState } from '@/store/store'
 export const selectWorkflows = (state: RootState) => state.workflows.items
 export const selectActiveWorkflow = (state: RootState) => state.workflows.active
@@ -6,11 +7,6 @@ export const selectWorkflowValidation = (state: RootState) => state.workflows.va
 export const selectWorkflowSelection = (state: RootState) => state.workflows.selectedNodeIds
 export const selectWorkflowViewport = (state: RootState) => state.workflows.viewport
 export const selectWorkflowHistory = (state: RootState) => state.workflows.history
-export const selectWorkflowRequestState = (state: RootState) => ({
-  saveStatus: state.workflows.saveStatus,
-  publishStatus: state.workflows.publishStatus,
-  runStatus: state.workflows.runStatus,
-  error: state.workflows.requestError,
-})
+export const selectWorkflowRequestState = createSelector([(state: RootState)=>state.workflows], (workflows) => ({ saveStatus: workflows.saveStatus, publishStatus: workflows.publishStatus, runStatus: workflows.runStatus, error: workflows.requestError }))
 export const selectWorkflowRuns = (state: RootState) => state.workflows.runs
 export const selectSelectedExecutionId = (state: RootState) => state.workflows.selectedExecutionId

@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
 import React from 'react'
+import '@testing-library/jest-dom/vitest'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { Provider } from 'react-redux'
 import { ReactFlowProvider } from '@xyflow/react'
 import { makeStore } from '@/store/store'
-import { selectWorkflow } from '@/features/workflows/workflowsSlice'
+import { moveNodes, selectNode, selectWorkflow, setValidation } from '@/features/workflows/workflowsSlice'
 import { WorkflowNodeLauncher } from '@/components/workflows/WorkflowNodeLauncher'
 import { WorkflowNode } from '@/components/workflows/WorkflowNode'
 import { WorkflowCanvas } from '@/components/workflows/WorkflowCanvas'
+import { WorkflowInspector } from '@/components/workflows/WorkflowInspector'
+import { WorkflowValidationPanel } from '@/components/workflows/WorkflowValidationPanel'
+import { WorkflowCommandBar } from '@/components/workflows/WorkflowCommandBar'
 
 beforeAll(() => {
   class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -55,5 +59,45 @@ describe('workflow editor components', () => {
     expect(screen.getByTitle('Zoom In')).toBeTruthy()
     expect(screen.getByTitle('Fit View')).toBeTruthy()
     expect(screen.getByText('Wait')).toBeTruthy()
+  })
+
+  it('edits typed node fields and keeps invalid advanced JSON out of Redux', () => {
+    const store = makeStore()
+    store.dispatch(selectWorkflow({ id: 'w', name: 'Flow', publishedVersion: null, definition: {
+      schemaVersion: 1, name: 'Flow', nodes: [{ id: 'wait', type: 'delay', name: 'Wait', config: { durationMs: 1000 } }], edges: [],
+    } }))
+    store.dispatch(selectNode('wait'))
+    render(<Provider store={store}><WorkflowInspector /></Provider>)
+    fireEvent.change(screen.getByLabelText('Duration (ms)'), { target: { value: '2500' } })
+    expect(store.getState().workflows.active!.definition.nodes[0].config.durationMs).toBe(2500)
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced JSON' }))
+    fireEvent.change(screen.getByLabelText('Configuration JSON'), { target: { value: '{bad' } })
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter valid JSON')
+    expect(store.getState().workflows.active!.definition.nodes[0].config).toEqual({ durationMs: 2500 })
+  })
+
+  it('navigates validation issues to their nodes', () => {
+    const store = makeStore()
+    store.dispatch(selectWorkflow({ id: 'w', name: 'Flow', publishedVersion: null, definition: {
+      schemaVersion: 1, name: 'Flow', nodes: [{ id: 'wait', type: 'delay', name: 'Wait', config: { durationMs: 0 } }], edges: [],
+    } }))
+    store.dispatch(setValidation([{ code: 'invalid_config', message: 'Duration must be positive', path: 'nodes[0].config.durationMs' }]))
+    render(<Provider store={store}><WorkflowValidationPanel /></Provider>)
+    fireEvent.click(screen.getByRole('button', { name: /Duration must be positive/ }))
+    expect(store.getState().workflows.selectedNodeId).toBe('wait')
+  })
+
+  it('shows lifecycle state and blocks publish or run when unavailable', () => {
+    const store = makeStore()
+    store.dispatch(selectWorkflow({ id: 'w', name: 'Flow', publishedVersion: null, definition: {
+      schemaVersion: 1, name: 'Flow', nodes: [{ id: 'wait', type: 'delay', name: 'Wait', config: { durationMs: 1000 } }], edges: [],
+    } }))
+    store.dispatch(moveNodes([{ id: 'wait', position: { x: 20, y: 20 } }]))
+    store.dispatch(setValidation([{ code: 'invalid_config', message: 'Fix node', path: 'nodes[0]' }]))
+    render(<Provider store={store}><WorkflowCommandBar /></Provider>)
+    expect(screen.getByText((_, element) => element?.textContent?.startsWith('Unsaved changes ·') === true)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Run workflow' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
   })
 })

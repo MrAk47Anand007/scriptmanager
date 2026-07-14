@@ -31,7 +31,7 @@ export type WorkflowDefinition = {
 }
 
 export type ValidationIssue = {
-  code: 'duplicate_node_id' | 'duplicate_edge_id' | 'missing_source' | 'missing_target' | 'invalid_source_port' | 'cycle'
+  code: 'duplicate_node_id' | 'duplicate_edge_id' | 'missing_source' | 'missing_target' | 'invalid_source_port' | 'cycle' | 'required_config' | 'invalid_config' | 'unsupported_runtime'
   message: string
   path?: string
 }
