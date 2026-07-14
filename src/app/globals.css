@@ -1,3 +1,5 @@
+@import '@xyflow/react/dist/style.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -200,6 +202,20 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.workflow-running-node {
+  animation: workflow-node-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes workflow-node-pulse {
+  50% { box-shadow: 0 0 0 4px hsl(var(--running) / 0.14); }
+}
+
+.react-flow__node:focus-visible .workflow-node,
+.react-flow__handle:focus-visible {
+  outline: 3px solid hsl(var(--ring));
+  outline-offset: 3px;
 }
 
 @media (forced-colors: active) {
