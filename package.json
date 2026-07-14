@@ -4,7 +4,9 @@
   "private": true,
   "description": "A standalone self-hosted script manager - write, run, schedule, and organize scripts",
   "main": "dist-electron/electron/bootstrap.js",
-  "bin": { "sm": "./cli/sm.mjs" },
+  "bin": {
+    "sm": "./cli/sm.mjs"
+  },
   "scripts": {
     "dev": "node ./scripts/dev-server.mjs",
     "build": "npx prisma generate && next build",
@@ -36,7 +38,9 @@
   "build": {
     "appId": "com.scriptmanager.app",
     "productName": "ScriptManager",
-    "directories": { "output": "release" },
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist-electron/**",
       ".next/**",
@@ -47,17 +51,57 @@
       "package.json"
     ],
     "extraResources": [
-      { "from": "prisma", "to": "prisma" },
-      { "from": "node_modules/.prisma", "to": "node_modules/.prisma", "filter": ["**/*"] },
-      { "from": "node_modules/@prisma/client", "to": "node_modules/@prisma/client", "filter": ["**/*"] },
-      { "from": ".next/standalone", "to": "standalone" },
-      { "from": ".next/standalone/node_modules", "to": "standalone/node_modules", "filter": ["**/*"] },
-      { "from": ".next/static", "to": "standalone/.next/static" }
+      {
+        "from": "prisma",
+        "to": "prisma"
+      },
+      {
+        "from": "node_modules/.prisma",
+        "to": "node_modules/.prisma",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/@prisma/client",
+        "to": "node_modules/@prisma/client",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": ".next/standalone",
+        "to": "standalone"
+      },
+      {
+        "from": ".next/standalone/node_modules",
+        "to": "standalone/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": ".next/static",
+        "to": "standalone/.next/static"
+      }
     ],
-    "win": { "target": "nsis", "artifactName": "ScriptManager-${version}-${arch}-setup.${ext}" },
-    "mac": { "target": "dmg", "artifactName": "ScriptManager-${version}-${arch}.${ext}", "hardenedRuntime": true },
-    "linux": { "target": "AppImage", "artifactName": "ScriptManager-${version}-${arch}.${ext}" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+    "win": {
+      "target": "nsis",
+      "artifactName": "ScriptManager-${version}-${arch}-setup.${ext}"
+    },
+    "mac": {
+      "target": "dmg",
+      "artifactName": "ScriptManager-${version}-${arch}.${ext}",
+      "hardenedRuntime": true
+    },
+    "linux": {
+      "target": "AppImage",
+      "artifactName": "ScriptManager-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1067.0",
@@ -78,6 +122,7 @@
     "@reduxjs/toolkit": "^2.2.1",
     "@tanstack/react-virtual": "^3.13.23",
     "@xterm/addon-webgl": "^0.19.0",
+    "@xyflow/react": "^12.11.2",
     "axios": "^1.6.7",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
