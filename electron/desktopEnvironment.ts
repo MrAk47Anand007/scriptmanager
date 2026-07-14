@@ -5,7 +5,7 @@ type DesktopEnvironmentInput = {
   userDataPath: string
   tempPath: string
   cwd: string
-  environment: NodeJS.ProcessEnv
+  environment: Partial<NodeJS.ProcessEnv>
 }
 
 export function getDesktopProcessEnvironment(input: DesktopEnvironmentInput) {

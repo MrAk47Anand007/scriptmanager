@@ -1,5 +1,25 @@
 # ScriptManager Session Handoff — 2026-07-13
 
+## Current update — 2026-07-15 workflow editor redesign
+
+- Current worktree: `.worktrees/workflow-editor`
+- Current branch: `codex/workflow-editor-redesign`
+- Base on `main`: `a7fb189` (`docs: plan n8n-inspired workflow editor`)
+- Implementation commits: `48b4ef0`, `be0634b`, `97fb741`, `8dbf5c8`, `3cdc342`, and `3178197`, followed by the final shell/responsive integration commit associated with this handoff update.
+- Integration state: local feature branch only; not merged, pushed, or opened as a pull request.
+
+Delivered in this branch: backward-compatible editor metadata, a typed node registry, React Flow canvas interactions, node search/launcher, typed and advanced-JSON configuration, inline validation, undo/redo history, execution inspection with retry/cancel controls, responsive workflow navigation, and a compact command bar.
+
+Verification evidence for the final branch is recorded in the completion response for this work. The UI was also exercised in a real Chromium session at desktop width, including workflow selection, empty state, node launcher, Script node insertion, validation feedback, canvas fit, inspector, and execution drawer. Electron-window-specific visual validation remains a separate manual check.
+
+Environment note: Prisma's Windows schema engine could not apply the migrations in this OneDrive worktree. The test and visual-QA databases were created by applying the checked-in SQLite migration SQL in order with Python `sqlite3`; this is an environment/tooling workaround, not an application migration change.
+
+Next actions, in order:
+
+1. Review the final feature-branch diff and browser screenshot.
+2. Optionally perform an Electron-native visual smoke test.
+3. Choose whether to merge locally, push/open a PR, or keep the branch isolated.
+
 ## Truth source
 
 - Repository: `scriptmanager`

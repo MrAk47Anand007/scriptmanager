@@ -218,6 +218,19 @@
   outline-offset: 3px;
 }
 
+.workflow-editor-shell { container-type: inline-size; position: relative; }
+
+@container (max-width: 620px) {
+  .workflow-inspector {
+    position: absolute;
+    inset: 3rem 0 2.25rem auto;
+    z-index: 30;
+    box-shadow: -16px 0 40px hsl(var(--background) / 0.45);
+    background: hsl(var(--background));
+  }
+  .workflow-inspector > aside { height: 100%; background: hsl(var(--background)); }
+}
+
 @media (forced-colors: active) {
   :focus-visible { outline: 3px solid CanvasText; }
   button, input, select, textarea { border: 1px solid ButtonText; }

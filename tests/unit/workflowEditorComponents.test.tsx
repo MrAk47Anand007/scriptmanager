@@ -14,6 +14,8 @@ import { WorkflowInspector } from '@/components/workflows/WorkflowInspector'
 import { WorkflowValidationPanel } from '@/components/workflows/WorkflowValidationPanel'
 import { WorkflowCommandBar } from '@/components/workflows/WorkflowCommandBar'
 import { WorkflowExecutionDrawer } from '@/components/workflows/WorkflowExecutionDrawer'
+import { WorkflowEditorShell } from '@/components/workflows/WorkflowEditorShell'
+import { WorkflowSidebar } from '@/components/workflows/WorkflowSidebar'
 
 beforeAll(() => {
   class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -118,5 +120,25 @@ describe('workflow editor components', () => {
     expect(screen.getByText('Build failed')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Retry Build' })).toBeEnabled()
     expect(JSON.stringify(store.getState().workflows.active!.definition)).toBe(original)
+  })
+
+  it('composes named responsive regions and an actionable empty workflow state', () => {
+    const store = makeStore()
+    store.dispatch(selectWorkflow({ id: 'w', name: 'Empty flow', publishedVersion: null, definition: { schemaVersion: 1, name: 'Empty flow', nodes: [], edges: [] } }))
+    render(<Provider store={store}><WorkflowEditorShell /></Provider>)
+    expect(screen.getByRole('main', { name: 'Workflow canvas' })).toBeTruthy()
+    expect(screen.getByLabelText('Node inspector')).toBeTruthy()
+    expect(screen.getByLabelText('Workflow executions')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Add first node' })).toBeTruthy()
+  })
+
+  it('collapses and restores workflow navigation', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => [] }))
+    const store = makeStore()
+    render(<Provider store={store}><WorkflowSidebar /></Provider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse workflows' }))
+    expect(screen.queryByText('Start from template')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Expand workflows' }))
+    expect(screen.getByText('Start from template')).toBeTruthy()
   })
 })

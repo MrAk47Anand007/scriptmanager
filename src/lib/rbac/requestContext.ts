@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import type { PrismaClient } from '@prisma/client'
 import type { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
-import { parseSessionToken, SESSION_COOKIE } from '@/lib/auth'
+import { parseSessionToken, SESSION_COOKIE, type SessionPayload } from '@/lib/auth'
 import { isDesktopSessionToken } from '@/lib/session'
 import { ensureDefaultWorkspace } from './bootstrap'
 import type { AuthorizationContext } from './types'
@@ -13,9 +13,9 @@ export async function resolveRequestContext(request: Request | NextRequest, data
   const cookie = request.headers.get('cookie')?.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${SESSION_COOKIE}=`))?.slice(SESSION_COOKIE.length + 1)
   const token = cookie ? decodeURIComponent(cookie) : undefined
   const desktopSession = isDesktopSessionToken(token)
-  const payload = desktopSession ? {} : parseSessionToken(token)
-  if (!desktopSession && !payload) return null
-  const identity = payload.userId && payload.workspaceId ? payload : { ...payload, ...(await ensureDefaultWorkspace(database)) }
+  const payload: SessionPayload | null = desktopSession ? { expiry: Number.MAX_SAFE_INTEGER } : parseSessionToken(token)
+  if (!payload) return null
+  const identity: SessionPayload = payload.userId && payload.workspaceId ? payload : { ...payload, ...(await ensureDefaultWorkspace(database)) }
   if (identity.sessionId) {
     const session = await database.userSession.findUnique({ where: { id: identity.sessionId } })
     if (!session || session.revokedAt || session.expiresAt <= new Date() || session.tokenHash !== hashSessionToken(token!)) return null
