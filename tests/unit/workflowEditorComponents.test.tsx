@@ -6,13 +6,14 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { Provider } from 'react-redux'
 import { ReactFlowProvider } from '@xyflow/react'
 import { makeStore } from '@/store/store'
-import { moveNodes, selectNode, selectWorkflow, setValidation } from '@/features/workflows/workflowsSlice'
+import { moveNodes, selectNode, selectWorkflow, setExecutionDetail, setSelectedExecution, setValidation, setWorkflowRuns } from '@/features/workflows/workflowsSlice'
 import { WorkflowNodeLauncher } from '@/components/workflows/WorkflowNodeLauncher'
 import { WorkflowNode } from '@/components/workflows/WorkflowNode'
 import { WorkflowCanvas } from '@/components/workflows/WorkflowCanvas'
 import { WorkflowInspector } from '@/components/workflows/WorkflowInspector'
 import { WorkflowValidationPanel } from '@/components/workflows/WorkflowValidationPanel'
 import { WorkflowCommandBar } from '@/components/workflows/WorkflowCommandBar'
+import { WorkflowExecutionDrawer } from '@/components/workflows/WorkflowExecutionDrawer'
 
 beforeAll(() => {
   class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -99,5 +100,23 @@ describe('workflow editor components', () => {
     expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Run workflow' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
+  })
+
+  it('inspects historical run and selected node details without changing the draft', () => {
+    const store = makeStore()
+    store.dispatch(selectWorkflow({ id: 'w', name: 'Flow', publishedVersion: 1, definition: {
+      schemaVersion: 1, name: 'Flow', nodes: [{ id: 'build', type: 'script', name: 'Build', config: { scriptId: 'release' } }], edges: [],
+    } }))
+    store.dispatch(setWorkflowRuns([{ id: 'run-1', status: 'failed', createdAt: '2026-07-15T00:00:00.000Z' }]))
+    store.dispatch(setExecutionDetail({ id: 'run-1', status: 'failed', createdAt: '2026-07-15T00:00:00.000Z', nodeRuns: [{ nodeId: 'build', status: 'failed', attempt: 2, input: { branch: 'main' }, error: { message: 'Build failed' } }] }))
+    store.dispatch(setSelectedExecution('run-1'))
+    store.dispatch(selectNode('build'))
+    const original = JSON.stringify(store.getState().workflows.active!.definition)
+    render(<Provider store={store}><WorkflowExecutionDrawer /></Provider>)
+    expect(screen.getAllByText('Failed').length).toBeGreaterThan(0)
+    expect(screen.getByText((_, element) => element?.textContent === 'Attempt 2')).toBeTruthy()
+    expect(screen.getByText('Build failed')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Retry Build' })).toBeEnabled()
+    expect(JSON.stringify(store.getState().workflows.active!.definition)).toBe(original)
   })
 })

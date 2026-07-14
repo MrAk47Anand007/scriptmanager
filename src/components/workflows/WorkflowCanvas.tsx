@@ -6,7 +6,7 @@ import {
   addEdge, applyEdgeChanges, applyNodeChanges, type Connection, type Edge, type EdgeChange, type NodeChange, type OnReconnect,
 } from '@xyflow/react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { selectActiveWorkflow, selectWorkflowSelection, selectWorkflowValidation, selectWorkflowViewport } from '@/features/workflows/selectors'
+import { selectActiveWorkflow, selectSelectedExecution, selectWorkflowSelection, selectWorkflowValidation, selectWorkflowViewport } from '@/features/workflows/selectors'
 import { addNode, connectNodes, moveNodes, removeEdges, removeNodes, replaceConnection, selectNodes, setViewport } from '@/features/workflows/workflowsSlice'
 import { getWorkflowNodeSpec } from '@/lib/workflows/nodeRegistry'
 import { WorkflowNode, type WorkflowFlowNode } from './WorkflowNode'
@@ -20,12 +20,13 @@ function CanvasInner() {
   const selectedIds = useAppSelector(selectWorkflowSelection)
   const validation = useAppSelector(selectWorkflowValidation)
   const viewport = useAppSelector(selectWorkflowViewport)
+  const execution = useAppSelector(selectSelectedExecution)
   const [launcher, setLauncher] = useState<{ open: boolean; x: number; y: number; connection?: Connection }>({ open: false, x: 80, y: 80 })
 
   const nodes = useMemo<WorkflowFlowNode[]>(() => workflow?.definition.nodes.map((node) => ({
     id: node.id, type: 'workflow', position: workflow.definition.editor?.positions[node.id] ?? { x: 0, y: 0 }, selected: selectedIds.includes(node.id),
-    data: { node, validationCount: validation.filter((issue) => issue.path?.startsWith(`nodes[${workflow.definition.nodes.indexOf(node)}]`)).length },
-  })) ?? [], [selectedIds, validation, workflow])
+    data: { node, validationCount: validation.filter((issue) => issue.path?.startsWith(`nodes[${workflow.definition.nodes.indexOf(node)}]`)).length, executionStatus: execution?.nodeRuns.find((run)=>run.nodeId===node.id)?.status },
+  })) ?? [], [execution, selectedIds, validation, workflow])
   const edges = useMemo<Edge[]>(() => workflow?.definition.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourcePort, type: 'smoothstep', animated: false })) ?? [], [workflow])
 
   const onNodesChange = useCallback((changes: NodeChange<WorkflowFlowNode>[]) => {

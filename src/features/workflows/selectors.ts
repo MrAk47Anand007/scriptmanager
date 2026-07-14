@@ -10,3 +10,4 @@ export const selectWorkflowHistory = (state: RootState) => state.workflows.histo
 export const selectWorkflowRequestState = createSelector([(state: RootState)=>state.workflows], (workflows) => ({ saveStatus: workflows.saveStatus, publishStatus: workflows.publishStatus, runStatus: workflows.runStatus, error: workflows.requestError }))
 export const selectWorkflowRuns = (state: RootState) => state.workflows.runs
 export const selectSelectedExecutionId = (state: RootState) => state.workflows.selectedExecutionId
+export const selectSelectedExecution = (state: RootState) => state.workflows.selectedExecutionId ? state.workflows.executionDetails[state.workflows.selectedExecutionId] ?? null : null

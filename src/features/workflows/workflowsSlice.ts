@@ -5,6 +5,8 @@ import type { ValidationIssue, WorkflowDefinition, WorkflowEdge, WorkflowNodeTyp
 
 export type WorkflowSummary = { id: string; name: string; description?: string; publishedVersion: number | null; projectId?: string | null; definition: WorkflowDefinition }
 export type WorkflowRunSummary = { id: string; status: string; createdAt: string; nodeRuns?: unknown[] }
+export type WorkflowNodeRunDetail = { nodeId: string; status: string; attempt: number; input?: unknown; output?: unknown; error?: unknown; startedAt?: string | null; finishedAt?: string | null }
+export type WorkflowRunDetail = { id: string; status: string; createdAt: string; startedAt?: string | null; finishedAt?: string | null; nodeRuns: WorkflowNodeRunDetail[] }
 type RequestStatus = 'idle' | 'saving' | 'publishing' | 'running' | 'failed'
 type History = { past: WorkflowDefinition[]; future: WorkflowDefinition[] }
 export type WorkflowState = {
@@ -17,6 +19,7 @@ export type WorkflowState = {
   dirty: boolean
   loading: boolean
   runs: WorkflowRunSummary[]
+  executionDetails: Record<string, WorkflowRunDetail>
   viewport: WorkflowEditorViewport
   history: History
   saveStatus: RequestStatus
@@ -28,7 +31,7 @@ export type WorkflowState = {
 const defaultViewport: WorkflowEditorViewport = { x: 0, y: 0, zoom: 1 }
 const initialState: WorkflowState = {
   items: [], active: null, selectedNodeId: null, selectedNodeIds: [], selectedExecutionId: null,
-  validation: [], dirty: false, loading: false, runs: [], viewport: defaultViewport,
+  validation: [], dirty: false, loading: false, runs: [], executionDetails: {}, viewport: defaultViewport,
   history: { past: [], future: [] }, saveStatus: 'idle', publishStatus: 'idle', runStatus: 'idle', requestError: null,
 }
 
@@ -66,6 +69,22 @@ export const runWorkflow = createAsyncThunk('workflows/run', async (id: string) 
   const response = await fetch(`/api/workflows/${id}/runs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: {} }) })
   if (!response.ok) throw new Error((await response.json()).error)
   return response.json()
+})
+const parseJson = (value: unknown) => { if (typeof value !== 'string') return value; try { return JSON.parse(value) } catch { return value } }
+export function normalizeWorkflowRunDetail(raw: Record<string, any>): WorkflowRunDetail {
+  return { id: raw.id, status: raw.status, createdAt: String(raw.createdAt), startedAt: raw.startedAt?String(raw.startedAt):null, finishedAt: raw.finishedAt?String(raw.finishedAt):null, nodeRuns: (raw.nodeRuns??[]).map((node: Record<string, any>)=>({ nodeId: node.nodeId, status: node.status, attempt: node.attempt??1, input: parseJson(node.inputJson??node.input), output: parseJson(node.outputJson??node.output), error: parseJson(node.errorJson??node.error), startedAt: node.startedAt?String(node.startedAt):null, finishedAt: node.finishedAt?String(node.finishedAt):null })) }
+}
+export const fetchWorkflowRuns = createAsyncThunk('workflows/fetchRuns', async (workflowId: string) => {
+  const response=await fetch(`/api/workflows/${workflowId}/runs`);if(!response.ok)throw new Error('Unable to load workflow runs');return response.json()
+})
+export const fetchWorkflowRun = createAsyncThunk('workflows/fetchRun', async (runId: string) => {
+  const response=await fetch(`/api/workflow-runs/${runId}`);if(!response.ok)throw new Error('Unable to load workflow run');return normalizeWorkflowRunDetail(await response.json())
+})
+export const retryWorkflowNode = createAsyncThunk('workflows/retryNode', async ({runId,nodeId}:{runId:string;nodeId:string}) => {
+  const response=await fetch(`/api/workflow-runs/${runId}/retry-node`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nodeId})});if(!response.ok)throw new Error((await response.json()).error??'Retry failed');return normalizeWorkflowRunDetail(await response.json())
+})
+export const cancelWorkflowRun = createAsyncThunk('workflows/cancelRun', async (runId:string) => {
+  const response=await fetch(`/api/workflow-runs/${runId}/cancel`,{method:'POST'});if(!response.ok)throw new Error((await response.json()).error??'Cancel failed');return normalizeWorkflowRunDetail(await response.json())
 })
 
 const slice = createSlice({
@@ -208,6 +227,8 @@ const slice = createSlice({
     },
     setValidation(state, action: PayloadAction<ValidationIssue[]>) { state.validation = action.payload },
     setSelectedExecution(state, action: PayloadAction<string | null>) { state.selectedExecutionId = action.payload },
+    setWorkflowRuns(state, action: PayloadAction<WorkflowRunSummary[]>) { state.runs = action.payload },
+    setExecutionDetail(state, action: PayloadAction<WorkflowRunDetail>) { state.executionDetails[action.payload.id] = action.payload },
     clearWorkflowRequestError(state) { state.requestError = null },
   },
   extraReducers(builder) {
@@ -224,12 +245,16 @@ const slice = createSlice({
       .addCase(runWorkflow.pending, (state) => { state.runStatus = 'running'; state.requestError = null })
       .addCase(runWorkflow.fulfilled, (state, action) => { state.runs.unshift(action.payload); state.runStatus = 'idle'; state.selectedExecutionId = action.payload.id })
       .addCase(runWorkflow.rejected, (state, action) => { state.runStatus = 'failed'; state.requestError = { operation: 'run', message: message(action) } })
+      .addCase(fetchWorkflowRuns.fulfilled, (state, action) => { state.runs = action.payload })
+      .addCase(fetchWorkflowRun.fulfilled, (state, action) => { state.executionDetails[action.payload.id] = action.payload })
+      .addCase(retryWorkflowNode.fulfilled, (state, action) => { state.executionDetails[action.payload.id] = action.payload })
+      .addCase(cancelWorkflowRun.fulfilled, (state, action) => { state.executionDetails[action.payload.id] = action.payload })
   },
 })
 
 export const {
   selectWorkflow, selectNode, selectNodes, addNode, updateNodeConfig, moveNodes, removeNodes, removeEdges,
   connectNodes, replaceConnection, duplicateSelection, undoWorkflowEdit, redoWorkflowEdit, setViewport,
-  setWorkflowProject, setValidation, setSelectedExecution, clearWorkflowRequestError,
+  setWorkflowProject, setValidation, setSelectedExecution, setWorkflowRuns, setExecutionDetail, clearWorkflowRequestError,
 } = slice.actions
 export default slice.reducer
