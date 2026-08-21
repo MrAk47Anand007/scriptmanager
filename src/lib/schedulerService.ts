@@ -5,6 +5,7 @@ import type { ScriptParameter } from '@/lib/types'
 import { createCorrelationId } from '@/lib/execution'
 import { createWorkflowRepository } from '@/lib/workflows/repository'
 import { createWorkflowTriggerService } from '@/lib/workflows/triggers'
+import { notifyWorkflowWorker } from '@/lib/workflows/workerLoop'
 
 // Module-level map: scriptId -> Cron instance
 const scheduledJobs = new Map<string, Cron>()
@@ -36,18 +37,48 @@ export async function initScheduler(): Promise<void> {
     }
   }
 
-  const workflowTriggers = await prisma.workflowTrigger.findMany({ where: { type: 'cron', enabled: true }, include: { workflow: { include: { versions: true } } } })
+  const workflowTriggers = await prisma.workflowTrigger.findMany({ where: { type: 'cron', enabled: true }, select: { id: true, workflowId: true, configJson: true } })
   for (const trigger of workflowTriggers) {
     const config = JSON.parse(trigger.configJson) as { cron?: string }
-    const version = trigger.workflow.versions.find((item) => item.version === trigger.workflow.publishedVersion)
-    if (!config.cron || !version) continue
-    const job = new Cron(config.cron, async () => {
-      await createWorkflowTriggerService(createWorkflowRepository(prisma)).cron({ workflowId: trigger.workflowId, versionId: version.id, triggerId: trigger.id, scheduledAt: new Date() })
-    })
-    workflowScheduledJobs.set(trigger.id, job)
+    if (!config.cron) continue
+    try {
+      registerWorkflowCronTrigger({ id: trigger.id, workflowId: trigger.workflowId, cron: config.cron })
+    } catch (err) {
+      console.error(`[Scheduler] Failed to register workflow cron ${trigger.id}:`, err)
+    }
   }
 
   console.log(`[Scheduler] Initialized with ${registered} active job(s)`)
+}
+
+export function registerWorkflowCronTrigger(input: { id: string; workflowId: string; cron: string }): void {
+  removeWorkflowCronTrigger(input.id)
+  const job = new Cron(input.cron, async () => {
+    try {
+      const fresh = await prisma.workflowTrigger.findUnique({ where: { id: input.id }, include: { workflow: { include: { versions: true } } } })
+      if (!fresh || !fresh.enabled || fresh.type !== 'cron') return
+      const version = fresh.workflow.versions.find((item) => item.version === fresh.workflow.publishedVersion)
+      if (!version) return
+      await createWorkflowTriggerService(createWorkflowRepository(prisma)).cron({ workflowId: fresh.workflowId, versionId: version.id, triggerId: fresh.id, scheduledAt: new Date() })
+      notifyWorkflowWorker()
+    } catch (err) {
+      console.error(`[Scheduler] Failed to enqueue workflow run for trigger ${input.id}:`, err)
+    }
+  })
+  workflowScheduledJobs.set(input.id, job)
+  console.log(`[Scheduler] Registered workflow cron ${input.id} (${input.cron})`)
+}
+
+export function removeWorkflowCronTrigger(triggerId: string): void {
+  const existing = workflowScheduledJobs.get(triggerId)
+  if (!existing) return
+  existing.stop()
+  workflowScheduledJobs.delete(triggerId)
+  console.log(`[Scheduler] Removed workflow cron ${triggerId}`)
+}
+
+export function isWorkflowCronScheduled(triggerId: string): boolean {
+  return workflowScheduledJobs.has(triggerId)
 }
 
 export function registerSchedule(script: ScriptScheduleInfo): void {

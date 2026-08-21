@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { createWorkflowRepository } from './repository'
+import { resolveRequestContext } from '@/lib/rbac/requestContext'
 
 export const workflowRepository = createWorkflowRepository(prisma)
 
@@ -11,4 +12,13 @@ export function apiError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Workflow operation failed'
   const status = message.includes('not found') || message.includes('No record') ? 404 : message.includes('Cannot') ? 409 : 400
   return Response.json({ error: message }, { status })
+}
+
+export async function resolveWorkflowActor(request: Request): Promise<{ userId: string; workspaceId: string }> {
+  const headerUserId = request.headers.get('x-scriptmanager-user-id')
+  const headerWorkspaceId = request.headers.get('x-scriptmanager-workspace-id')
+  if (headerUserId && headerWorkspaceId) return { userId: headerUserId, workspaceId: headerWorkspaceId }
+  const context = await resolveRequestContext(request).catch(() => null)
+  if (context) return { userId: context.userId, workspaceId: context.workspaceId }
+  return { userId: 'admin', workspaceId: 'default' }
 }

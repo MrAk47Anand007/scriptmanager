@@ -23,6 +23,14 @@ app.prepare().then(async () => {
     console.error('[Server] Failed to initialize scheduler:', err)
   }
 
+  // Start the durable workflow worker (reconciles interrupted runs, drains queue)
+  try {
+    const { startWorkflowWorker } = await import('./src/lib/workflows/workerLoop')
+    startWorkflowWorker()
+  } catch (err) {
+    console.error('[Server] Failed to start workflow worker:', err)
+  }
+
   const server = createServer(async (req, res) => {
     try {
       const parsedUrl = parse(req.url!, true)

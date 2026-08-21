@@ -136,6 +136,7 @@ export async function execRemote(opts: {
     command: string
     remoteExecId: string
     context?: ExecutionContext
+    signal?: AbortSignal
 }): Promise<void> {
     const { profileId, command, remoteExecId } = opts
     const context = opts.context ?? {
@@ -161,6 +162,10 @@ export async function execRemote(opts: {
     let client: SshClient | null = null
     const outputLines: string[] = []
     let exitCode = 1
+
+    if (opts.signal?.aborted) throw new Error('Remote execution cancelled')
+    const onAbort = () => { try { client?.end() } catch { /* already closed */ } }
+    opts.signal?.addEventListener('abort', onAbort, { once: true })
 
     try {
         const config = await buildConnectConfig(profileId)
@@ -229,6 +234,7 @@ export async function execRemote(opts: {
             data: { profileId, exitCode, error: (err as Error).message },
         })
     } finally {
+        opts.signal?.removeEventListener('abort', onAbort)
         client?.end()
         remoteExecEmitters.delete(remoteExecId)
     }

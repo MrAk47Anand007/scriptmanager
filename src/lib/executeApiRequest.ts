@@ -54,6 +54,7 @@ export interface ExecuteApiRequestInput {
   body: string
   authType: MaterializableApiRequestDraft['authType']
   authConfig: Record<string, string>
+  signal?: AbortSignal
 }
 
 function isPrivateIPv4(host: string): boolean {
@@ -426,7 +427,7 @@ export async function executeApiRequest(input: ExecuteApiRequestInput) {
   const fetchOptions: RequestInit = {
     method: runtimeRequest.method ?? 'GET',
     headers: finalHeaders,
-    signal: AbortSignal.timeout(30000),
+    signal: input.signal ? AbortSignal.any([AbortSignal.timeout(30000), input.signal]) : AbortSignal.timeout(30000),
   }
   if (requestBody !== undefined && runtimeRequest.method !== 'GET' && runtimeRequest.method !== 'HEAD') {
     fetchOptions.body = requestBody

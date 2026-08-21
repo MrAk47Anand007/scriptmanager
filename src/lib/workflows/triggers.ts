@@ -9,9 +9,12 @@ export function verifyWorkflowWebhookSignature(rawBody: string, signatureHeader:
   return expected.length === received.length && timingSafeEqual(expected, received)
 }
 
-export function deriveWebhookIdempotencyKey(triggerId: string, deliveryId: string | undefined, rawBody: string): string {
+export const WEBHOOK_REPLAY_WINDOW_MS = 24 * 60 * 60 * 1000
+
+export function deriveWebhookIdempotencyKey(triggerId: string, deliveryId: string | undefined, rawBody: string, now = Date.now()): string {
   const requestIdentity = deliveryId ?? createHash('sha256').update(rawBody).digest('hex')
-  return `webhook:${triggerId}:${requestIdentity}`
+  const windowBucket = Math.floor(now / WEBHOOK_REPLAY_WINDOW_MS)
+  return `webhook:${triggerId}:${windowBucket}:${requestIdentity}`
 }
 
 type EnqueueInput = {

@@ -15,6 +15,14 @@ describe('workflow triggers', () => {
     expect(deriveWebhookIdempotencyKey('trigger-1', undefined, 'a')).not.toBe(deriveWebhookIdempotencyKey('trigger-1', undefined, 'b'))
   })
 
+  it('expires webhook idempotency after the replay window', () => {
+    const now = Date.UTC(2026, 6, 13, 10, 0, 0)
+    const later = now + 25 * 60 * 60 * 1000
+    expect(deriveWebhookIdempotencyKey('t', undefined, '{}', now)).toBe(deriveWebhookIdempotencyKey('t', undefined, '{}', now + 60_000))
+    expect(deriveWebhookIdempotencyKey('t', undefined, '{}', now)).not.toBe(deriveWebhookIdempotencyKey('t', undefined, '{}', later))
+    expect(deriveWebhookIdempotencyKey('t', 'delivery-x', '{}', now)).toBe(deriveWebhookIdempotencyKey('t', 'delivery-x', 'ignored', now))
+  })
+
   it('enqueues manual and cron runs with explicit actors', async () => {
     const enqueueRun = vi.fn(async (input) => input)
     const service = createWorkflowTriggerService({ enqueueRun })

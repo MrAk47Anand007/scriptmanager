@@ -20,6 +20,7 @@ const PUBLIC_PREFIXES = [
   '/api/auth/login',
   '/api/auth/logout',
   '/api/webhooks/',  // Webhook triggers stay unauthenticated
+  '/api/workflow-webhooks/',  // HMAC signature is the authentication
   '/_next/',
   '/favicon.ico',
 ]
@@ -88,6 +89,7 @@ async function findResourceWorkspace(pathname: string, resource: RbacResource): 
   }
   if (resource === 'workflow') {
     const id = idAfter('workflows'); if (id) return (await prisma.workflow.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId
+    const runId = idAfter('workflow-runs'); if (runId) return (await prisma.workflowRun.findUnique({ where: { id: runId }, include: { workflow: { select: { workspaceId: true } } } }))?.workflow.workspaceId
   }
   if (resource === 'git') {
     const id = idAfter('projects'); if (id) return (await prisma.project.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId
@@ -109,7 +111,8 @@ async function findResourceWorkspace(pathname: string, resource: RbacResource): 
 
 function apiRequirement(pathname: string, method: string): { resource: RbacResource; action: RbacAction } | null {
   const resource = pathname.startsWith('/api/scripts') ? 'script'
-    : pathname.startsWith('/api/workflows') ? 'workflow'
+    : pathname.startsWith('/api/workflow-runs') ? 'workflow'
+      : pathname.startsWith('/api/workflows') ? 'workflow'
       : pathname.startsWith('/api/secrets') ? 'secret'
         : pathname.startsWith('/api/agent') ? 'agent'
           : pathname.startsWith('/api/approvals') ? 'approval'
@@ -121,8 +124,8 @@ function apiRequirement(pathname: string, method: string): { resource: RbacResou
                     : pathname.startsWith('/api/workspaces/current/audit') ? 'audit' : null
   if (!resource) return null
   const action: RbacAction = method === 'GET' || method === 'HEAD' ? 'read'
-    : pathname.includes('/decision') ? 'approve'
-      : pathname.includes('/run') || pathname.includes('/execute') ? 'run'
+    : pathname.includes('/decision') || pathname.includes('/approve') ? 'approve'
+      : pathname.includes('/run') || pathname.includes('/execute') || pathname.includes('/retry-node') || pathname.includes('/cancel') ? 'run'
         : pathname.includes('/reveal') ? 'reveal'
           : method === 'POST' ? 'create' : method === 'DELETE' ? 'delete' : 'update'
   return { resource, action }

@@ -3,6 +3,7 @@ import { decryptString } from '@/lib/storage/secretBox'
 import { resolveResourceSecret } from '@/lib/secrets/migration'
 import { createWorkflowRepository } from '@/lib/workflows/repository'
 import { createWorkflowTriggerService, verifyWorkflowWebhookSignature } from '@/lib/workflows/triggers'
+import { notifyWorkflowWorker } from '@/lib/workflows/workerLoop'
 import { checkRateLimit, readBoundedBody, type RateLimitEntry } from '@/lib/production/httpSecurity'
 
 const webhookLimits = new Map<string, RateLimitEntry>()
@@ -26,5 +27,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   let payload: unknown = {}
   try { payload = rawBody ? JSON.parse(rawBody) : {} } catch { return Response.json({ error: 'Invalid JSON body' }, { status: 400 }) }
   const run = await createWorkflowTriggerService(createWorkflowRepository(prisma)).webhook({ workflowId: trigger.workflowId, versionId: version.id, triggerId: trigger.id, deliveryId: request.headers.get('x-delivery-id') ?? undefined, rawBody, payload })
+  notifyWorkflowWorker()
   return Response.json(run, { status: 202 })
 }

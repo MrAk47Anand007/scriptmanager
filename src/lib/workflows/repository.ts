@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { PrismaClient } from '@prisma/client'
+import { Prisma, type PrismaClient } from '@prisma/client'
 import { parseWorkflowDefinition } from './schema'
 import type { WorkflowDefinition } from './types'
 
@@ -68,13 +68,9 @@ export function createWorkflowRepository(database: Database) {
       idempotencyKey?: string
       payload?: unknown
     }) {
-      if (input.idempotencyKey) {
-        const existing = await database.workflowRun.findUnique({ where: { idempotencyKey: input.idempotencyKey } })
-        if (existing) return existing
-      }
-      const version = await database.workflowVersion.findFirstOrThrow({ where: { id: input.versionId, workflowId: input.workflowId } })
-      const definition = parseWorkflowDefinition(JSON.parse(version.definitionJson))
-      return database.$transaction(async (tx) => {
+      const createRun = (tx: Prisma.TransactionClient) => (async () => {
+        const version = await tx.workflowVersion.findFirstOrThrow({ where: { id: input.versionId, workflowId: input.workflowId } })
+        const definition = parseWorkflowDefinition(JSON.parse(version.definitionJson))
         const run = await tx.workflowRun.create({
           data: {
             workflowId: input.workflowId,
@@ -90,7 +86,22 @@ export function createWorkflowRepository(database: Database) {
           data: definition.nodes.map((node) => ({ runId: run.id, nodeId: node.id, nodeType: node.type })),
         })
         return run
-      })
+      })()
+
+      if (!input.idempotencyKey) return database.$transaction(createRun)
+      try {
+        return await database.$transaction(async (tx) => {
+          const existing = await tx.workflowRun.findUnique({ where: { idempotencyKey: input.idempotencyKey } })
+          if (existing) return existing
+          return createRun(tx)
+        })
+      } catch (error) {
+        if ((error as { code?: string }).code === 'P2002') {
+          const existing = await database.workflowRun.findUnique({ where: { idempotencyKey: input.idempotencyKey! } })
+          if (existing) return existing
+        }
+        throw error
+      }
     },
 
     async claimNextRun(workerId: string) {
@@ -103,24 +114,25 @@ export function createWorkflowRepository(database: Database) {
           data: { status: 'running', workerId, claimedAt, startedAt: claimedAt },
         })
         if (claimed.count !== 1) return null
-        return tx.workflowRun.findUnique({ where: { id: candidate.id }, include: { version: true, nodeRuns: true } })
+        return tx.workflowRun.findUnique({ where: { id: candidate.id }, include: { version: true, nodeRuns: true, workflow: { select: { workspaceId: true } } } })
       })
     },
 
     async startNode(runId: string, nodeId: string, attempt: number, input: unknown) {
       return database.workflowNodeRun.update({
         where: { runId_nodeId: { runId, nodeId } },
-        data: { status: 'running', attempt, inputJson: JSON.stringify(input), outputJson: null, errorJson: null, startedAt: new Date(), finishedAt: null },
+        data: { status: 'running', attempt, inputJson: JSON.stringify(input), outputJson: null, errorJson: null, selectedPort: null, startedAt: new Date(), finishedAt: null },
       })
     },
 
-    async finishNode(runId: string, nodeId: string, attempt: number, status: string, output?: unknown, error?: unknown) {
+    async finishNode(runId: string, nodeId: string, attempt: number, status: string, output?: unknown, error?: unknown, selectedPort?: 'true' | 'false') {
       return database.workflowNodeRun.update({
         where: { runId_nodeId: { runId, nodeId } },
         data: {
           status, attempt,
           outputJson: output === undefined ? undefined : JSON.stringify(output),
           errorJson: error === undefined ? undefined : JSON.stringify(error),
+          selectedPort,
           finishedAt: new Date(),
         },
       })

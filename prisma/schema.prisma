@@ -412,6 +412,7 @@ model WorkflowNodeRun {
   inputJson  String?     @map("input_json")
   outputJson String?     @map("output_json")
   errorJson  String?     @map("error_json")
+  selectedPort String?   @map("selected_port")
   startedAt  DateTime?   @map("started_at")
   finishedAt DateTime?   @map("finished_at")
   run        WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)

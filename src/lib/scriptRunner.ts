@@ -1,4 +1,4 @@
-import { spawn } from 'child_process'
+import { spawn, type ChildProcess } from 'child_process'
 import { EventEmitter } from 'events'
 import { prisma } from '@/lib/db'
 import path from 'path'
@@ -12,6 +12,7 @@ import { executionTelemetry, lifecycleEventType, type ExecutionContext, createCo
 
 // Module-level map: buildId -> EventEmitter (Node.js equivalent of Python's _output_queues dict)
 const buildEmitters = new Map<string, EventEmitter>()
+const runningChildren = new Map<string, ChildProcess>()
 
 const DEFAULT_TIMEOUT_MS = 30_000 // 30 seconds
 const SETTINGS_CACHE_TTL_MS = 30_000
@@ -144,7 +145,6 @@ export async function executeScriptAsync(
       logStream.write(errMsg)
       logStream.end()
       emitter.emit('line', errMsg)
-      emitter.emit('done')
       buildEmitters.delete(buildId)
 
       await prisma.build.update({
@@ -152,6 +152,7 @@ export async function executeScriptAsync(
         data: { status: 'failure', exitCode: 1, finishedAt: new Date() }
       })
       await emitFinalScriptEvent('failure', 1)
+      emitter.emit('done')
       return
     }
 
@@ -175,6 +176,7 @@ export async function executeScriptAsync(
       env: { ...process.env, PYTHONUNBUFFERED: '1', ...scriptEnv, ...paramEnv },
       stdio: ['ignore', 'pipe', 'pipe']
     })
+    runningChildren.set(buildId, child)
     buildUpdatePromise.catch((error) => {
       console.error('[ScriptRunner] Failed to mark build as running:', error)
     })
@@ -206,7 +208,7 @@ export async function executeScriptAsync(
       logStream.write(errMsg)
       logStream.end()
       emitter.emit('line', errMsg)
-      emitter.emit('done')
+      runningChildren.delete(buildId)
       buildEmitters.delete(buildId)
 
       await prisma.build.update({
@@ -214,13 +216,14 @@ export async function executeScriptAsync(
         data: { status: 'failure', exitCode: -1, finishedAt: new Date() }
       })
       await emitFinalScriptEvent('failure', -1)
+      emitter.emit('done')
     })
 
     child.on('close', async (code) => {
       clearTimeout(timeoutHandle)
       const exitCode = code ?? -1
       logStream.end()
-      emitter.emit('done')
+      runningChildren.delete(buildId)
       buildEmitters.delete(buildId)
 
       const finalStatus = timedOut ? 'timeout' : (exitCode === 0 ? 'success' : 'failure')
@@ -239,8 +242,10 @@ export async function executeScriptAsync(
         where: { id: script.id },
         data: { lastRun: new Date() }
       })
+      emitter.emit('done')
     })
   } catch (err) {
+    runningChildren.delete(buildId)
     buildEmitters.delete(buildId)
     const errMsg = `\nInternal error: ${err}\n`
     await prisma.build.update({
@@ -272,6 +277,16 @@ export function ensureBuildEmitter(buildId: string): EventEmitter {
   const emitter = new EventEmitter()
   buildEmitters.set(buildId, emitter)
   return emitter
+}
+
+export function killRunningBuild(buildId: string): boolean {
+  const child = runningChildren.get(buildId)
+  if (!child) return false
+  child.kill('SIGTERM')
+  setTimeout(() => {
+    if (runningChildren.has(buildId)) child.kill('SIGKILL')
+  }, 2000)
+  return true
 }
 
 export async function getScriptFilePath(filename: string): Promise<string> {
