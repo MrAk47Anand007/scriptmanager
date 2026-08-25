@@ -30,14 +30,15 @@ npm run electron:build # full distributable (NSIS/DMG/AppImage)
 npm run electron:pack  # package without installer (for testing)
 ```
 
-There is no test suite in this project.
+There is no linter configured. Tests run with Vitest: `npm test` (all), `npm run test:unit`, `npm run test:integration`, or targeted via `npx vitest run <file>`. Workflow engine tests live in `tests/unit/workflow*.test.ts` and `tests/integration/workflow*.test.ts`.
 
 ## Architecture
 
 ### Server bootstrap (`server.ts`)
 
-The entry point is a custom HTTP server that wraps Next.js and adds three long-lived singletons:
-- **Cron scheduler** (`src/lib/schedulerService.ts`) — loaded once at boot; runs `croner` jobs for every enabled script schedule.
+The entry point is a custom HTTP server that wraps Next.js and adds four long-lived singletons:
+- **Cron scheduler** (`src/lib/schedulerService.ts`) — loaded once at boot; runs `croner` jobs for every enabled script schedule and workflow cron trigger (live-registered via trigger CRUD).
+- **Workflow worker loop** (`src/lib/workflows/workerLoop.ts`) — started at boot; reconciles interrupted runs, drains the durable run queue, and is kicked by every enqueue path.
 - **Terminal WebSocket server** (`src/lib/socketService.ts`) — node-pty over WebSockets; gives the browser a real PTY.
 - **Build WebSocket server** (`src/lib/buildSocketService.ts`) — streams live build output to subscribed clients.
 

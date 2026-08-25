@@ -53,3 +53,7 @@ coverage/
 
 # Isolated Codex feature worktrees
 .worktrees/
+
+# Session artifacts and stray outputs
+.superpowers/
+tsc_output.txt

@@ -4,26 +4,7 @@
 
 A self-hosted, local-first script manager — write, run, schedule, and organize scripts with a professional web UI. Think of it as **n8n for scripts**: automation without the complexity.
 
-![ScriptManager UI](https://github.com/MrAk47Anand007/scriptmanager/blob/main/Screenshot%202026-02-17%20145941.png)
-
----
-
-## Table of Contents
-
-- [Features](#features)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Usage Guide](#usage-guide)
-- [CLI Usage](#cli-usage)
-- [Desktop App (Electron)](#desktop-app-electron)
-- [API Reference](#api-reference)
-- [Database Schema](#database-schema)
-- [Contributing](#contributing)
-- [License](#license)
-
----
+![ScriptManager UI](docs/screenshot.png)
 
 ---
 
@@ -131,45 +112,39 @@ A self-hosted, local-first script manager — write, run, schedule, and organize
 ```
 scriptmanager/
 ├── cli/
-│   └── sm.mjs                  # CLI entry point (sm run, sm list, sm logs)
-├── electron/
-│   ├── main.ts                 # Electron main process (spawns server, manages window)
-│   ├── preload.ts              # Context bridge (security)
-│   └── tsconfig.json
+│   └── sm.mjs                  # CLI entry point (sm run, sm list, sm logs, sm config)
+├── electron/                   # Desktop main process, preload, IPC runtimes, OAuth flow
 ├── prisma/
-│   ├── schema.prisma           # Database schema
+│   ├── schema.prisma           # Database schema (~50 models)
 │   └── migrations/             # SQL migration history
-├── public/                     # Static assets
+├── sdk/                        # Public plugin SDK types
 ├── src/
 │   ├── app/                    # Next.js App Router pages & API routes
-│   │   ├── api/
-│   │   │   ├── auth/           # Login / logout
-│   │   │   ├── builds/         # Build logs, output, SSE streaming
-│   │   │   ├── collections/    # Script collections CRUD
-│   │   │   ├── env/            # Per-script environment variables
-│   │   │   ├── scripts/        # Scripts CRUD, run, schedule, gist, webhook, tags, versions
-│   │   │   ├── settings/       # Global app settings
-│   │   │   ├── tags/           # Global tag management
-│   │   │   ├── templates/      # Script templates CRUD
-│   │   │   └── webhooks/       # Unauthenticated webhook trigger endpoint
-│   │   └── (pages)/            # UI pages (login, main app)
-│   ├── components/             # React UI components
-│   │   └── ScriptsManager.tsx  # Main app shell
-│   ├── features/
-│   │   └── scripts/
-│   │       └── scriptsSlice.ts # Redux slice (scripts, builds, collections, env vars, etc.)
+│   │   └── api/                # scripts, builds, collections, env, tags, templates,
+│   │                           # settings, webhooks, workflows, workflow-runs,
+│   │                           # api-client (collections/requests/env/history),
+│   │                           # ops, secrets, approvals, agents, notifications,
+│   │                           # observability, plugins, projects, storage-providers,
+│   │                           # workspaces, bootstrap, export
+│   ├── components/             # React UI (scripts manager, workflows editor, API client, ops…)
+│   ├── features/               # Redux slices: scripts, workflows, api, ops, settings
 │   ├── lib/
-│   │   ├── db.ts               # Prisma client singleton
-│   │   ├── gistService.ts      # GitHub Gist sync logic
-│   │   ├── scriptRunner.ts     # Script execution engine (async, streaming, timeout)
-│   │   ├── scheduler.ts        # Cron scheduler
+│   │   ├── workflows/          # Durable engine: schema, graph planner, mappings, policy,
+│   │   │                       # worker + workerLoop, repository, triggers, node registry
+│   │   ├── schedulerService.ts # Cron scheduler (scripts + workflow triggers)
+│   │   ├── scriptRunner.ts     # Script execution engine (streaming, timeout, kill)
 │   │   ├── socketService.ts    # WebSocket terminal server (node-pty)
-│   │   └── types.ts            # Shared TypeScript types
-│   └── middleware.ts           # Auth middleware (session validation, route protection)
-├── server.ts                   # Custom Express-compatible server (WebSockets + Next.js)
-├── .env                        # Environment variables
-├── package.json
-└── tsconfig.json
+│   │   ├── storage/            # Cloud sync providers (S3/GCS/WebDAV/GDrive/OneDrive)
+│   │   ├── secrets/            # Encrypted vault with bindings and audit
+│   │   ├── rbac/               # Workspace roles, permissions, request context
+│   │   ├── plugins/            # Signed plugin host and capability-scoped APIs
+│   │   ├── approvals/          # Approval requests, decisions, grants, policy
+│   │   └── observability/      # Correlated execution events and dashboards
+│   └── middleware.ts           # Auth middleware (sessions, API tokens, RBAC routing)
+├── server.ts                   # Custom HTTP server (Next.js + WebSockets + scheduler + worker)
+├── tests/                      # Vitest unit / integration / performance suites
+├── docker-compose.yml          # Self-hosted deployment
+└── package.json
 ```
 
 ---
@@ -419,7 +394,7 @@ Built artifacts are output to the `release/` directory.
 
 ## API Reference
 
-All routes (except `/api/webhooks/` and `/api/auth/`) require a valid session cookie.
+All routes (except `/api/webhooks/`, `/api/workflow-webhooks/`, and `/api/auth/`) require a valid session cookie. Bearer API tokens are also accepted.
 
 ### Scripts
 

@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { prisma } from '@/lib/db'
 import { createWorkflowRepository } from '@/lib/workflows/repository'
 import { runClaimedWorkflow } from '@/lib/workflows/worker'
+import { createApprovalService } from '@/lib/approvals/service'
 import type { WorkflowAdapters } from '@/lib/workflows/adapters'
 import type { WorkflowDefinition } from '@/lib/workflows/types'
 
@@ -195,5 +196,52 @@ describe('workflow worker', () => {
       agent: { approved: true, actorId: 'approver-1' },
       after: { note: true },
     })
+  })
+
+  it('executes same-layer nodes concurrently instead of sequentially', async () => {
+    const started: string[] = []
+    const parallelAdapters = {
+      ...adapters,
+      runScript: vi.fn(async (config: { scriptId: string }) => {
+        started.push(config.scriptId)
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        return { exitCode: 0 }
+      }),
+    }
+    const claimed = await queued({ schemaVersion: 1, name: 'Parallel', nodes: [
+      { id: 'a', type: 'script', name: 'A', config: { scriptId: 'a' } },
+      { id: 'b', type: 'script', name: 'B', config: { scriptId: 'b' } },
+      { id: 'c', type: 'script', name: 'C', config: { scriptId: 'c' } },
+    ], edges: [] })
+    const began = Date.now()
+    await runClaimedWorkflow(claimed!, repository, parallelAdapters)
+    const elapsed = Date.now() - began
+    expect(started.sort()).toEqual(['a', 'b', 'c'])
+    expect(elapsed).toBeLessThan(1000)
+    const run = await repository.getRun(claimed!.id)
+    expect(run.status).toBe('succeeded')
+  })
+
+  it('fails the run when an approval is rejected via the decision service', async () => {
+    const definition: WorkflowDefinition = {
+      schemaVersion: 1, name: 'Rejectable',
+      nodes: [
+        { id: 'approval', type: 'approval', name: 'Approve', config: { prompt: 'Deploy?' } },
+        { id: 'script', type: 'script', name: 'Script', config: { scriptId: 's' } },
+      ],
+      edges: [{ id: 'edge', source: 'approval', target: 'script' }],
+    }
+    const workflow = await repository.createDraft({ name: definition.name, definition })
+    const version = await repository.publish(workflow.id)
+    await repository.enqueueRun({ workflowId: workflow.id, versionId: version.id, triggerType: 'manual', actorId: 'admin', payload: {} })
+    const claimed = await repository.claimNextRun('test-worker')
+    const untouchedScript = vi.fn(async () => ({ exitCode: 0 }))
+    await runClaimedWorkflow(claimed!, repository, { ...adapters, runScript: untouchedScript })
+    const pending = await prisma.approvalRequest.findFirstOrThrow({ where: { runId: claimed!.id, nodeId: 'approval' } })
+    await createApprovalService(prisma).decide(pending.id, 'reject', 'guardian')
+    const run = await repository.getRun(claimed!.id)
+    expect(run.status).toBe('failed')
+    expect(run.nodeRuns.find((item) => item.nodeId === 'approval')?.errorJson).toContain('Approval rejected')
+    expect(untouchedScript).not.toHaveBeenCalled()
   })
 })
