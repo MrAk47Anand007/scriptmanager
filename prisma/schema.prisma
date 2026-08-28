@@ -112,6 +112,8 @@ model Collection {
   name                   String
   description            String   @default("")
   folderPath             String?  @map("folder_path")
+  folderAvailable        Boolean  @default(true) @map("folder_available")
+  folderLastScannedAt    DateTime? @map("folder_last_scanned_at")
   isTemporary            Boolean  @default(false) @map("is_temporary")
   runtimePreset          String   @default("general") @map("runtime_preset")
   pythonToolchainEnabled Boolean  @default(false) @map("python_toolchain_enabled")

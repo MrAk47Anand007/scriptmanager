@@ -47,6 +47,7 @@ import {
   sendApiRequest as sendDesktopApiRequest,
 } from './apiRuntime'
 import { createOsBackedSecretStore } from './secretStore'
+import { getCanonicalFolderAvailability } from './canonicalFolderRuntime'
 import { approveRemoteExecution, rejectRemoteExecution } from '../src/lib/ops/remoteExecutionApprovalService'
 import {
   assignCollectionToProject as assignDesktopCollectionToProject,
@@ -228,6 +229,8 @@ type CollectionRecord = {
   projectId: string | null
   parentId: string | null
   folderPath: string | null
+  folderAvailable: boolean
+  folderLastScannedAt: Date | null
   isTemporary: boolean
   runtimePreset: string
   pythonToolchainEnabled: boolean
@@ -1155,6 +1158,19 @@ async function listCollections(): Promise<CollectionDto[]> {
     include: { _count: { select: { scripts: true } } },
   })
 
+  await Promise.all(collections.map(async (collection) => {
+    if (!collection.folderPath) return
+    const availability = await getCanonicalFolderAvailability(collection.folderPath, collection.id)
+    if (collection.folderAvailable !== availability.available) {
+      await prisma.collection.update({
+        where: { id: collection.id },
+        data: { folderAvailable: availability.available, folderLastScannedAt: new Date(availability.checkedAt) },
+      })
+      collection.folderAvailable = availability.available
+      collection.folderLastScannedAt = new Date(availability.checkedAt)
+    }
+  }))
+
   const hydrated = await Promise.all(collections.map((collection) => hydrateCollectionPythonMetadata(collection)))
   return hydrated.map(serializeCollectionRecord)
 }
@@ -1699,6 +1715,8 @@ async function openLocalFolder(payload: OpenFolderPayload) {
       data: {
         name: (payload.collectionName?.trim() || getFolderDisplayName(resolvedFolderPath)) + (payload.mode === 'temporary' ? ' (Temporary)' : ''),
         folderPath: resolvedFolderPath,
+        folderAvailable: true,
+        folderLastScannedAt: new Date(),
         isTemporary: payload.mode === 'temporary',
         runtimePreset: payload.runtimePreset ?? 'general',
         pythonToolchainEnabled: inspection.hasVenv || requestedPythonTools,
@@ -1720,6 +1738,8 @@ async function openLocalFolder(payload: OpenFolderPayload) {
         pythonToolchainEnabled: inspection.hasVenv || requestedPythonTools,
         pythonVenvPath: inspection.venvPath,
         pythonInterpreterPath: inspection.interpreterPath,
+        folderAvailable: true,
+        folderLastScannedAt: new Date(),
       },
       include: { _count: { select: { scripts: true } } },
     })
