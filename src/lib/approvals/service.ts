@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client'
 import { createExecutionEvent } from '@/lib/execution/events'
 import { createExecutionEventRepository } from '@/lib/execution/eventRepository'
+import type { TrustedActorContext } from '@/lib/runtime/trustedContext'
 import { canGrantDecision, isApprovalExpired } from './policy'
 import type { ApprovalDecisionKind, ApprovalRisk } from './types'
 
@@ -9,6 +10,14 @@ export interface CreateApprovalInput {
   runId?: string; nodeId?: string; capability: string; operation: string; resource: string
   risk: ApprovalRisk; reason?: string; preview?: unknown; protectedAction?: boolean
   policyVersion?: number; correlationId: string; expiresAt: Date
+}
+
+export interface ApprovalDecisionInput {
+  requestId: string
+  decision: ApprovalDecisionKind
+  actor: TrustedActorContext
+  note?: string
+  now?: Date
 }
 
 export function createApprovalService(database: PrismaClient) {
@@ -30,18 +39,25 @@ export function createApprovalService(database: PrismaClient) {
     async expire(now = new Date()) {
       return database.approvalRequest.updateMany({ where: { status: 'pending', expiresAt: { lte: now } }, data: { status: 'expired', decidedAt: now } })
     },
-    async decide(id: string, decision: ApprovalDecisionKind, decidedBy: string, note = '', now = new Date()) {
-      const request = await database.approvalRequest.findUniqueOrThrow({ where: { id } })
+    async decide(inputOrId: ApprovalDecisionInput | string, decisionArg?: ApprovalDecisionKind, decidedByArg?: string, noteArg = '', nowArg = new Date()) {
+      const requestId = typeof inputOrId === 'string' ? inputOrId : inputOrId.requestId
+      const decision = typeof inputOrId === 'string' ? decisionArg! : inputOrId.decision
+      const decidedBy = typeof inputOrId === 'string' ? decidedByArg! : inputOrId.actor.actorId
+      const actorWorkspaceId = typeof inputOrId === 'string' ? null : inputOrId.actor.workspaceId
+      const note = typeof inputOrId === 'string' ? noteArg : (inputOrId.note ?? '')
+      const now = typeof inputOrId === 'string' ? nowArg : (inputOrId.now ?? new Date())
+      const request = await database.approvalRequest.findUniqueOrThrow({ where: { id: requestId } })
+      if (actorWorkspaceId && request.workspaceId !== actorWorkspaceId) throw new Error('Approval workspace does not match')
       if (request.status !== 'pending') throw new Error(`Approval is ${request.status}`)
       if (isApprovalExpired(request.expiresAt, now)) {
-        await database.approvalRequest.update({ where: { id }, data: { status: 'expired', decidedAt: now } })
+        await database.approvalRequest.update({ where: { id: requestId }, data: { status: 'expired', decidedAt: now } })
         throw new Error('Approval has expired')
       }
       if (!canGrantDecision(decision, request.protectedAction)) throw new Error('Protected actions cannot receive workspace grants')
       const allowed = decision !== 'reject'
       await database.$transaction(async (tx) => {
-        await tx.approvalDecision.create({ data: { requestId: id, decision, decidedBy, note } })
-        await tx.approvalRequest.update({ where: { id }, data: { status: allowed ? 'approved' : 'rejected', decidedAt: now } })
+        await tx.approvalDecision.create({ data: { requestId, decision, decidedBy, note } })
+        await tx.approvalRequest.update({ where: { id: requestId }, data: { status: allowed ? 'approved' : 'rejected', decidedAt: now } })
         if (decision === 'allow_run' || decision === 'allow_workspace') await tx.approvalGrant.create({ data: {
           actorId: request.actorId, workspaceId: request.workspaceId, runId: decision === 'allow_run' ? request.runId : null,
           capability: request.capability, resource: request.resource, policyVersion: request.policyVersion, createdBy: decidedBy,
@@ -53,8 +69,8 @@ export function createApprovalService(database: PrismaClient) {
           await tx.workflowRun.update({ where: { id: request.runId }, data: allowed ? { status: 'queued', workerId: null, claimedAt: null, finishedAt: null } : { status: 'failed', errorJson: JSON.stringify({ message: 'Approval rejected' }), finishedAt: now } })
         }
       })
-      await events.append(createExecutionEvent({ type: 'approval.decided', executionKind: request.runId ? 'workflow' : 'agent', correlationId: request.correlationId, actor: { type: 'user', id: decidedBy }, target: { type: request.runId ? 'workflow' : 'agent_run', id: request.runId ?? request.id }, data: { requestId: id, decision } }))
-      return this.get(id)
+      await events.append(createExecutionEvent({ type: 'approval.decided', executionKind: request.runId ? 'workflow' : 'agent', correlationId: request.correlationId, actor: { type: 'user', id: decidedBy }, target: { type: request.runId ? 'workflow' : 'agent_run', id: request.runId ?? request.id }, data: { requestId, decision } }))
+      return this.get(requestId)
     },
   }
 }
