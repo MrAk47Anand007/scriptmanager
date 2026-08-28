@@ -35,6 +35,12 @@ export type CanonicalFile = {
   sourcePath: string
 }
 
+export type CanonicalFolderChange = {
+  type: 'changed' | 'deleted'
+  collectionId: string
+  sourcePath: string
+}
+
 export function assertPathWithinRoot(rootPath: string, candidatePath: string): string {
   const root = path.resolve(rootPath)
   const candidate = path.resolve(candidatePath)
@@ -77,4 +83,59 @@ export async function writeCanonicalFile(rootPath: string, sourcePath: string, c
   }
 
   return readCanonicalFile(rootPath, resolvedPath)
+}
+
+export function createCanonicalFolderWatcher({
+  onChange,
+  debounceMs = 50,
+}: {
+  onChange: (event: CanonicalFolderChange) => void
+  debounceMs?: number
+}) {
+  const watchers = new Map<string, fs.FSWatcher>()
+  const pending = new Map<string, ReturnType<typeof setTimeout>>()
+
+  const emit = async (collectionId: string, folderPath: string, filename: string) => {
+    const sourcePath = path.resolve(folderPath, filename)
+    if (path.basename(sourcePath).includes('.tmp')) return
+
+    try {
+      const stats = await fs.promises.stat(sourcePath)
+      if (stats.isFile()) onChange({ type: 'changed', collectionId, sourcePath })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        onChange({ type: 'deleted', collectionId, sourcePath })
+      }
+    }
+  }
+
+  return {
+    watch(collectionId: string, folderPath: string) {
+      this.unwatch(collectionId)
+      const watcher = fs.watch(folderPath, (_eventType, changedName) => {
+        if (!changedName) return
+        const filename = changedName.toString()
+        const key = `${collectionId}:${filename}`
+        const existing = pending.get(key)
+        if (existing) clearTimeout(existing)
+        pending.set(key, setTimeout(() => {
+          pending.delete(key)
+          void emit(collectionId, folderPath, filename)
+        }, debounceMs))
+      })
+      watchers.set(collectionId, watcher)
+    },
+
+    unwatch(collectionId: string) {
+      watchers.get(collectionId)?.close()
+      watchers.delete(collectionId)
+    },
+
+    close() {
+      for (const timeout of pending.values()) clearTimeout(timeout)
+      pending.clear()
+      for (const watcher of watchers.values()) watcher.close()
+      watchers.clear()
+    },
+  }
 }

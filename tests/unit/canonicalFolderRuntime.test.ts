@@ -1,8 +1,8 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { assertPathWithinRoot, readCanonicalFile, writeCanonicalFile } from '../../electron/canonicalFolderRuntime'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { assertPathWithinRoot, createCanonicalFolderWatcher, readCanonicalFile, writeCanonicalFile } from '../../electron/canonicalFolderRuntime'
 
 const temporaryDirectories: string[] = []
 
@@ -33,5 +33,17 @@ describe('canonical folder runtime', () => {
     expect(await fs.promises.readFile(sourcePath, 'utf8')).toBe('print("updated")')
     expect(after.revision).not.toBe(before.revision)
     expect(after.content).toBe('print("updated")')
+  })
+
+  it('emits a changed event after an external canonical file write', async () => {
+    const { root, sourcePath } = createFixture()
+    const events: Array<{ type: string; collectionId: string; sourcePath?: string }> = []
+    const watcher = createCanonicalFolderWatcher({ onChange: (event) => events.push(event), debounceMs: 10 })
+    watcher.watch('collection-1', root)
+
+    await fs.promises.writeFile(sourcePath, 'print("external")', 'utf8')
+
+    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'changed', collectionId: 'collection-1', sourcePath })))
+    watcher.close()
   })
 })

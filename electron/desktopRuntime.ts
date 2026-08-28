@@ -47,7 +47,8 @@ import {
   sendApiRequest as sendDesktopApiRequest,
 } from './apiRuntime'
 import { createOsBackedSecretStore } from './secretStore'
-import { getCanonicalFolderAvailability, writeCanonicalFile } from './canonicalFolderRuntime'
+import { createCanonicalFolderWatcher, getCanonicalFolderAvailability, writeCanonicalFile } from './canonicalFolderRuntime'
+import { createRecoveryDraftStore } from './recoveryDraftStore'
 import { approveRemoteExecution, rejectRemoteExecution } from '../src/lib/ops/remoteExecutionApprovalService'
 import {
   assignCollectionToProject as assignDesktopCollectionToProject,
@@ -129,6 +130,8 @@ type CollectionDto = {
   project_id: string | null
   parent_id: string | null
   folder_path: string | null
+  folder_available: boolean
+  folder_last_scanned_at: string | null
   is_temporary: boolean
   runtime_preset: 'general' | 'python' | 'node' | 'shell' | 'powershell'
   python_toolchain_enabled: boolean
@@ -240,6 +243,24 @@ type CollectionRecord = {
   remotePrefix?: string | null
   createdAt: Date
   _count?: { scripts: number }
+}
+
+let canonicalFolderWatcher: ReturnType<typeof createCanonicalFolderWatcher> | null = null
+
+function getCanonicalFolderWatcher() {
+  canonicalFolderWatcher ??= createCanonicalFolderWatcher({
+    onChange: () => undefined,
+  })
+  return canonicalFolderWatcher
+}
+
+export function getDesktopRecoveryDraftStore() {
+  return createRecoveryDraftStore({ rootDir: app.getPath('userData') })
+}
+
+export function stopCanonicalFolderWatchers() {
+  canonicalFolderWatcher?.close()
+  canonicalFolderWatcher = null
 }
 
 type FolderInspection = {
@@ -498,6 +519,8 @@ function serializeCollectionRecord(collection: CollectionRecord): CollectionDto 
     project_id: collection.projectId ?? null,
     parent_id: collection.parentId ?? null,
     folder_path: collection.folderPath ?? null,
+    folder_available: collection.folderAvailable,
+    folder_last_scanned_at: collection.folderLastScannedAt?.toISOString() ?? null,
     is_temporary: collection.isTemporary,
     runtime_preset: normalizeRuntimePreset(collection.runtimePreset),
     python_toolchain_enabled: collection.pythonToolchainEnabled,
@@ -1169,6 +1192,8 @@ async function listCollections(): Promise<CollectionDto[]> {
       collection.folderAvailable = availability.available
       collection.folderLastScannedAt = new Date(availability.checkedAt)
     }
+    if (availability.available) getCanonicalFolderWatcher().watch(collection.id, collection.folderPath)
+    else getCanonicalFolderWatcher().unwatch(collection.id)
   }))
 
   const hydrated = await Promise.all(collections.map((collection) => hydrateCollectionPythonMetadata(collection)))
