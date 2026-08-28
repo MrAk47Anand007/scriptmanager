@@ -6,16 +6,16 @@ import { parseSessionToken, SESSION_COOKIE, type SessionPayload } from '@/lib/au
 import { isDesktopSessionToken } from '@/lib/session'
 import { ensureDefaultWorkspace } from './bootstrap'
 import type { AuthorizationContext } from './types'
+import { createDesktopActorContext, type TrustedActorContext } from '@/lib/runtime/trustedContext'
 
 export const hashSessionToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex')
 
-export async function resolveRequestContext(request: Request | NextRequest, database: PrismaClient = prisma): Promise<AuthorizationContext | null> {
+function readSessionCookie(request: Request | NextRequest): string | undefined {
   const cookie = request.headers.get('cookie')?.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${SESSION_COOKIE}=`))?.slice(SESSION_COOKIE.length + 1)
-  const token = cookie ? decodeURIComponent(cookie) : undefined
-  const desktopSession = isDesktopSessionToken(token)
-  const payload: SessionPayload | null = desktopSession ? { expiry: Number.MAX_SAFE_INTEGER } : parseSessionToken(token)
-  if (!payload) return null
-  const identity: SessionPayload = payload.userId && payload.workspaceId ? payload : { ...payload, ...(await ensureDefaultWorkspace(database)) }
+  return cookie ? decodeURIComponent(cookie) : undefined
+}
+
+async function loadAuthorizationContext(identity: SessionPayload, token: string | undefined, database: PrismaClient): Promise<AuthorizationContext | null> {
   if (identity.sessionId) {
     const session = await database.userSession.findUnique({ where: { id: identity.sessionId } })
     if (!session || session.revokedAt || session.expiresAt <= new Date() || session.tokenHash !== hashSessionToken(token!)) return null
@@ -26,4 +26,49 @@ export async function resolveRequestContext(request: Request | NextRequest, data
   })
   if (!membership || membership.status !== 'active') return null
   return { userId: identity.userId!, workspaceId: identity.workspaceId!, sessionId: identity.sessionId, membershipId: membership.id, roleKey: membership.role.key, permissions: membership.role.permissions.map((entry) => entry.permission) }
+}
+
+export async function resolveTrustedRequestContext(request: Request | NextRequest, database: PrismaClient = prisma): Promise<TrustedActorContext | null> {
+  const token = readSessionCookie(request)
+  if (isDesktopSessionToken(token)) {
+    return createDesktopActorContext(database)
+  }
+
+  const payload = parseSessionToken(token)
+  if (!payload) {
+    return null
+  }
+
+  const identity: SessionPayload = payload.userId && payload.workspaceId ? payload : { ...payload, ...(await ensureDefaultWorkspace(database)) }
+  const context = await loadAuthorizationContext(identity, token, database)
+  if (!context) {
+    return null
+  }
+
+  return {
+    runtimeMode: 'web',
+    authType: 'session',
+    actorId: context.userId,
+    workspaceId: context.workspaceId,
+    membershipId: context.membershipId,
+    roleKey: context.roleKey,
+    permissions: context.permissions,
+    sessionId: context.sessionId,
+  }
+}
+
+export async function resolveRequestContext(request: Request | NextRequest, database: PrismaClient = prisma): Promise<AuthorizationContext | null> {
+  const context = await resolveTrustedRequestContext(request, database)
+  if (!context) {
+    return null
+  }
+
+  return {
+    userId: context.actorId,
+    workspaceId: context.workspaceId,
+    membershipId: context.membershipId,
+    roleKey: context.roleKey,
+    permissions: context.permissions,
+    sessionId: context.sessionId,
+  }
 }

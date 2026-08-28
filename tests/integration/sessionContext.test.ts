@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { prisma } from '@/lib/db'
 import { createSessionToken, SESSION_COOKIE } from '@/lib/auth'
 import { ensureDefaultWorkspace } from '@/lib/rbac/bootstrap'
-import { hashSessionToken, resolveRequestContext } from '@/lib/rbac/requestContext'
+import { hashSessionToken, resolveTrustedRequestContext } from '@/lib/rbac/requestContext'
 
 beforeAll(async () => { await ensureDefaultWorkspace(prisma) })
 afterEach(async () => { await prisma.userSession.deleteMany({ where: { userId: 'local-admin' } }) })
@@ -17,8 +17,10 @@ describe('persisted request session context', () => {
     })
 
     try {
-      await expect(resolveRequestContext(request)).resolves.toMatchObject({
-        userId: 'local-admin',
+      await expect(resolveTrustedRequestContext(request)).resolves.toMatchObject({
+        runtimeMode: 'desktop',
+        authType: 'desktop',
+        actorId: 'local-admin',
         workspaceId: 'default',
         roleKey: 'owner',
         permissions: expect.arrayContaining(['*:*']),
@@ -34,8 +36,15 @@ describe('persisted request session context', () => {
     const token = createSessionToken({ userId: 'local-admin', workspaceId: 'default', sessionId })
     await prisma.userSession.create({ data: { id: sessionId, userId: 'local-admin', workspaceId: 'default', tokenHash: hashSessionToken(token), expiresAt: new Date(Date.now() + 60_000) } })
     const request = new Request('http://localhost/api/scripts', { headers: { cookie: `${SESSION_COOKIE}=${encodeURIComponent(token)}` } })
-    await expect(resolveRequestContext(request)).resolves.toMatchObject({ userId: 'local-admin', workspaceId: 'default', roleKey: 'owner', permissions: expect.arrayContaining(['*:*']) })
+    await expect(resolveTrustedRequestContext(request)).resolves.toMatchObject({
+      runtimeMode: 'web',
+      authType: 'session',
+      actorId: 'local-admin',
+      workspaceId: 'default',
+      roleKey: 'owner',
+      permissions: expect.arrayContaining(['*:*']),
+    })
     await prisma.userSession.update({ where: { id: sessionId }, data: { revokedAt: new Date() } })
-    await expect(resolveRequestContext(request)).resolves.toBeNull()
+    await expect(resolveTrustedRequestContext(request)).resolves.toBeNull()
   })
 })
