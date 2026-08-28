@@ -48,7 +48,7 @@ export const productionWorkflowAdapters: WorkflowAdapters = {
   async runApiRequest(config, input, signal) {
     throwIfAborted(signal)
     const request = await prisma.apiRequest.findUniqueOrThrow({ where: { id: String(config.requestId) } })
-    const result = await executeApiRequest({ requestId: request.id, collectionId: request.collectionId, method: request.method, url: request.url, headers: rows(request.headers), queryParams: rows(request.queryParams), variables: rows(request.variables), requestOptions: JSON.parse(request.requestOptions || '{}'), preRequestScript: request.preRequestScript, testScript: request.testScript, responseMappings: rows(request.responseMappings), bodyType: request.bodyType as 'none', body: request.body, authType: request.authType as 'none', authConfig: JSON.parse(request.authConfig || '{}'), signal })
+    const result = await executeApiRequest({ workspaceId: 'default', requestId: request.id, collectionId: request.collectionId, method: request.method, url: request.url, headers: rows(request.headers), queryParams: rows(request.queryParams), variables: rows(request.variables), requestOptions: JSON.parse(request.requestOptions || '{}'), preRequestScript: request.preRequestScript, testScript: request.testScript, responseMappings: rows(request.responseMappings), bodyType: request.bodyType as 'none', body: request.body, authType: request.authType as 'none', authConfig: JSON.parse(request.authConfig || '{}'), signal })
     if (!result.ok) throw new Error(result.error)
     return result
   },

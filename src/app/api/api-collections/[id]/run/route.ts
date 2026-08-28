@@ -2,9 +2,12 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { executeApiRequest } from '@/lib/executeApiRequest'
 import { parseResponseMappingRows, parseVariableRows } from '@/lib/apiRequestMaterialization'
+import { requireTrustedContext } from '@/lib/runtime/trustedContext'
+import { resolveTrustedRequestContext } from '@/lib/rbac/requestContext'
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  const actor = requireTrustedContext(await resolveTrustedRequestContext(req, prisma))
   const { environmentId } = await req.json().catch(() => ({ environmentId: null }))
 
   const [collection, environment] = await Promise.all([
@@ -45,6 +48,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   for (const request of requests) {
     try {
       const result = await executeApiRequest({
+        workspaceId: actor.workspaceId,
         requestId: request.id,
         collectionId: request.collectionId,
         environmentId: environment?.id ?? null,

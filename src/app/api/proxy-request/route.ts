@@ -4,11 +4,14 @@ import type { ApiResponseMappingRow, ApiVariableRow } from '@/lib/apiRequestMate
 import { executionTelemetry } from '@/lib/execution'
 import { prisma } from '@/lib/db'
 import { resolveApiAuthConfig } from '@/lib/secrets/apiAuth'
+import { resolveTrustedRequestContext } from '@/lib/rbac/requestContext'
+import { requireTrustedContext } from '@/lib/runtime/trustedContext'
 
 export async function POST(req: Request) {
   const correlationId = executionTelemetry.correlationId(req)
   let targetId = 'draft'
   try {
+    const actor = requireTrustedContext(await resolveTrustedRequestContext(req, prisma))
     const {
       requestId,
       collectionId,
@@ -41,6 +44,7 @@ export async function POST(req: Request) {
     })
 
     const result = await executeApiRequest({
+      workspaceId: actor.workspaceId,
       requestId: requestId ?? null,
       collectionId: collectionId ?? null,
       environmentId: environmentId ?? null,

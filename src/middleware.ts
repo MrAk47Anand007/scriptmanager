@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { isAuthenticatedSessionToken, SESSION_COOKIE } from '@/lib/session'
-import { verifyApiToken } from '@/lib/auth'
 import { prisma } from '@/lib/db'
-import { resolveRequestContext } from '@/lib/rbac/requestContext'
+import { resolveBearerTokenContext, resolveRequestContext, resolveTrustedRequestContext } from '@/lib/rbac/requestContext'
 import { authorize } from '@/lib/rbac/authorization'
 import type { RbacAction, RbacResource } from '@/lib/rbac/catalog'
 
@@ -25,15 +24,11 @@ const PUBLIC_PREFIXES = [
   '/favicon.ico',
 ]
 
-async function hasValidApiToken(request: NextRequest): Promise<boolean> {
-  const authHeader = request.headers.get('authorization')
-  if (!authHeader?.startsWith('Bearer ')) return false
-
-  const token = authHeader.slice('Bearer '.length).trim()
-  if (!token) return false
-
-  const stored = await prisma.setting.findUnique({ where: { key: 'api_token_hash' } })
-  return verifyApiToken(token, stored?.value)
+function deniedResponse(reason: string, permission?: string, status?: number) {
+  return NextResponse.json(
+    permission ? { error: reason, permission } : { error: reason },
+    { status: status ?? (reason === 'unauthenticated' ? 401 : 403) },
+  )
 }
 
 export async function middleware(request: NextRequest) {
@@ -54,7 +49,7 @@ export async function middleware(request: NextRequest) {
         const requestedWorkspaceId = request.nextUrl.searchParams.get('workspaceId') ?? undefined
         const resourceWorkspaceId = await findResourceWorkspace(pathname, requirement.resource)
         const decision = authorize(context, requirement.resource, requirement.action, resourceWorkspaceId ?? requestedWorkspaceId)
-        if (!decision.allowed) return NextResponse.json({ error: decision.reason, permission: decision.permission }, { status: decision.reason === 'unauthenticated' ? 401 : 403 })
+        if (!decision.allowed) return deniedResponse(decision.reason, decision.permission)
         const headers = new Headers(request.headers)
         headers.set('x-scriptmanager-workspace-id', context!.workspaceId)
         headers.set('x-scriptmanager-user-id', context!.userId)
@@ -65,13 +60,43 @@ export async function middleware(request: NextRequest) {
   }
 
   // Allow API clients to authenticate with a bearer token
-  if (pathname.startsWith('/api/') && await hasValidApiToken(request)) {
-    return NextResponse.next()
+  if (pathname.startsWith('/api/')) {
+    const requirement = apiRequirement(pathname, request.method)
+    const bearerContext = await resolveBearerTokenContext(request, prisma)
+    if (bearerContext) {
+      if (!requirement) {
+        return NextResponse.next()
+      }
+
+      const requestedWorkspaceId = request.nextUrl.searchParams.get('workspaceId') ?? undefined
+      const resourceWorkspaceId = await findResourceWorkspace(pathname, requirement.resource)
+      const decision = authorize(
+        {
+          userId: bearerContext.actorId,
+          workspaceId: bearerContext.workspaceId,
+          membershipId: bearerContext.membershipId,
+          roleKey: bearerContext.roleKey,
+          permissions: bearerContext.permissions,
+          sessionId: bearerContext.sessionId,
+        },
+        requirement.resource,
+        requirement.action,
+        resourceWorkspaceId ?? requestedWorkspaceId,
+      )
+      if (!decision.allowed) {
+        return deniedResponse(decision.reason, decision.permission)
+      }
+
+      const headers = new Headers(request.headers)
+      headers.set('x-scriptmanager-workspace-id', bearerContext.workspaceId)
+      headers.set('x-scriptmanager-user-id', bearerContext.actorId)
+      return NextResponse.next({ request: { headers } })
+    }
   }
 
   // API routes return 401 JSON instead of redirecting
   if (pathname.startsWith('/api/')) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return deniedResponse('Unauthorized', undefined, 401)
   }
 
   // Redirect browser requests to login page

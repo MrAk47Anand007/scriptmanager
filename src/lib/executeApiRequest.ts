@@ -14,7 +14,7 @@ import { executeApiScripts } from '@/lib/apiScripting'
 
 const MAX_BODY_SIZE = 1024 * 1024
 const PRIVATE_HOST_ERROR = 'Requests to localhost or private network addresses are blocked by default'
-const COOKIE_JAR_KEY = 'api_cookie_jar'
+const COOKIE_JAR_KEY_PREFIX = 'api_cookie_jar:'
 
 interface AuthConfig {
   token?: string
@@ -38,6 +38,7 @@ interface CookieJarStore {
 }
 
 export interface ExecuteApiRequestInput {
+  workspaceId: string
   requestId?: string | null
   collectionId?: string | null
   environmentId?: string | null
@@ -117,8 +118,12 @@ async function validateProxyTarget(rawUrl: string): Promise<{ ok: true; url: URL
   return { ok: true, url: parsedUrl }
 }
 
-async function readCookieJar(): Promise<CookieJarStore> {
-  const setting = await prisma.setting.findUnique({ where: { key: COOKIE_JAR_KEY } })
+function cookieJarKey(workspaceId: string) {
+  return `${COOKIE_JAR_KEY_PREFIX}${workspaceId}`
+}
+
+export async function readCookieJar(workspaceId: string): Promise<CookieJarStore> {
+  const setting = await prisma.setting.findUnique({ where: { key: cookieJarKey(workspaceId) } })
   if (!setting?.value) return {}
   try {
     return JSON.parse(setting.value) as CookieJarStore
@@ -127,11 +132,11 @@ async function readCookieJar(): Promise<CookieJarStore> {
   }
 }
 
-async function writeCookieJar(jar: CookieJarStore) {
+export async function writeCookieJar(workspaceId: string, jar: CookieJarStore) {
   await prisma.setting.upsert({
-    where: { key: COOKIE_JAR_KEY },
+    where: { key: cookieJarKey(workspaceId) },
     update: { value: JSON.stringify(jar) },
-    create: { key: COOKIE_JAR_KEY, value: JSON.stringify(jar) },
+    create: { key: cookieJarKey(workspaceId), value: JSON.stringify(jar) },
   })
 }
 
@@ -343,7 +348,7 @@ export async function executeApiRequest(input: ExecuteApiRequestInput) {
 
   const finalHeaders: Record<string, string> = {}
   const useCookieJar = Boolean(runtimeRequest.requestOptions?.useCookieJar)
-  const cookieJar = useCookieJar ? await readCookieJar() : {}
+  const cookieJar = useCookieJar ? await readCookieJar(input.workspaceId) : {}
 
   runtimeRequest.headers.filter((header) => header.enabled && header.key).forEach((header) => {
     finalHeaders[header.key] = header.value
@@ -459,7 +464,7 @@ export async function executeApiRequest(input: ExecuteApiRequestInput) {
         if (pair) jarForHost[pair.name] = pair.value
       }
       cookieJar[target.url.hostname] = jarForHost
-      await writeCookieJar(cookieJar)
+      await writeCookieJar(input.workspaceId, cookieJar)
     }
   }
 

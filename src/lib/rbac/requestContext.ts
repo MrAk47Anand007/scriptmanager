@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import type { PrismaClient } from '@prisma/client'
 import type { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
-import { parseSessionToken, SESSION_COOKIE, type SessionPayload } from '@/lib/auth'
+import { parseSessionToken, SESSION_COOKIE, type SessionPayload, verifyApiToken } from '@/lib/auth'
 import { isDesktopSessionToken } from '@/lib/session'
 import { ensureDefaultWorkspace } from './bootstrap'
 import type { AuthorizationContext } from './types'
@@ -54,6 +54,30 @@ export async function resolveTrustedRequestContext(request: Request | NextReques
     roleKey: context.roleKey,
     permissions: context.permissions,
     sessionId: context.sessionId,
+  }
+}
+
+export async function resolveBearerTokenContext(request: Request | NextRequest, database: PrismaClient = prisma): Promise<TrustedActorContext | null> {
+  const authHeader = request.headers.get('authorization')
+  if (!authHeader?.startsWith('Bearer ')) {
+    return null
+  }
+
+  const token = authHeader.slice('Bearer '.length).trim()
+  if (!token) {
+    return null
+  }
+
+  const stored = await database.setting.findUnique({ where: { key: 'api_token_hash' } })
+  if (!verifyApiToken(token, stored?.value)) {
+    return null
+  }
+
+  const context = await createDesktopActorContext(database)
+  return {
+    ...context,
+    runtimeMode: 'web',
+    authType: 'bearer',
   }
 }
 
