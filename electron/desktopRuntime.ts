@@ -47,7 +47,7 @@ import {
   sendApiRequest as sendDesktopApiRequest,
 } from './apiRuntime'
 import { createOsBackedSecretStore } from './secretStore'
-import { getCanonicalFolderAvailability } from './canonicalFolderRuntime'
+import { getCanonicalFolderAvailability, writeCanonicalFile } from './canonicalFolderRuntime'
 import { approveRemoteExecution, rejectRemoteExecution } from '../src/lib/ops/remoteExecutionApprovalService'
 import {
   assignCollectionToProject as assignDesktopCollectionToProject,
@@ -1541,10 +1541,13 @@ async function saveLocalScript(payload: SaveScriptPayload): Promise<ScriptDto> {
   }
 
   const filePath = resolveScriptPath(script)
-  // The script's folder may not exist yet (fresh checkout, moved workspace,
-  // or a DB row pointing at a deleted directory) — recreate it before writing.
-  fs.mkdirSync(path.dirname(filePath), { recursive: true })
-  fs.writeFileSync(filePath, payload.content, 'utf8')
+  if (script.sourcePath && script.collection?.folderPath) {
+    await writeCanonicalFile(script.collection.folderPath, filePath, payload.content)
+  } else {
+    // The managed workspace may not exist yet after a fresh checkout.
+    fs.mkdirSync(path.dirname(filePath), { recursive: true })
+    fs.writeFileSync(filePath, payload.content, 'utf8')
+  }
   await createVersionSnapshot(script.id, payload.content)
 
   const updated = await prisma.script.update({
