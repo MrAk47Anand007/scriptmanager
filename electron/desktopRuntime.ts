@@ -6,7 +6,19 @@ import crypto from 'crypto'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { createApprovalService } from '../src/lib/approvals/service'
+import { createPluginRegistry } from '../src/lib/plugins/registry'
+import { createTeamAdminService } from '../src/lib/rbac/adminService'
+import { createDesktopActorContext } from '../src/lib/runtime/trustedContext'
+import { vaultNotificationConfig } from '../src/lib/secrets/notificationConfig'
 import { resolveScriptEnvironment } from '../src/lib/secrets/runtime'
+import { createSecretVaultService } from '../src/lib/secrets/service'
+import { createServerSecretStore } from '../src/lib/secrets/serverStore'
+import { notifyWorkflowWorker } from '../src/lib/workflows/workerLoop'
+import { createWorkflowRepository } from '../src/lib/workflows/repository'
+import { parseWorkflowDefinition } from '../src/lib/workflows/schema'
+import { createWorkflowTriggerService } from '../src/lib/workflows/triggers'
+import { validateWorkflowGraph } from '../src/lib/workflows/graph'
 import { getDesktopWorkspaceLayout, ensureDesktopWorkspaceLayout, sanitizeWorkspaceName } from '../src/lib/workspaceLayout'
 import {
   deleteStorageProvider as deleteDesktopStorageProvider,
@@ -34,8 +46,9 @@ import {
   saveApiRequest as saveDesktopApiRequest,
   sendApiRequest as sendDesktopApiRequest,
 } from './apiRuntime'
+import { createOsBackedSecretStore } from './secretStore'
+import { approveRemoteExecution, rejectRemoteExecution } from '../src/lib/ops/remoteExecutionApprovalService'
 import {
-  approveExecution as approveDesktopRemoteExecution,
   assignCollectionToProject as assignDesktopCollectionToProject,
   deleteProject as deleteDesktopProject,
   deleteServerProfile as deleteDesktopServerProfile,
@@ -43,7 +56,6 @@ import {
   listAuditLog as listDesktopAuditLog,
   listProjects as listDesktopProjects,
   listServerProfiles as listDesktopServerProfiles,
-  rejectExecution as rejectDesktopRemoteExecution,
   saveProject as saveDesktopProject,
   saveServerProfile as saveDesktopServerProfile,
   startRemoteExec as startDesktopRemoteExecution,
@@ -262,6 +274,46 @@ const SAFE_FILENAME_CHARS = /[^a-zA-Z0-9_.-]/g
 const SETTINGS_CACHE_TTL_MS = 30_000
 
 let cachedWorkspaceRoot: { value: string; expiresAt: number } | null = null
+const desktopWorkflowRepository = createWorkflowRepository(prisma)
+
+function getDesktopSecretVaultService() {
+  try {
+    return createSecretVaultService(prisma, createOsBackedSecretStore())
+  } catch {
+    return createSecretVaultService(prisma, createServerSecretStore())
+  }
+}
+
+async function readSettingsMap(): Promise<Record<string, string>> {
+  const settings = await prisma.setting.findMany()
+  const result: Record<string, string> = {}
+
+  for (const entry of settings) {
+    if (entry.value !== null) {
+      result[entry.key] = entry.value
+    }
+  }
+
+  return result
+}
+
+async function saveSettingsMap(nextSettings: Record<string, string>): Promise<Record<string, string>> {
+  await prisma.$transaction(
+    Object.entries(nextSettings).map(([key, value]) =>
+      prisma.setting.upsert({
+        where: { key },
+        update: { value: value ?? '' },
+        create: { key, value: value ?? '' },
+      })
+    )
+  )
+
+  return readSettingsMap()
+}
+
+function serializeWorkflow(workflow: { draftDefinition: string; [key: string]: unknown }) {
+  return { ...workflow, definition: JSON.parse(workflow.draftDefinition), draftDefinition: undefined }
+}
 
 function normalizeRuntimePreset(value: string | null | undefined): CollectionDto['runtime_preset'] {
   if (value === 'python' || value === 'node' || value === 'shell' || value === 'powershell') {
@@ -2181,6 +2233,114 @@ function destroyWindowRuntime(windowId: number) {
   windowRuntimes.delete(windowId)
 }
 
+async function getDesktopBootstrapState() {
+  const [scripts, collections, settings] = await Promise.all([
+    listScripts(),
+    listCollections(),
+    readSettingsMap(),
+  ])
+
+  return { scripts, collections, settings }
+}
+
+async function listWorkspaceAccessState() {
+  const actor = await createDesktopActorContext(prisma)
+  const service = createTeamAdminService(prisma)
+  const [workspace, members, roles, invitations, sessions, audit] = await Promise.all([
+    prisma.workspace.findUnique({ where: { id: actor.workspaceId } }),
+    service.listMembers(actor.workspaceId),
+    service.listRoles(actor.workspaceId),
+    service.listInvitations(actor.workspaceId),
+    service.listSessions(actor.workspaceId),
+    service.listAudit(actor.workspaceId),
+  ])
+
+  return {
+    workspace,
+    members,
+    roles,
+    invitations,
+    currentUserId: actor.actorId,
+    permissions: actor.permissions,
+    sessions,
+    audit,
+  }
+}
+
+async function createWorkflowDraftForDesktop(payload: {
+  name: string
+  description?: string
+  definition: unknown
+  projectId?: string | null
+}) {
+  const actor = await createDesktopActorContext(prisma)
+  const workflow = await desktopWorkflowRepository.createDraft({
+    name: payload.name,
+    description: payload.description,
+    definition: parseWorkflowDefinition(payload.definition),
+    projectId: payload.projectId,
+    workspaceId: actor.workspaceId,
+  })
+  return serializeWorkflow(workflow)
+}
+
+async function saveWorkflowDraftForDesktop(payload: {
+  id: string
+  definition: unknown
+  projectId?: string | null
+}) {
+  const updated = await desktopWorkflowRepository.updateDraft(
+    payload.id,
+    parseWorkflowDefinition(payload.definition)
+  )
+
+  if (payload.projectId !== undefined) {
+    await desktopWorkflowRepository.setProject(payload.id, payload.projectId)
+  }
+
+  return serializeWorkflow({
+    ...updated,
+    projectId: payload.projectId ?? updated.projectId,
+  })
+}
+
+async function publishWorkflowForDesktop(id: string) {
+  const stored = await desktopWorkflowRepository.getWorkflow(id)
+  if (!stored) {
+    throw new Error('Workflow not found')
+  }
+
+  const issues = validateWorkflowGraph(parseWorkflowDefinition(JSON.parse(stored.draftDefinition)))
+  if (issues.length) {
+    throw new Error('Workflow is invalid')
+  }
+
+  return desktopWorkflowRepository.publish(id)
+}
+
+async function runWorkflowForDesktop(payload: { id: string; input?: unknown }) {
+  const actor = await createDesktopActorContext(prisma)
+  const workflow = await desktopWorkflowRepository.getWorkflow(payload.id)
+  if (!workflow?.publishedVersion) {
+    throw new Error('Publish the workflow before running it')
+  }
+
+  const version = workflow.versions.find((item) => item.version === workflow.publishedVersion)
+  if (!version) {
+    throw new Error('Published workflow version not found')
+  }
+
+  const run = await createWorkflowTriggerService(desktopWorkflowRepository).manual({
+    workflowId: payload.id,
+    versionId: version.id,
+    actorId: actor.actorId,
+    payload: payload.input ?? {},
+  })
+
+  notifyWorkflowWorker()
+  return run
+}
+
 export function attachDesktopRuntime(window: BrowserWindow) {
   const handleClosed = () => destroyWindowRuntime(window.id)
   window.once('closed', handleClosed)
@@ -2195,6 +2355,143 @@ export function warmWindowDesktopRuntime(window: BrowserWindow) {
 }
 
 export function initDesktopRuntimeIpc() {
+  ipcMain.handle('scriptmanager:runtime:get-bootstrap-state', async () => {
+    return getDesktopBootstrapState()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:read-settings', async () => {
+    return readSettingsMap()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-settings', async (_event, settings: Record<string, string>) => {
+    return saveSettingsMap(settings)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-secrets', async () => {
+    const actor = await createDesktopActorContext(prisma)
+    return getDesktopSecretVaultService().listSecrets(actor.workspaceId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:create-secret', async (_event, payload: { name: string; plaintext: string; description?: string; scope?: string }) => {
+    const actor = await createDesktopActorContext(prisma)
+    return getDesktopSecretVaultService().createSecret({ ...payload, workspaceId: actor.workspaceId, createdBy: actor.actorId })
+  })
+
+  ipcMain.handle('scriptmanager:runtime:rotate-secret', async (_event, payload: { id: string; plaintext?: string; resource?: string; reason?: string }) => {
+    if (!payload.plaintext) throw new Error('Secret value is required')
+    const actor = await createDesktopActorContext(prisma)
+    return getDesktopSecretVaultService().rotateSecret(payload.id, payload.plaintext, {
+      actorType: 'user', actorId: actor.actorId, workspaceId: actor.workspaceId, capability: 'secret:manage', resource: payload.resource ?? 'desktop', reason: payload.reason ?? '',
+    })
+  })
+
+  ipcMain.handle('scriptmanager:runtime:disable-secret', async (_event, payload: { id: string; resource?: string; reason?: string }) => {
+    const actor = await createDesktopActorContext(prisma)
+    return getDesktopSecretVaultService().disableSecret(payload.id, {
+      actorType: 'user', actorId: actor.actorId, workspaceId: actor.workspaceId, capability: 'secret:manage', resource: payload.resource ?? 'desktop', reason: payload.reason ?? '',
+    })
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-approvals', async (_event, status?: string) => {
+    await createDesktopActorContext(prisma)
+    return createApprovalService(prisma).list(status)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:decide-approval', async (_event, payload: { id: string; decision: 'allow_once' | 'allow_run' | 'allow_workspace' | 'reject'; note?: string }) => {
+    const actor = await createDesktopActorContext(prisma)
+    return createApprovalService(prisma).decide({ requestId: payload.id, decision: payload.decision, actor, note: payload.note })
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-workspace-access', async () => {
+    return listWorkspaceAccessState()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:create-workspace-invitation', async (_event, payload: { email: string; roleId: string }) => {
+    const actor = await createDesktopActorContext(prisma)
+    return createTeamAdminService(prisma).invite({ workspaceId: actor.workspaceId, email: payload.email, roleId: payload.roleId, invitedById: actor.actorId })
+  })
+
+  ipcMain.handle('scriptmanager:runtime:revoke-workspace-grants', async (_event, payload: { actorId?: string }) => {
+    const actor = await createDesktopActorContext(prisma)
+    return createTeamAdminService(prisma).revokeGrants(actor.workspaceId, payload.actorId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:create-workspace-role', async (_event, payload: { name: string; description?: string; permissions: string[] }) => {
+    const actor = await createDesktopActorContext(prisma)
+    return createTeamAdminService(prisma).createRole(actor.workspaceId, actor.actorId, payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-workflows', async () => {
+    const actor = await createDesktopActorContext(prisma)
+    return (await desktopWorkflowRepository.listWorkflows(actor.workspaceId)).map(serializeWorkflow)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:create-workflow', async (_event, payload) => {
+    return createWorkflowDraftForDesktop(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-workflow', async (_event, payload) => {
+    return saveWorkflowDraftForDesktop(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:publish-workflow', async (_event, id: string) => {
+    return publishWorkflowForDesktop(id)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:run-workflow', async (_event, payload: { id: string; input?: unknown }) => {
+    return runWorkflowForDesktop(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-workflow-runs', async (_event, workflowId: string) => {
+    return desktopWorkflowRepository.listRuns(workflowId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:read-workflow-run', async (_event, runId: string) => {
+    return desktopWorkflowRepository.getRun(runId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:retry-workflow-node', async (_event, payload: { runId: string; nodeId: string }) => {
+    return desktopWorkflowRepository.retryNode(payload.runId, payload.nodeId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:cancel-workflow-run', async (_event, runId: string) => {
+    return desktopWorkflowRepository.requestCancellation(runId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-notification-channels', async () => {
+    return prisma.notificationChannel.findMany({ include: { _count: { select: { rules: true, deliveries: true } } }, orderBy: { createdAt: 'desc' } })
+  })
+
+  ipcMain.handle('scriptmanager:runtime:create-notification-channel', async (_event, payload: { name: string; kind: string; config?: unknown }) => {
+    if (!['desktop', 'webhook', 'slack', 'smtp', 'teams'].includes(payload.kind)) throw new Error('Invalid channel')
+    const id = crypto.randomUUID()
+    const config = await vaultNotificationConfig(prisma, id, payload.config)
+    return prisma.notificationChannel.create({ data: { id, name: payload.name, kind: payload.kind, configJson: JSON.stringify(config) } })
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-plugins', async () => {
+    const actor = await createDesktopActorContext(prisma)
+    return createPluginRegistry(prisma).list(actor.workspaceId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:update-plugin', async (_event, payload: { id: string; action: string; healthy?: boolean; message?: string; settings?: unknown }) => {
+    const actor = await createDesktopActorContext(prisma)
+    const registry = createPluginRegistry(prisma)
+    const result = payload.action === 'trust' ? await registry.trust(actor.workspaceId, payload.id)
+      : payload.action === 'enable' ? await registry.enable(actor.workspaceId, payload.id)
+        : payload.action === 'disable' ? await registry.disable(actor.workspaceId, payload.id)
+          : payload.action === 'health' ? await registry.setHealth(actor.workspaceId, payload.id, Boolean(payload.healthy), payload.message)
+            : payload.action === 'settings' ? await registry.updateSettings(actor.workspaceId, payload.id, payload.settings)
+              : null
+    if (!result) throw new Error('Unsupported plugin action')
+    return result
+  })
+
+  ipcMain.handle('scriptmanager:runtime:remove-plugin', async (_event, id: string) => {
+    const actor = await createDesktopActorContext(prisma)
+    await createPluginRegistry(prisma).uninstall(actor.workspaceId, id)
+  })
+
   ipcMain.handle('scriptmanager:runtime:list-scripts', async () => {
     return listScripts()
   })
@@ -2368,15 +2665,17 @@ export function initDesktopRuntimeIpc() {
     return result
   })
 
-  ipcMain.handle('scriptmanager:runtime:approve-remote-execution', async (event, payload: { id: string; approverName: string }) => {
+  ipcMain.handle('scriptmanager:runtime:approve-remote-execution', async (event, payload: { id: string; note?: string }) => {
     const window = resolveWindow(event)
-    const id = await approveDesktopRemoteExecution(payload.id, payload.approverName)
-    forwardRemoteExecutionToWindow(window, id)
-    return id
+    const actor = await createDesktopActorContext(prisma)
+    const result = await approveRemoteExecution(payload.id, actor, crypto.randomUUID())
+    forwardRemoteExecutionToWindow(window, result.remoteExecId)
+    return result
   })
 
   ipcMain.handle('scriptmanager:runtime:reject-remote-execution', async (_event, id: string) => {
-    return rejectDesktopRemoteExecution(id)
+    const actor = await createDesktopActorContext(prisma)
+    return rejectRemoteExecution(id, actor)
   })
 
   ipcMain.handle('scriptmanager:runtime:list-audit-log', async (_event, payload) => {

@@ -49,6 +49,5 @@ export async function createDesktopActorContext(database: PrismaClient = prisma)
     membershipId: membership.id,
     roleKey: membership.role.key,
     permissions: membership.role.permissions.map((entry) => entry.permission),
-    sessionId: identity.sessionId,
   }
 }

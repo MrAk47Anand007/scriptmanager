@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Clock, History, Loader2, RefreshCw, ShieldCheck, UserPlus, Users } from 'lucide-react'
+import { createWorkspaceInvitationRuntime, createWorkspaceRoleRuntime, loadWorkspaceAccessRuntime, revokeWorkspaceGrantsRuntime } from '@/lib/workspacesRuntimeClient'
 
 type Role = { id: string; key: string; name: string; permissions: { permission: string }[] }
 type Member = { id: string; status: string; user: { id: string; name: string; email: string }; role: Role }
@@ -23,25 +24,20 @@ export const WorkspaceAccessSection = () => {
   const [audit, setAudit] = useState<AuditEvent[]>([])
   const load = useCallback(async () => {
     setError('')
-    const response = await fetch('/api/workspaces/current')
-    if (!response.ok) { setError(response.status === 403 ? 'Your role cannot view workspace administration.' : 'Could not load workspace access.'); return }
-    const next = await response.json(); setData(next); setRoleId((value) => value || next.roles.find((role: Role) => role.key === 'viewer')?.id || '')
-    const [sessionsResponse, auditResponse] = await Promise.all([fetch('/api/workspaces/current/sessions'), fetch('/api/workspaces/current/audit')])
-    if (sessionsResponse.ok) setSessions(await sessionsResponse.json())
-    if (auditResponse.ok) setAudit(await auditResponse.json())
+    try {
+      const next = await loadWorkspaceAccessRuntime(); setData(next); setRoleId((value) => value || next.roles.find((role: Role) => role.key === 'viewer')?.id || '')
+      setSessions(next.sessions ?? [])
+      setAudit(next.audit ?? [])
+    } catch (error) { setError(error instanceof Error && error.message.includes('denied') ? 'Your role cannot view workspace administration.' : 'Could not load workspace access.') }
   }, [])
   useEffect(() => { void load() }, [load])
   const canManageMembers = data?.permissions.some((entry) => entry === '*:*' || entry === 'member:*' || entry === 'member:create')
   const invite = async () => {
-    const response = await fetch('/api/workspaces/current/invitations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, roleId }) })
-    const body = await response.json(); if (!response.ok) return setError(body.error ?? 'Invitation failed')
-    setEmail(''); await load()
+    try { await createWorkspaceInvitationRuntime({ email, roleId }); setEmail(''); await load() } catch (error) { setError(error instanceof Error ? error.message : 'Invitation failed') }
   }
-  const revokeSessionGrants = async () => { await fetch('/api/workspaces/current/grants/revoke', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); await load() }
+  const revokeSessionGrants = async () => { await revokeWorkspaceGrantsRuntime(); await load() }
   const createRole = async () => {
-    const response = await fetch('/api/workspaces/current/roles', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: roleName, permissions: rolePermissions.split(',').map((entry) => entry.trim()).filter(Boolean) }) })
-    const body = await response.json(); if (!response.ok) return setError(body.error ?? 'Role creation failed')
-    setRoleName(''); await load()
+    try { await createWorkspaceRoleRuntime({ name: roleName, permissions: rolePermissions.split(',').map((entry) => entry.trim()).filter(Boolean) }); setRoleName(''); await load() } catch (error) { setError(error instanceof Error ? error.message : 'Role creation failed') }
   }
 
   if (!data && !error) return <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading workspace access…</div>

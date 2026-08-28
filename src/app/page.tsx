@@ -7,26 +7,12 @@ import { fetchScripts, fetchCollections, fetchTemplates, fetchAllTags, setAutoSa
 import { fetchSettings } from '@/features/settings/settingsSlice'
 import { setActiveActivity } from '@/features/workbench/workbenchSlice'
 import { selectIsModeActive } from '@/features/ops/selectors'
-import { hasDesktopScriptsRuntime, listDesktopCollections, listDesktopScripts } from '@/lib/scriptsRuntimeClient'
+import { loadBootstrapRuntime } from '@/lib/bootstrapRuntimeClient'
 
 /** Single round-trip to hydrate scripts + collections + settings on startup */
 async function loadBootstrap(dispatch: ReturnType<typeof import('@/store/hooks').useAppDispatch>) {
   try {
-    if (typeof window !== 'undefined' && hasDesktopScriptsRuntime()) {
-      const [scripts, collections] = await Promise.all([
-        listDesktopScripts(),
-        listDesktopCollections(),
-      ])
-
-      dispatch(fetchScripts.fulfilled(scripts, 'desktop-bootstrap', undefined))
-      dispatch(fetchCollections.fulfilled(collections, 'desktop-bootstrap', undefined))
-      await dispatch(fetchSettings())
-      return
-    }
-
-    const res = await fetch('/api/bootstrap')
-    if (!res.ok) throw new Error('bootstrap failed')
-    const data = await res.json()
+    const data = await loadBootstrapRuntime()
     // Reuse existing fulfilled reducers so cache invalidation logic stays in one place
     dispatch(fetchScripts.fulfilled(data.scripts, 'bootstrap', undefined))
     dispatch(fetchCollections.fulfilled(data.collections, 'bootstrap', undefined))

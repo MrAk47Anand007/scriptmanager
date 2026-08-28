@@ -31,7 +31,7 @@ export function ApprovalGateDialog({
     open, onClose, remoteExecId, scriptName, profileName, serverHost, environment, onApproved,
 }: Props) {
     const dispatch = useAppDispatch()
-    const [approverName, setApproverName] = useState('')
+    const [approvalNote, setApprovalNote] = useState('')
     const [isApproving, setIsApproving] = useState(false)
     const [isRejecting, setIsRejecting] = useState(false)
 
@@ -39,10 +39,10 @@ export function ApprovalGateDialog({
     const envLabel = isProd ? 'PRODUCTION' : 'UAT'
 
     const handleApprove = async () => {
-        if (!approverName.trim()) return
+        if (!approvalNote.trim()) return
         setIsApproving(true)
         try {
-            await dispatch(approveExecution({ id: remoteExecId, approverName: approverName.trim() }))
+            await dispatch(approveExecution({ id: remoteExecId, note: approvalNote.trim() }))
             onApproved()
             onClose()
         } finally {
@@ -97,16 +97,16 @@ export function ApprovalGateDialog({
 
                 <div className="space-y-3 py-1">
                     <div>
-                        <Label htmlFor="approver-name" className="text-xs">
-                            Your name / approval note <span className="text-red-500">*</span>
+                        <Label htmlFor="approval-note" className="text-xs">
+                            Approval note <span className="text-red-500">*</span>
                         </Label>
                         <Input
-                            id="approver-name"
+                            id="approval-note"
                             autoFocus
-                            placeholder="e.g. John Smith — approved for hotfix deploy"
-                            value={approverName}
-                            onChange={e => setApproverName(e.target.value)}
-                            onKeyDown={e => e.key === 'Enter' && approverName.trim() && handleApprove()}
+                            placeholder="e.g. Approved for hotfix deploy"
+                            value={approvalNote}
+                            onChange={e => setApprovalNote(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && approvalNote.trim() && handleApprove()}
                             className="mt-1 h-8 text-sm"
                         />
                     </div>
@@ -132,7 +132,7 @@ export function ApprovalGateDialog({
                             isProd ? "bg-red-600 hover:bg-red-700 text-white" : "bg-amber-600 hover:bg-amber-700 text-white"
                         )}
                         onClick={handleApprove}
-                        disabled={!approverName.trim() || isApproving || isRejecting}
+                        disabled={!approvalNote.trim() || isApproving || isRejecting}
                     >
                         {isApproving ? 'Approving…' : `Approve & Run on ${envLabel}`}
                     </Button>

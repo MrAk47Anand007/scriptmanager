@@ -5,6 +5,7 @@ import { KeyRound, Plus, RefreshCw, ShieldOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { createSecretRuntime, disableSecretRuntime, listSecretsRuntime, rotateSecretRuntime } from '@/lib/secretsRuntimeClient'
 
 type SecretMetadata = { id: string; name: string; description: string; scope: string; status: string; currentVersion: number; updatedAt: string; _count: { bindings: number; accessEvents: number } }
 
@@ -13,25 +14,25 @@ export function SecretsSection() {
   const [name, setName] = useState('')
   const [plaintext, setPlaintext] = useState('')
   const [busy, setBusy] = useState(false)
-  const load = useCallback(async () => setSecrets(await (await fetch('/api/secrets?workspaceId=default')).json()), [])
+  const load = useCallback(async () => setSecrets(await listSecretsRuntime()), [])
   useEffect(() => { void load() }, [load])
 
   async function createSecret() {
     if (!name || !plaintext) return
     setBusy(true)
-    await fetch('/api/secrets', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, plaintext, workspaceId: 'default' }) })
+    await createSecretRuntime({ name, plaintext })
     setName(''); setPlaintext(''); await load(); setBusy(false)
   }
 
   async function rotate(secret: SecretMetadata) {
     const value = window.prompt(`New value for ${secret.name}`)
     if (!value) return
-    await fetch(`/api/secrets/${secret.id}/rotate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ plaintext: value, resource: '*', reason: 'settings rotation' }) })
+    await rotateSecretRuntime(secret.id, { plaintext: value, resource: '*', reason: 'settings rotation' })
     await load()
   }
 
   async function disable(secret: SecretMetadata) {
-    await fetch(`/api/secrets/${secret.id}/disable`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ resource: '*', reason: 'settings disable' }) })
+    await disableSecretRuntime(secret.id, { resource: '*', reason: 'settings disable' })
     await load()
   }
 

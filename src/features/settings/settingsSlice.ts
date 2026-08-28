@@ -1,4 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { readSettingsRuntime, saveSettingsRuntime } from '@/lib/settingsRuntimeClient';
 
 interface SettingsState {
     settings: Record<string, string>;
@@ -13,25 +14,11 @@ const initialState: SettingsState = {
 };
 
 export const fetchSettings = createAsyncThunk('settings/fetchSettings', async () => {
-    const response = await fetch('/api/settings');
-    if (!response.ok) {
-        throw new Error('Failed to fetch settings');
-    }
-    return response.json();
+    return readSettingsRuntime();
 });
 
 export const saveSettings = createAsyncThunk('settings/saveSettings', async (settings: Record<string, string>) => {
-    const response = await fetch('/api/settings', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(settings),
-    });
-    if (!response.ok) {
-        throw new Error('Failed to save settings');
-    }
-    return settings;
+    return saveSettingsRuntime(settings);
 });
 
 const settingsSlice = createSlice({

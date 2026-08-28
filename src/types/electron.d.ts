@@ -48,6 +48,33 @@ declare global {
         onEvent: (listener: (payload: { sessionId: string; event: unknown }) => void) => () => void
       }
       runtime?: {
+        getBootstrapState: () => Promise<{ scripts: unknown[]; collections: unknown[]; settings: Record<string, string> }>
+        readSettings: () => Promise<Record<string, string>>
+        saveSettings: (payload: Record<string, string>) => Promise<Record<string, string>>
+        listSecrets: () => Promise<unknown[]>
+        createSecret: (payload: { name: string; plaintext: string; description?: string; scope?: string }) => Promise<unknown>
+        rotateSecret: (payload: { id: string; plaintext?: string; resource?: string; reason?: string }) => Promise<unknown>
+        disableSecret: (payload: { id: string; resource?: string; reason?: string }) => Promise<unknown>
+        listApprovals: (status?: string) => Promise<unknown[]>
+        decideApproval: (payload: { id: string; decision: string; note?: string }) => Promise<unknown>
+        listWorkspaceAccess: () => Promise<unknown>
+        createWorkspaceInvitation: (payload: { email: string; roleId: string }) => Promise<unknown>
+        revokeWorkspaceGrants: (payload?: { actorId?: string }) => Promise<unknown>
+        createWorkspaceRole: (payload: { name: string; permissions: string[]; description?: string }) => Promise<unknown>
+        listWorkflows: () => Promise<unknown[]>
+        createWorkflow: (payload: unknown) => Promise<unknown>
+        saveWorkflow: (payload: unknown) => Promise<unknown>
+        publishWorkflow: (id: string) => Promise<unknown>
+        runWorkflow: (payload: { id: string; input?: unknown }) => Promise<unknown>
+        listWorkflowRuns: (workflowId: string) => Promise<unknown[]>
+        readWorkflowRun: (runId: string) => Promise<unknown>
+        retryWorkflowNode: (payload: { runId: string; nodeId: string }) => Promise<unknown>
+        cancelWorkflowRun: (runId: string) => Promise<unknown>
+        listNotificationChannels: () => Promise<unknown[]>
+        createNotificationChannel: (payload: { name: string; kind: string; config?: unknown }) => Promise<unknown>
+        listPlugins: () => Promise<unknown[]>
+        updatePlugin: (payload: { id: string; action: string; healthy?: boolean; message?: string; settings?: unknown }) => Promise<unknown>
+        removePlugin: (id: string) => Promise<void>
         listScripts: () => Promise<unknown[]>
         listCollections: () => Promise<unknown[]>
         createCollection: (payload: unknown) => Promise<unknown>
@@ -105,8 +132,8 @@ declare global {
         testServerProfileConnection: (profileId: string) => Promise<unknown>
         transferRemoteScript: (payload: unknown) => Promise<unknown>
         startRemoteExecution: (payload: unknown) => Promise<unknown>
-        approveRemoteExecution: (payload: { id: string; approverName: string }) => Promise<string>
-        rejectRemoteExecution: (id: string) => Promise<string>
+        approveRemoteExecution: (payload: { id: string; note?: string }) => Promise<{ ok: true; remoteExecId: string }>
+        rejectRemoteExecution: (id: string) => Promise<{ ok: true; remoteExecId: string }>
         listAuditLog: (payload?: unknown) => Promise<unknown>
         listStorageProviders?: () => Promise<unknown[]>
         saveStorageProvider?: (payload: unknown) => Promise<unknown>

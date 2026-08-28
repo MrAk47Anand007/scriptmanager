@@ -41,6 +41,48 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     },
   },
   runtime: {
+    getBootstrapState: () =>
+      ipcRenderer.invoke('scriptmanager:runtime:get-bootstrap-state') as Promise<{ scripts: unknown[]; collections: unknown[]; settings: Record<string, string> }>,
+    readSettings: () => ipcRenderer.invoke('scriptmanager:runtime:read-settings') as Promise<Record<string, string>>,
+    saveSettings: (payload: Record<string, string>) =>
+      ipcRenderer.invoke('scriptmanager:runtime:save-settings', payload) as Promise<Record<string, string>>,
+    listSecrets: () => ipcRenderer.invoke('scriptmanager:runtime:list-secrets') as Promise<unknown[]>,
+    createSecret: (payload: { name: string; plaintext: string; description?: string; scope?: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:create-secret', payload) as Promise<unknown>,
+    rotateSecret: (payload: { id: string; plaintext?: string; resource?: string; reason?: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:rotate-secret', payload) as Promise<unknown>,
+    disableSecret: (payload: { id: string; resource?: string; reason?: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:disable-secret', payload) as Promise<unknown>,
+    listApprovals: (status = 'pending') =>
+      ipcRenderer.invoke('scriptmanager:runtime:list-approvals', status) as Promise<unknown[]>,
+    decideApproval: (payload: { id: string; decision: string; note?: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:decide-approval', payload) as Promise<unknown>,
+    listWorkspaceAccess: () => ipcRenderer.invoke('scriptmanager:runtime:list-workspace-access') as Promise<unknown>,
+    createWorkspaceInvitation: (payload: { email: string; roleId: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:create-workspace-invitation', payload) as Promise<unknown>,
+    revokeWorkspaceGrants: (payload?: { actorId?: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:revoke-workspace-grants', payload ?? {}) as Promise<unknown>,
+    createWorkspaceRole: (payload: { name: string; permissions: string[]; description?: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:create-workspace-role', payload) as Promise<unknown>,
+    listWorkflows: () => ipcRenderer.invoke('scriptmanager:runtime:list-workflows') as Promise<unknown[]>,
+    createWorkflow: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:create-workflow', payload) as Promise<unknown>,
+    saveWorkflow: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-workflow', payload) as Promise<unknown>,
+    publishWorkflow: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:publish-workflow', id) as Promise<unknown>,
+    runWorkflow: (payload: { id: string; input?: unknown }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:run-workflow', payload) as Promise<unknown>,
+    listWorkflowRuns: (workflowId: string) =>
+      ipcRenderer.invoke('scriptmanager:runtime:list-workflow-runs', workflowId) as Promise<unknown[]>,
+    readWorkflowRun: (runId: string) => ipcRenderer.invoke('scriptmanager:runtime:read-workflow-run', runId) as Promise<unknown>,
+    retryWorkflowNode: (payload: { runId: string; nodeId: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:retry-workflow-node', payload) as Promise<unknown>,
+    cancelWorkflowRun: (runId: string) => ipcRenderer.invoke('scriptmanager:runtime:cancel-workflow-run', runId) as Promise<unknown>,
+    listNotificationChannels: () => ipcRenderer.invoke('scriptmanager:runtime:list-notification-channels') as Promise<unknown[]>,
+    createNotificationChannel: (payload: { name: string; kind: string; config?: unknown }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:create-notification-channel', payload) as Promise<unknown>,
+    listPlugins: () => ipcRenderer.invoke('scriptmanager:runtime:list-plugins') as Promise<unknown[]>,
+    updatePlugin: (payload: { id: string; action: string; healthy?: boolean; message?: string; settings?: unknown }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:update-plugin', payload) as Promise<unknown>,
+    removePlugin: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:remove-plugin', id) as Promise<void>,
     listScripts: () => ipcRenderer.invoke('scriptmanager:runtime:list-scripts') as Promise<unknown[]>,
     listCollections: () => ipcRenderer.invoke('scriptmanager:runtime:list-collections') as Promise<unknown[]>,
     createCollection: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:create-collection', payload) as Promise<unknown>,
@@ -99,9 +141,10 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
       ipcRenderer.invoke('scriptmanager:runtime:test-server-profile-connection', profileId) as Promise<unknown>,
     transferRemoteScript: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:transfer-remote-script', payload) as Promise<unknown>,
     startRemoteExecution: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:start-remote-execution', payload) as Promise<unknown>,
-    approveRemoteExecution: (payload: { id: string; approverName: string }) =>
-      ipcRenderer.invoke('scriptmanager:runtime:approve-remote-execution', payload) as Promise<string>,
-    rejectRemoteExecution: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:reject-remote-execution', id) as Promise<string>,
+    approveRemoteExecution: (payload: { id: string; note?: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:approve-remote-execution', payload) as Promise<{ ok: true; remoteExecId: string }>,
+    rejectRemoteExecution: (id: string) =>
+      ipcRenderer.invoke('scriptmanager:runtime:reject-remote-execution', id) as Promise<{ ok: true; remoteExecId: string }>,
     listAuditLog: (payload?: unknown) => ipcRenderer.invoke('scriptmanager:runtime:list-audit-log', payload ?? null) as Promise<unknown>,
     listStorageProviders: () => ipcRenderer.invoke('scriptmanager:runtime:list-storage-providers') as Promise<unknown[]>,
     saveStorageProvider: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-storage-provider', payload) as Promise<unknown>,

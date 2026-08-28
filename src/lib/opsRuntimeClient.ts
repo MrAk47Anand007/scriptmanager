@@ -93,20 +93,20 @@ export async function startRemoteExecutionRuntime(payload: Record<string, unknow
   return response.data
 }
 
-export async function approveRemoteExecutionRuntime(id: string, approverName: string) {
+export async function approveRemoteExecutionRuntime(id: string, note?: string) {
   if (window.scriptManagerDesktop?.runtime?.approveRemoteExecution) {
-    return window.scriptManagerDesktop.runtime.approveRemoteExecution({ id, approverName })
+    return window.scriptManagerDesktop.runtime.approveRemoteExecution({ id, note })
   }
-  await axios.post(`/api/ops/remote-exec/${id}/approve`, { approver_name: approverName })
-  return id
+  const response = await axios.post(`/api/ops/remote-exec/${id}/approve`, note ? { note } : {})
+  return response.data as { ok: true; remote_exec_id: string }
 }
 
 export async function rejectRemoteExecutionRuntime(id: string) {
   if (window.scriptManagerDesktop?.runtime?.rejectRemoteExecution) {
     return window.scriptManagerDesktop.runtime.rejectRemoteExecution(id)
   }
-  await axios.post(`/api/ops/remote-exec/${id}/reject`)
-  return id
+  const response = await axios.post(`/api/ops/remote-exec/${id}/reject`)
+  return response.data as { ok: true; remote_exec_id: string }
 }
 
 export async function listAuditLogRuntime(params?: { profileId?: string; scriptId?: string; limit?: number; offset?: number }) {

@@ -225,8 +225,8 @@ export const fetchAuditLog = createAsyncThunk(
 
 export const approveExecution = createAsyncThunk(
     'ops/approveExecution',
-    async ({ id, approverName }: { id: string; approverName: string }) => {
-        return await approveRemoteExecutionRuntime(id, approverName)
+    async ({ id, note }: { id: string; note?: string }) => {
+        return await approveRemoteExecutionRuntime(id, note)
     }
 )
 

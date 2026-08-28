@@ -1,5 +1,15 @@
 import { createAsyncThunk, createSlice, nanoid, type PayloadAction } from '@reduxjs/toolkit'
 import { normalizeEditorMetadata } from '@/lib/workflows/editorLayout'
+import {
+  cancelWorkflowRunRuntime,
+  fetchWorkflowRunRuntime,
+  fetchWorkflowRunsRuntime,
+  listWorkflowsRuntime,
+  publishWorkflowRuntime,
+  retryWorkflowNodeRuntime,
+  runWorkflowRuntime,
+  saveWorkflowRuntime,
+} from '@/lib/workflowsRuntimeClient'
 import type { WorkflowEditorViewport, WorkflowNodePosition } from '@/lib/workflows/editorTypes'
 import type { ValidationIssue, WorkflowDefinition, WorkflowEdge, WorkflowNodeType } from '@/lib/workflows/types'
 
@@ -53,38 +63,28 @@ function message(action: { error?: { message?: string } }) {
   return action.error?.message ?? 'Request failed'
 }
 
-export const fetchWorkflows = createAsyncThunk('workflows/fetch', async () => (await fetch('/api/workflows')).json())
+export const fetchWorkflows = createAsyncThunk('workflows/fetch', async () => listWorkflowsRuntime())
 export const saveWorkflow = createAsyncThunk('workflows/save', async (_, { getState }) => {
   const active = (getState() as { workflows: WorkflowState }).workflows.active!
-  const response = await fetch(`/api/workflows/${active.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ definition: active.definition, projectId: active.projectId ?? null }) })
-  if (!response.ok) throw new Error((await response.json()).error)
-  return response.json()
+  return saveWorkflowRuntime({ id: active.id, definition: active.definition, projectId: active.projectId ?? null })
 })
-export const publishWorkflow = createAsyncThunk('workflows/publish', async (id: string) => {
-  const response = await fetch(`/api/workflows/${id}/publish`, { method: 'POST' })
-  if (!response.ok) throw new Error((await response.json()).error)
-  return response.json()
-})
-export const runWorkflow = createAsyncThunk('workflows/run', async (id: string) => {
-  const response = await fetch(`/api/workflows/${id}/runs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: {} }) })
-  if (!response.ok) throw new Error((await response.json()).error)
-  return response.json()
-})
+export const publishWorkflow = createAsyncThunk('workflows/publish', async (id: string) => publishWorkflowRuntime(id))
+export const runWorkflow = createAsyncThunk('workflows/run', async (id: string) => runWorkflowRuntime(id))
 const parseJson = (value: unknown) => { if (typeof value !== 'string') return value; try { return JSON.parse(value) } catch { return value } }
 export function normalizeWorkflowRunDetail(raw: Record<string, any>): WorkflowRunDetail {
   return { id: raw.id, status: raw.status, createdAt: String(raw.createdAt), startedAt: raw.startedAt?String(raw.startedAt):null, finishedAt: raw.finishedAt?String(raw.finishedAt):null, nodeRuns: (raw.nodeRuns??[]).map((node: Record<string, any>)=>({ nodeId: node.nodeId, status: node.status, attempt: node.attempt??1, input: parseJson(node.inputJson??node.input), output: parseJson(node.outputJson??node.output), error: parseJson(node.errorJson??node.error), startedAt: node.startedAt?String(node.startedAt):null, finishedAt: node.finishedAt?String(node.finishedAt):null })) }
 }
 export const fetchWorkflowRuns = createAsyncThunk('workflows/fetchRuns', async (workflowId: string) => {
-  const response=await fetch(`/api/workflows/${workflowId}/runs`);if(!response.ok)throw new Error('Unable to load workflow runs');return response.json()
+  return fetchWorkflowRunsRuntime(workflowId)
 })
 export const fetchWorkflowRun = createAsyncThunk('workflows/fetchRun', async (runId: string) => {
-  const response=await fetch(`/api/workflow-runs/${runId}`);if(!response.ok)throw new Error('Unable to load workflow run');return normalizeWorkflowRunDetail(await response.json())
+  return fetchWorkflowRunRuntime(runId)
 })
 export const retryWorkflowNode = createAsyncThunk('workflows/retryNode', async ({runId,nodeId}:{runId:string;nodeId:string}) => {
-  const response=await fetch(`/api/workflow-runs/${runId}/retry-node`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nodeId})});if(!response.ok)throw new Error((await response.json()).error??'Retry failed');return normalizeWorkflowRunDetail(await response.json())
+  return retryWorkflowNodeRuntime({ runId, nodeId })
 })
 export const cancelWorkflowRun = createAsyncThunk('workflows/cancelRun', async (runId:string) => {
-  const response=await fetch(`/api/workflow-runs/${runId}/cancel`,{method:'POST'});if(!response.ok)throw new Error((await response.json()).error??'Cancel failed');return normalizeWorkflowRunDetail(await response.json())
+  return cancelWorkflowRunRuntime(runId)
 })
 
 const slice = createSlice({

@@ -1,8 +1,25 @@
-import { describe, expect, it } from 'vitest'
+import { configureStore } from '@reduxjs/toolkit'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import reducer, {
   addNode, connectNodes, duplicateSelection, moveNodes, redoWorkflowEdit, removeEdges, removeNodes,
-  saveWorkflow, selectNodes, selectWorkflow, setValidation, setViewport, undoWorkflowEdit, updateNodeConfig,
+  fetchWorkflows, saveWorkflow, selectNodes, selectWorkflow, setValidation, setViewport, undoWorkflowEdit, updateNodeConfig,
 } from '@/features/workflows/workflowsSlice'
+
+const { listWorkflowsRuntimeMock } = vi.hoisted(() => ({
+  listWorkflowsRuntimeMock: vi.fn(),
+}))
+
+vi.mock('@/lib/workflowsRuntimeClient', () => ({
+  listWorkflowsRuntime: listWorkflowsRuntimeMock,
+  createWorkflowRuntime: vi.fn(),
+  saveWorkflowRuntime: vi.fn(),
+  publishWorkflowRuntime: vi.fn(),
+  runWorkflowRuntime: vi.fn(),
+  fetchWorkflowRunsRuntime: vi.fn(),
+  fetchWorkflowRunRuntime: vi.fn(),
+  retryWorkflowNodeRuntime: vi.fn(),
+  cancelWorkflowRunRuntime: vi.fn(),
+}))
 
 const selected = () => selectWorkflow({
   id: 'w', name: 'Flow', publishedVersion: null,
@@ -17,6 +34,10 @@ const selected = () => selectWorkflow({
 })
 
 describe('workflows slice', () => {
+  beforeEach(() => {
+    listWorkflowsRuntimeMock.mockReset()
+  })
+
   it('selects a workflow and edits its draft', () => {
     let state = reducer(undefined, selectWorkflow({ id: 'w', name: 'Flow', publishedVersion: null, definition: { schemaVersion: 1, name: 'Flow', nodes: [], edges: [] } }))
     state = reducer(state, addNode({ type: 'delay', name: 'Wait', config: { durationMs: 100 } }))
@@ -80,5 +101,27 @@ describe('workflows slice', () => {
     expect(state.saveStatus).toBe('saving')
     state = reducer(state, { type: saveWorkflow.rejected.type, error: { message: 'offline' } })
     expect(state).toMatchObject({ dirty: true, saveStatus: 'failed', requestError: { operation: 'save', message: 'offline' } })
+  })
+
+  it('loads workflows through the runtime client so desktop mode does not depend on /api/workflows', async () => {
+    listWorkflowsRuntimeMock.mockResolvedValue([
+      { id: 'desktop-flow', name: 'Desktop Flow', publishedVersion: null, definition: { schemaVersion: 1, name: 'Desktop Flow', nodes: [], edges: [] } },
+    ])
+    vi.stubGlobal('fetch', vi.fn(() => {
+      throw new Error('fetch should not be called')
+    }))
+
+    const store = configureStore({
+      reducer: {
+        workflows: reducer,
+      },
+    })
+
+    const action = await store.dispatch(fetchWorkflows())
+
+    expect(fetchWorkflows.fulfilled.match(action)).toBe(true)
+    expect(listWorkflowsRuntimeMock).toHaveBeenCalledOnce()
+    expect(store.getState().workflows.items).toHaveLength(1)
+    vi.unstubAllGlobals()
   })
 })
