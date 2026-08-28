@@ -636,6 +636,16 @@ async function createWindow() {
   mainWindow.on('move', () => saveWindowState(mainWindow!))
   mainWindow.on('maximize', () => saveWindowState(mainWindow!))
   mainWindow.on('unmaximize', () => saveWindowState(mainWindow!))
+  if (process.env.SCRIPTMANAGER_SMOKE_TEST === '1') {
+    mainWindow.webContents.once('did-navigate', (_event, url) => {
+      const route = new URL(url).pathname
+      if (route === '/login') {
+        console.error(`SMOKE_URL=${url}`)
+        return
+      }
+      console.log(`SMOKE_URL=${url}`)
+    })
+  }
   mainWindow.loadURL(`http://localhost:${PORT}`)
   attachDesktopRuntime(mainWindow)
   mainWindow.on('closed', () => {

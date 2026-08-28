@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Loader2, Lock } from 'lucide-react'
+import { isDesktopRenderer } from '@/lib/runtime/desktopMode'
 
 function LoginForm() {
     const router = useRouter()
@@ -19,6 +20,11 @@ function LoginForm() {
     const [initialSetupAllowed, setInitialSetupAllowed] = useState(true)
 
     useEffect(() => {
+        if (isDesktopRenderer()) {
+            router.replace('/')
+            return
+        }
+
         fetch('/api/auth/login', { method: 'HEAD' })
             .then(res => {
                 setIsFirstRun(res.status === 204)
@@ -28,7 +34,7 @@ function LoginForm() {
                 setIsFirstRun(false)
                 setInitialSetupAllowed(true)
             })
-    }, [])
+    }, [router])
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault()
@@ -52,6 +58,10 @@ function LoginForm() {
         } finally {
             setLoading(false)
         }
+    }
+
+    if (isDesktopRenderer()) {
+        return null
     }
 
     return (

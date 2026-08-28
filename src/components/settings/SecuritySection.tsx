@@ -9,8 +9,18 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Loader2, Lock, LogOut, KeyRound } from 'lucide-react'
 import axios from 'axios'
 import { useRouter } from 'next/navigation'
+import { isDesktopRenderer } from '@/lib/runtime/desktopMode'
 
 export const SecuritySection = () => {
+    if (isDesktopRenderer()) {
+        return (
+            <section>
+                <h2 className="text-lg font-semibold">Security</h2>
+                <p className="text-sm text-muted-foreground">Desktop mode uses the local app context. Password, session, and API-token controls are available in hosted web mode.</p>
+            </section>
+        )
+    }
+
     const router = useRouter()
 
     // Password change state
