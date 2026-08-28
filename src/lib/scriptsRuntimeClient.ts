@@ -38,6 +38,13 @@ type DesktopOpenFolderPayload = {
   createVenvIfMissing?: boolean
 }
 
+type CanonicalRecoveryDraftPayload = {
+  scriptId: string
+  sourcePath: string
+  sourceRevision: string
+  content: string
+}
+
 type DesktopScriptRecord = {
   id: string
   name: string
@@ -252,6 +259,26 @@ export async function openDesktopScriptsFolder(payload: DesktopOpenFolderPayload
     scripts: Array<{ id: string; name: string }>
     imported_count: number
   }>
+}
+
+export async function rescanCanonicalFolder(collectionId: string) {
+  if (!window.scriptManagerDesktop?.runtime?.rescanCanonicalFolder) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.rescanCanonicalFolder(collectionId)
+}
+
+export async function listCanonicalRecoveryDrafts(scriptId: string) {
+  if (!window.scriptManagerDesktop?.runtime?.listCanonicalRecoveryDrafts) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.listCanonicalRecoveryDrafts(scriptId)
+}
+
+export async function saveCanonicalRecoveryDraft(payload: CanonicalRecoveryDraftPayload) {
+  if (!window.scriptManagerDesktop?.runtime?.saveCanonicalRecoveryDraft) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.saveCanonicalRecoveryDraft(payload)
+}
+
+export async function discardCanonicalRecoveryDraft(draftId: string) {
+  if (!window.scriptManagerDesktop?.runtime?.discardCanonicalRecoveryDraft) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.discardCanonicalRecoveryDraft(draftId)
 }
 
 export async function warmScriptsTerminal(sessionId = DEFAULT_TERMINAL_SESSION_ID): Promise<void> {

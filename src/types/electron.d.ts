@@ -89,6 +89,10 @@ declare global {
         deleteScript: (payload: { id: string }) => Promise<string>
         duplicateScript: (scriptId: string) => Promise<unknown>
         openFolder: (payload: unknown) => Promise<unknown>
+        rescanCanonicalFolder?: (collectionId: string) => Promise<unknown>
+        listCanonicalRecoveryDrafts?: (scriptId: string) => Promise<unknown[]>
+        saveCanonicalRecoveryDraft?: (payload: { scriptId: string; sourcePath: string; sourceRevision: string; content: string }) => Promise<unknown>
+        discardCanonicalRecoveryDraft?: (draftId: string) => Promise<void>
         scanPcScripts?: (payload: { roots: string[]; extensions: string[] }) => Promise<{
           files: Array<{ path: string; name: string; ext: string; sizeBytes: number; modifiedAt: string }>
           truncated: boolean

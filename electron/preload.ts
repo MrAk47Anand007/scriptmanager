@@ -99,6 +99,11 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     deleteScript: (payload: { id: string }) => ipcRenderer.invoke('scriptmanager:runtime:delete-script', payload) as Promise<string>,
     duplicateScript: (scriptId: string) => ipcRenderer.invoke('scriptmanager:runtime:duplicate-script', scriptId) as Promise<unknown>,
     openFolder: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:open-folder', payload) as Promise<unknown>,
+    rescanCanonicalFolder: (collectionId: string) => ipcRenderer.invoke('scriptmanager:runtime:rescan-canonical-folder', collectionId) as Promise<unknown>,
+    listCanonicalRecoveryDrafts: (scriptId: string) => ipcRenderer.invoke('scriptmanager:runtime:list-canonical-recovery-drafts', scriptId) as Promise<unknown[]>,
+    saveCanonicalRecoveryDraft: (payload: { scriptId: string; sourcePath: string; sourceRevision: string; content: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:save-canonical-recovery-draft', payload) as Promise<unknown>,
+    discardCanonicalRecoveryDraft: (draftId: string) => ipcRenderer.invoke('scriptmanager:runtime:discard-canonical-recovery-draft', draftId) as Promise<void>,
     scanPcScripts: (payload: { roots: string[]; extensions: string[] }) =>
       ipcRenderer.invoke('scriptmanager:runtime:scan-pc-scripts', payload) as Promise<unknown>,
     importScannedScripts: (payload: { files: { path: string }[]; mode: 'misc' | 'by-folder'; rootForGrouping?: string }) =>

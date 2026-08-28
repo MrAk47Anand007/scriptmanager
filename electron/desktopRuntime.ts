@@ -2596,6 +2596,24 @@ export function initDesktopRuntimeIpc() {
     return openLocalFolder(payload)
   })
 
+  ipcMain.handle('scriptmanager:runtime:rescan-canonical-folder', async (_event, collectionId: string) => {
+    const collection = await prisma.collection.findUniqueOrThrow({ where: { id: collectionId } })
+    if (!collection.folderPath || collection.isTemporary) throw new Error('Collection is not a persistent canonical folder')
+    return openLocalFolder({ folderPath: collection.folderPath, mode: 'collection', collectionName: collection.name, runtimePreset: normalizeRuntimePreset(collection.runtimePreset), pythonToolchainEnabled: collection.pythonToolchainEnabled })
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-canonical-recovery-drafts', async (_event, scriptId: string) => {
+    return getDesktopRecoveryDraftStore().list(scriptId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-canonical-recovery-draft', async (_event, payload) => {
+    return getDesktopRecoveryDraftStore().save(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:discard-canonical-recovery-draft', async (_event, draftId: string) => {
+    await getDesktopRecoveryDraftStore().discard(draftId)
+  })
+
   ipcMain.handle('scriptmanager:runtime:scan-pc-scripts', async (_event, payload: ScanPcScriptsPayload) => {
     return scanPcScripts(payload)
   })
