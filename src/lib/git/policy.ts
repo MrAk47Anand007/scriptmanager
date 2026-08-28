@@ -9,6 +9,10 @@ export function parseWorkspacePolicy(value?: string | null): WorkspacePolicy {
 }
 
 export function resolveRepositoryPath(root: string, requestedPath = '.'): string {
+  if (/^[a-zA-Z]:[\\/]/.test(requestedPath) || requestedPath.startsWith('\\\\')) {
+    throw new Error('Requested path is outside the granted repository root')
+  }
+
   const normalizedRoot = path.resolve(root)
   const resolved = path.resolve(normalizedRoot, requestedPath)
   const relative = path.relative(normalizedRoot, resolved)

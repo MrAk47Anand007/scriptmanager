@@ -11,6 +11,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    setupFiles: ['tests/setup/env.ts'],
+    globalSetup: ['tests/setup/database.ts'],
     fileParallelism: false,
     exclude: [...configDefaults.exclude, '**/.worktrees/**', '**/.claude/**'],
     coverage: {
