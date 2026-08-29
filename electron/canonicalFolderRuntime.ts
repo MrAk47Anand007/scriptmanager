@@ -123,7 +123,10 @@ export function createCanonicalFolderWatcher({
         pending.set(key, setTimeout(() => {
           pending.delete(key)
           void fs.promises.stat(changedPath).then((stats) => {
-            if (stats.isDirectory()) watchDirectoryTree(collectionId, rootPath, changedPath)
+            if (stats.isDirectory()) {
+              watchDirectoryTree(collectionId, rootPath, changedPath)
+              void emitExistingFiles(collectionId, rootPath, changedPath)
+            }
           }).catch(() => undefined)
           void emit(collectionId, rootPath, path.relative(rootPath, changedPath))
         }, debounceMs))
@@ -138,6 +141,18 @@ export function createCanonicalFolderWatcher({
     watchDirectory(collectionId, rootPath, directoryPath)
     for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {
       if (entry.isDirectory()) watchDirectoryTree(collectionId, rootPath, path.join(directoryPath, entry.name))
+    }
+  }
+
+  const emitExistingFiles = async (collectionId: string, rootPath: string, directoryPath: string) => {
+    const entries = await fs.promises.readdir(directoryPath, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      const entryPath = path.join(directoryPath, entry.name)
+      if (entry.isDirectory()) {
+        await emitExistingFiles(collectionId, rootPath, entryPath)
+      } else if (entry.isFile()) {
+        await emit(collectionId, rootPath, path.relative(rootPath, entryPath))
+      }
     }
   }
 

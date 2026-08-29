@@ -62,4 +62,31 @@ describe('canonical folder runtime', () => {
     await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'changed', collectionId: 'collection-1', sourcePath })))
     watcher.close()
   })
+
+  it('emits a deleted event when a canonical file is removed', async () => {
+    const { root, sourcePath } = createFixture()
+    const events: Array<{ type: string; collectionId: string; sourcePath?: string }> = []
+    const watcher = createCanonicalFolderWatcher({ onChange: (event) => events.push(event), debounceMs: 10 })
+    watcher.watch('collection-1', root)
+
+    await fs.promises.unlink(sourcePath)
+
+    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'deleted', collectionId: 'collection-1', sourcePath })))
+    watcher.close()
+  })
+
+  it('continues watching a nested folder created after startup', async () => {
+    const { root } = createFixture()
+    const nestedFolder = path.join(root, 'created-later')
+    const sourcePath = path.join(nestedFolder, 'script.py')
+    const events: Array<{ type: string; collectionId: string; sourcePath?: string }> = []
+    const watcher = createCanonicalFolderWatcher({ onChange: (event) => events.push(event), debounceMs: 10 })
+    watcher.watch('collection-1', root)
+
+    await fs.promises.mkdir(nestedFolder)
+    await fs.promises.writeFile(sourcePath, 'print("external")', 'utf8')
+
+    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'changed', collectionId: 'collection-1', sourcePath })))
+    watcher.close()
+  })
 })
