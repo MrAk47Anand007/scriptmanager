@@ -8,7 +8,7 @@ import { listApprovalsRuntime } from '@/lib/approvalsRuntimeClient'
 import { loadWorkspaceAccessRuntime } from '@/lib/workspacesRuntimeClient'
 import { listWorkflowsRuntime } from '@/lib/workflowsRuntimeClient'
 import { clearGithubGistSettingsRuntime, readGithubGistSettingsRuntime, saveGithubGistSettingsRuntime } from '@/lib/gistCredentialsRuntimeClient'
-import { deleteDesktopGist, syncDesktopScriptToGist } from '@/lib/scriptsRuntimeClient'
+import { deleteDesktopGist, readScriptContentRuntime, syncDesktopScriptToGist } from '@/lib/scriptsRuntimeClient'
 import { listDesktopBuilds, readDesktopBuildOutput } from '@/lib/scriptsRuntimeClient'
 import {
   listDesktopScriptEnv,
@@ -86,6 +86,14 @@ describe('desktop runtime bridge', () => {
     await expect(deleteDesktopGist('script-1')).resolves.toEqual({ ok: true })
     expect(syncGist).toHaveBeenCalledWith('script-1')
     expect(deleteGist).toHaveBeenCalledWith('script-1')
+  })
+
+  it('reads non-active script content through desktop IPC', async () => {
+    const readScript = vi.fn().mockResolvedValue({ id: 'script-1', content: 'print(1)' })
+    window.scriptManagerDesktop = { runtime: { readScript } } as never
+
+    await expect(readScriptContentRuntime('script-1')).resolves.toBe('print(1)')
+    expect(readScript).toHaveBeenCalledWith('script-1')
   })
 
   it('uses desktop IPC for build history and build output', async () => {

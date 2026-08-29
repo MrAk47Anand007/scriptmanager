@@ -243,6 +243,16 @@ export async function readDesktopScript(scriptId: string): Promise<DesktopScript
   return window.scriptManagerDesktop.runtime.readScript(scriptId) as Promise<DesktopScriptRecord>
 }
 
+export async function readScriptContentRuntime(scriptId: string): Promise<string> {
+  if (hasDesktopScriptsRuntime()) {
+    const script = await readDesktopScript(scriptId)
+    return script.content ?? ''
+  }
+
+  const response = await axios.get(`/api/scripts/${encodeURIComponent(scriptId)}`)
+  return response.data.content ?? ''
+}
+
 export async function createDesktopScript(payload: DesktopCreateScriptPayload): Promise<DesktopScriptRecord> {
   if (!window.scriptManagerDesktop?.runtime) {
     throw new Error('Desktop runtime unavailable')

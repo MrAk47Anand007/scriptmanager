@@ -35,6 +35,7 @@ import { DeleteCollectionDialog } from './sidebar/DeleteCollectionDialog';
 import { PythonEnvDialog } from './sidebar/PythonEnvDialog';
 import { CloudStorageDialog } from './sidebar/CloudStorageDialog';
 import { syncCollectionRemote } from '@/lib/storageRuntimeClient';
+import { readScriptContentRuntime } from '@/lib/scriptsRuntimeClient';
 import { SaveAsTemplateDialog } from './sidebar/SaveAsTemplateDialog';
 import { ScriptTree, getCollectionTreeKey, type ScriptTreeCallbacks } from './sidebar/ScriptTree';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
@@ -63,7 +64,6 @@ import {
 } from "@/components/ui/select";
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, useSensors, useSensor, PointerSensor } from '@dnd-kit/core';
 import { createPortal } from 'react-dom';
-import axios from 'axios';
 
 const GistSyncStatus = () => {
     const settings = useAppSelector(selectSettings);
@@ -524,8 +524,7 @@ const ScriptsSidebarComponent = () => {
             if (saveAsSourceScript.id === activeScriptId && state.scripts.activeScriptContent) {
                 content = state.scripts.activeScriptContent
             } else {
-                const res = await axios.get(`/api/scripts/${saveAsSourceScript.id}`)
-                content = res.data.content ?? ''
+                content = await readScriptContentRuntime(saveAsSourceScript.id)
             }
 
             const result = await dispatch(saveAsTemplate({
