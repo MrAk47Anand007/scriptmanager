@@ -8,7 +8,7 @@ import { listApprovalsRuntime } from '@/lib/approvalsRuntimeClient'
 import { loadWorkspaceAccessRuntime } from '@/lib/workspacesRuntimeClient'
 import { listWorkflowsRuntime } from '@/lib/workflowsRuntimeClient'
 import { clearGithubGistSettingsRuntime, readGithubGistSettingsRuntime, saveGithubGistSettingsRuntime } from '@/lib/gistCredentialsRuntimeClient'
-import { deleteDesktopGist, exportScriptRuntime, exportScriptsRuntime, importScriptsRuntime, readScriptContentRuntime, syncDesktopScriptToGist } from '@/lib/scriptsRuntimeClient'
+import { deleteDesktopGist, deleteDesktopTemplate, exportScriptRuntime, exportScriptsRuntime, importScriptsRuntime, readScriptContentRuntime, syncDesktopScriptToGist } from '@/lib/scriptsRuntimeClient'
 import { runScript as runScriptThunk } from '@/features/scripts/scriptsSlice'
 import { runGitActionRuntime } from '@/lib/gitRuntimeClient'
 import {
@@ -209,6 +209,14 @@ describe('desktop runtime bridge', () => {
     await expect(toggleDesktopWebhookSignature('script-1', true)).resolves.toMatchObject({ require_webhook_signature: true })
     expect(saveSchedule).toHaveBeenCalledWith({ scriptId: 'script-1', cron: '', enabled: false })
     expect(saveEnv).toHaveBeenCalledWith({ scriptId: 'script-1', key: 'token', value: 'value-1', isSecret: true })
+  })
+
+  it('uses desktop IPC to delete a custom template', async () => {
+    const deleteTemplate = vi.fn().mockResolvedValue({ id: 'template-1' })
+    window.scriptManagerDesktop = { runtime: { deleteTemplate } } as never
+
+    await expect(deleteDesktopTemplate('template-1')).resolves.toEqual({ id: 'template-1' })
+    expect(deleteTemplate).toHaveBeenCalledWith('template-1')
   })
 
   it('uses desktop IPC for tags', async () => {

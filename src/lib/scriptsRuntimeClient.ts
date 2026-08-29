@@ -412,6 +412,11 @@ export async function saveDesktopTemplate(payload: DesktopTemplatePayload) {
   return window.scriptManagerDesktop.runtime.saveTemplate(payload)
 }
 
+export async function deleteDesktopTemplate(id: string) {
+  if (!window.scriptManagerDesktop?.runtime?.deleteTemplate) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.deleteTemplate(id)
+}
+
 export async function moveDesktopScript(scriptId: string, collectionId: string | null): Promise<{ scriptId: string; collectionId: string | null }> {
   if (!window.scriptManagerDesktop?.runtime?.moveScript) throw new Error('Desktop runtime unavailable')
   return window.scriptManagerDesktop.runtime.moveScript({ scriptId, collectionId }) as Promise<{ scriptId: string; collectionId: string | null }>

@@ -208,6 +208,7 @@ const ScriptInspectorSection = memo(function ScriptInspectorSection({
     timeoutSecs,
     setTimeoutSecs,
     webhookUrl,
+    desktopRuntime,
 }: {
     activeScript: Script | null | undefined
     activeScriptId: string
@@ -234,6 +235,7 @@ const ScriptInspectorSection = memo(function ScriptInspectorSection({
     timeoutSecs: string
     setTimeoutSecs: React.Dispatch<React.SetStateAction<string>>
     webhookUrl: string
+    desktopRuntime: boolean
 }) {
     return (
         <div className="p-4 border-b dark:border-slate-800 bg-white dark:bg-slate-950 space-y-4">
@@ -242,14 +244,14 @@ const ScriptInspectorSection = memo(function ScriptInspectorSection({
                     <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 flex-1 min-w-0">
                         <LinkIcon className="h-3 w-3 shrink-0" /> <span className="truncate">Webhook</span>
                     </h3>
-                    <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={handleRegenerateWebhook} title="Regenerate Token" disabled={isRegeneratingWebhook}>
+                    <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={handleRegenerateWebhook} title="Regenerate Token" disabled={desktopRuntime || isRegeneratingWebhook}>
                         {isRegeneratingWebhook ? <Loader2 className="h-3 w-3 animate-spin text-slate-400" /> : <RefreshCw className="h-3 w-3 text-slate-400" />}
                     </Button>
                 </div>
                 <div className="bg-slate-100 dark:bg-slate-900 p-2 rounded border border-slate-200 dark:border-slate-700 text-[10px] font-mono break-all text-slate-600 dark:text-slate-400 select-all">
                     {webhookUrl}
                 </div>
-                <p className="text-[10px] text-slate-400 mt-1">POST to this URL to trigger the script</p>
+                <p className="text-[10px] text-slate-400 mt-1">{desktopRuntime ? 'Inbound webhooks require hosted web mode.' : 'POST to this URL to trigger the script'}</p>
 
                 <div className="mt-2 border-t pt-2">
                     <div className="flex items-center gap-2 overflow-hidden">
@@ -263,6 +265,7 @@ const ScriptInspectorSection = memo(function ScriptInspectorSection({
                             <Switch
                                 checked={activeScript?.require_webhook_signature ?? false}
                                 onCheckedChange={handleToggleWebhookSignature}
+                                disabled={desktopRuntime}
                                 className="scale-75 origin-right"
                             />
                         )}
@@ -277,6 +280,7 @@ const ScriptInspectorSection = memo(function ScriptInspectorSection({
                             size="sm"
                             className="h-4 text-[9px] text-blue-500 hover:text-blue-700 px-1"
                             onClick={handleRotateWebhookSecret}
+                            disabled={desktopRuntime}
                         >
                             {activeScript?.webhook_secret_set ? 'Rotate' : 'Generate'}
                         </Button>
@@ -1091,7 +1095,9 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
         }
     }
 
-    const webhookUrl = activeScript?.webhook_token
+    const webhookUrl = isDesktopRuntime
+        ? 'Unavailable in desktop mode'
+        : activeScript?.webhook_token
         ? `${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/${activeScript.webhook_token}`
         : 'No webhook generated yet';
 
@@ -1497,6 +1503,7 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
                                 timeoutSecs={timeoutSecs}
                                 setTimeoutSecs={setTimeoutSecs}
                                 webhookUrl={webhookUrl}
+                                desktopRuntime={isDesktopRuntime}
                             />
                             <VersionHistorySection
                                 activeScriptId={activeScriptId}

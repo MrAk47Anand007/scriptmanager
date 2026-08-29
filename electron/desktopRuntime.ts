@@ -2279,6 +2279,15 @@ async function saveLocalTemplate(payload: SaveTemplatePayload) {
   return serializeLocalTemplate(template)
 }
 
+async function deleteLocalTemplate(id: string) {
+  await createDesktopActorContext(prisma)
+  const template = await prisma.scriptTemplate.findUnique({ where: { id } })
+  if (!template) throw new Error('Template not found')
+  if (template.isBuiltIn) throw new Error('Built-in templates cannot be deleted')
+  await prisma.scriptTemplate.delete({ where: { id } })
+  return { id }
+}
+
 async function regenerateLocalWebhook(scriptId: string) {
   await getAuthorizedDesktopScript(scriptId)
   const token = crypto.randomUUID().replace(/-/g, '')
@@ -3533,6 +3542,10 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:save-template', async (_event, payload: SaveTemplatePayload) => {
     return saveLocalTemplate(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:delete-template', async (_event, id: string) => {
+    return deleteLocalTemplate(id)
   })
 
   ipcMain.handle('scriptmanager:runtime:move-script', async (_event, payload: { scriptId: string; collectionId: string | null }) => {

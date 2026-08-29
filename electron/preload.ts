@@ -132,6 +132,7 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     removeTag: (payload: { scriptId: string; tagId: string }) => ipcRenderer.invoke('scriptmanager:runtime:remove-tag', payload) as Promise<unknown>,
     listTemplates: () => ipcRenderer.invoke('scriptmanager:runtime:list-templates') as Promise<unknown[]>,
     saveTemplate: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-template', payload) as Promise<unknown>,
+    deleteTemplate: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-template', id) as Promise<unknown>,
     moveScript: (payload: { scriptId: string; collectionId: string | null }) =>
       ipcRenderer.invoke('scriptmanager:runtime:move-script', payload) as Promise<unknown>,
     deleteScript: (payload: { id: string }) => ipcRenderer.invoke('scriptmanager:runtime:delete-script', payload) as Promise<string>,

@@ -31,6 +31,7 @@ import {
     removeDesktopTag,
     listDesktopTemplates,
     saveDesktopTemplate,
+    deleteDesktopTemplate,
     saveDesktopScript,
     syncDesktopScriptToGist,
     deleteDesktopGist,
@@ -351,6 +352,10 @@ export const saveAsTemplate = createAsyncThunk(
 )
 
 export const deleteTemplate = createAsyncThunk('scripts/deleteTemplate', async (id: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        await deleteDesktopTemplate(id)
+        return id
+    }
     await axios.delete(`/api/templates/${id}`)
     return id
 })

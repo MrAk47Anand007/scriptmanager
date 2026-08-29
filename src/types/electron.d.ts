@@ -119,6 +119,7 @@ declare global {
         removeTag: (payload: { scriptId: string; tagId: string }) => Promise<unknown>
         listTemplates: () => Promise<unknown[]>
         saveTemplate: (payload: unknown) => Promise<unknown>
+        deleteTemplate: (id: string) => Promise<unknown>
         moveScript?: (payload: { scriptId: string; collectionId: string | null }) => Promise<unknown>
         deleteScript: (payload: { id: string }) => Promise<string>
         duplicateScript: (scriptId: string) => Promise<unknown>
