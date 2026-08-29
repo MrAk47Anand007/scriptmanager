@@ -46,4 +46,20 @@ describe('canonical folder runtime', () => {
     await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'changed', collectionId: 'collection-1', sourcePath })))
     watcher.close()
   })
+
+  it('emits a changed event for an external write in a nested canonical folder', async () => {
+    const { root } = createFixture()
+    const nestedFolder = path.join(root, 'nested')
+    const sourcePath = path.join(nestedFolder, 'script.py')
+    await fs.promises.mkdir(nestedFolder)
+    await fs.promises.writeFile(sourcePath, 'print("canonical")', 'utf8')
+    const events: Array<{ type: string; collectionId: string; sourcePath?: string }> = []
+    const watcher = createCanonicalFolderWatcher({ onChange: (event) => events.push(event), debounceMs: 10 })
+    watcher.watch('collection-1', root)
+
+    await fs.promises.writeFile(sourcePath, 'print("external")', 'utf8')
+
+    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'changed', collectionId: 'collection-1', sourcePath })))
+    watcher.close()
+  })
 })

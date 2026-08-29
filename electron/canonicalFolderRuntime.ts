@@ -92,7 +92,7 @@ export function createCanonicalFolderWatcher({
   onChange: (event: CanonicalFolderChange) => void
   debounceMs?: number
 }) {
-  const watchers = new Map<string, fs.FSWatcher>()
+  const watchers = new Map<string, Map<string, fs.FSWatcher>>()
   const pending = new Map<string, ReturnType<typeof setTimeout>>()
 
   const emit = async (collectionId: string, folderPath: string, filename: string) => {
@@ -109,32 +109,57 @@ export function createCanonicalFolderWatcher({
     }
   }
 
-  return {
-    watch(collectionId: string, folderPath: string) {
-      this.unwatch(collectionId)
-      const watcher = fs.watch(folderPath, (_eventType, changedName) => {
+  const watchDirectory = (collectionId: string, rootPath: string, directoryPath: string) => {
+    const collectionWatchers = watchers.get(collectionId)
+    if (!collectionWatchers || collectionWatchers.has(directoryPath)) return
+
+    try {
+      const watcher = fs.watch(directoryPath, (_eventType, changedName) => {
         if (!changedName) return
-        const filename = changedName.toString()
-        const key = `${collectionId}:${filename}`
+        const changedPath = path.resolve(directoryPath, changedName.toString())
+        const key = `${collectionId}:${changedPath}`
         const existing = pending.get(key)
         if (existing) clearTimeout(existing)
         pending.set(key, setTimeout(() => {
           pending.delete(key)
-          void emit(collectionId, folderPath, filename)
+          void fs.promises.stat(changedPath).then((stats) => {
+            if (stats.isDirectory()) watchDirectoryTree(collectionId, rootPath, changedPath)
+          }).catch(() => undefined)
+          void emit(collectionId, rootPath, path.relative(rootPath, changedPath))
         }, debounceMs))
       })
-      watchers.set(collectionId, watcher)
+      collectionWatchers.set(directoryPath, watcher)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+
+  const watchDirectoryTree = (collectionId: string, rootPath: string, directoryPath: string) => {
+    watchDirectory(collectionId, rootPath, directoryPath)
+    for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {
+      if (entry.isDirectory()) watchDirectoryTree(collectionId, rootPath, path.join(directoryPath, entry.name))
+    }
+  }
+
+  return {
+    watch(collectionId: string, folderPath: string) {
+      this.unwatch(collectionId)
+      const rootPath = path.resolve(folderPath)
+      watchers.set(collectionId, new Map())
+      watchDirectoryTree(collectionId, rootPath, rootPath)
     },
 
     unwatch(collectionId: string) {
-      watchers.get(collectionId)?.close()
+      for (const watcher of watchers.get(collectionId)?.values() ?? []) watcher.close()
       watchers.delete(collectionId)
     },
 
     close() {
       for (const timeout of pending.values()) clearTimeout(timeout)
       pending.clear()
-      for (const watcher of watchers.values()) watcher.close()
+      for (const collectionWatchers of watchers.values()) {
+        for (const watcher of collectionWatchers.values()) watcher.close()
+      }
       watchers.clear()
     },
   }
