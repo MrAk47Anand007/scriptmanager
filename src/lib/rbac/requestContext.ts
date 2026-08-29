@@ -35,26 +35,24 @@ export async function resolveTrustedRequestContext(request: Request | NextReques
   }
 
   const payload = parseSessionToken(token)
-  if (!payload) {
-    return null
+  if (payload) {
+    const identity: SessionPayload = payload.userId && payload.workspaceId ? payload : { ...payload, ...(await ensureDefaultWorkspace(database)) }
+    const context = await loadAuthorizationContext(identity, token, database)
+    if (context) {
+      return {
+        runtimeMode: 'web',
+        authType: 'session',
+        actorId: context.userId,
+        workspaceId: context.workspaceId,
+        membershipId: context.membershipId,
+        roleKey: context.roleKey,
+        permissions: context.permissions,
+        sessionId: context.sessionId,
+      }
+    }
   }
 
-  const identity: SessionPayload = payload.userId && payload.workspaceId ? payload : { ...payload, ...(await ensureDefaultWorkspace(database)) }
-  const context = await loadAuthorizationContext(identity, token, database)
-  if (!context) {
-    return null
-  }
-
-  return {
-    runtimeMode: 'web',
-    authType: 'session',
-    actorId: context.userId,
-    workspaceId: context.workspaceId,
-    membershipId: context.membershipId,
-    roleKey: context.roleKey,
-    permissions: context.permissions,
-    sessionId: context.sessionId,
-  }
+  return resolveBearerTokenContext(request, database)
 }
 
 export async function resolveBearerTokenContext(request: Request | NextRequest, database: PrismaClient = prisma): Promise<TrustedActorContext | null> {

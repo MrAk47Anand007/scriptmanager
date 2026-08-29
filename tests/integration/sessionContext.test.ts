@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { prisma } from '@/lib/db'
-import { createSessionToken, SESSION_COOKIE } from '@/lib/auth'
+import { createSessionToken, hashApiToken, SESSION_COOKIE } from '@/lib/auth'
 import { ensureDefaultWorkspace } from '@/lib/rbac/bootstrap'
 import { hashSessionToken, resolveTrustedRequestContext } from '@/lib/rbac/requestContext'
 
@@ -46,5 +46,24 @@ describe('persisted request session context', () => {
     })
     await prisma.userSession.update({ where: { id: sessionId }, data: { revokedAt: new Date() } })
     await expect(resolveTrustedRequestContext(request)).resolves.toBeNull()
+  })
+
+  it('resolves the bearer API token context for hosted API routes', async () => {
+    await prisma.setting.upsert({
+      where: { key: 'api_token_hash' },
+      update: { value: hashApiToken('context-test-token') },
+      create: { key: 'api_token_hash', value: hashApiToken('context-test-token') },
+    })
+    try {
+      const request = new Request('http://localhost/api/ops/server-profiles', { headers: { authorization: 'Bearer context-test-token' } })
+      await expect(resolveTrustedRequestContext(request)).resolves.toMatchObject({
+        runtimeMode: 'web',
+        authType: 'bearer',
+        actorId: 'local-admin',
+        workspaceId: 'default',
+      })
+    } finally {
+      await prisma.setting.delete({ where: { key: 'api_token_hash' } }).catch(() => undefined)
+    }
   })
 })
