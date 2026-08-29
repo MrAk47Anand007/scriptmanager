@@ -10,6 +10,7 @@ import { listWorkflowsRuntime } from '@/lib/workflowsRuntimeClient'
 import { clearGithubGistSettingsRuntime, readGithubGistSettingsRuntime, saveGithubGistSettingsRuntime } from '@/lib/gistCredentialsRuntimeClient'
 import { deleteDesktopGist, exportScriptRuntime, exportScriptsRuntime, importScriptsRuntime, readScriptContentRuntime, syncDesktopScriptToGist } from '@/lib/scriptsRuntimeClient'
 import { runScript as runScriptThunk } from '@/features/scripts/scriptsSlice'
+import { runGitActionRuntime } from '@/lib/gitRuntimeClient'
 import { listDesktopBuilds, readDesktopBuildOutput } from '@/lib/scriptsRuntimeClient'
 import {
   listDesktopScriptEnv,
@@ -107,6 +108,17 @@ describe('desktop runtime bridge', () => {
 
     expect(result.payload).toEqual({ buildId: 'build-1', status: 'started' })
     expect(runScript).toHaveBeenCalledWith({ scriptId: 'script-1', paramValues: { ENV: 'test' }, buildId: undefined })
+  })
+
+  it('runs Git actions through desktop IPC', async () => {
+    const runGitAction = vi.fn().mockResolvedValue({ kind: 'result', data: { output: '' } })
+    window.scriptManagerDesktop = { runtime: { runGitAction } } as never
+
+    await expect(runGitActionRuntime('project-1', { action: 'status' })).resolves.toEqual({
+      kind: 'result',
+      data: { output: '' },
+    })
+    expect(runGitAction).toHaveBeenCalledWith({ projectId: 'project-1', action: { action: 'status' } })
   })
 
   it('uses desktop IPC for script backup and restore', async () => {

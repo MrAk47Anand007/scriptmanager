@@ -1,14 +1,14 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import axios from 'axios'
 import type { GitBranches, GitDiffFile, GitStatus } from '@/lib/git/types'
+import type { GitAction } from '@/lib/git/types'
+import { runGitActionRuntime } from '@/lib/gitRuntimeClient'
 
 interface GitState { projectId: string | null; status: GitStatus | null; branches: GitBranches | null; diff: GitDiffFile[]; selectedPath: string | null; pending: string | null; approvalId: string | null; error: string | null }
 const initialState: GitState = { projectId: null, status: null, branches: null, diff: [], selectedPath: null, pending: null, approvalId: null, error: null }
 
-export const runGitAction = createAsyncThunk('git/run', async ({ projectId, action }: { projectId: string; action: Record<string, unknown> }) => {
-  const response = await axios.post(`/api/projects/${projectId}/git`, action, { validateStatus: status => status < 500 })
-  if (response.status >= 400) throw new Error(response.data.error ?? 'Git operation failed')
-  return { action: String(action.action), response: response.data }
+export const runGitAction = createAsyncThunk('git/run', async ({ projectId, action }: { projectId: string; action: GitAction }) => {
+  const response = await runGitActionRuntime(projectId, action)
+  return { action: action.action, response }
 })
 
 const slice = createSlice({ name: 'git', initialState, reducers: {

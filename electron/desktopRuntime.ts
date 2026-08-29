@@ -7,6 +7,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { createApprovalService } from '../src/lib/approvals/service'
+import { createExecutionEventRepository } from '../src/lib/execution/eventRepository'
+import { createCorrelationId, createExecutionEvent } from '../src/lib/execution/events'
 import { createPluginRegistry } from '../src/lib/plugins/registry'
 import { createTeamAdminService } from '../src/lib/rbac/adminService'
 import { createGithubGistCredentialService } from '../src/lib/gistCredentials'
@@ -18,6 +20,10 @@ import { createSecretVaultService } from '../src/lib/secrets/service'
 import { createServerSecretStore } from '../src/lib/secrets/serverStore'
 import { parseSecretReference, serializeSecretReference } from '../src/lib/secrets/references'
 import { getNextRunTime } from '../src/lib/schedulerService'
+import { parseWorkspacePolicy } from '../src/lib/git/policy'
+import { runGit } from '../src/lib/git/process'
+import { createGitService } from '../src/lib/git/service'
+import type { GitAction } from '../src/lib/git/types'
 import { notifyWorkflowWorker } from '../src/lib/workflows/workerLoop'
 import { createWorkflowRepository } from '../src/lib/workflows/repository'
 import { parseWorkflowDefinition } from '../src/lib/workflows/schema'
@@ -3039,6 +3045,39 @@ async function getDesktopBootstrapState() {
   return { scripts, collections, settings }
 }
 
+async function runDesktopGitAction(payload: { projectId: string; action: GitAction }) {
+  if (!payload || typeof payload !== 'object' || !payload.projectId?.trim() || !payload.action || typeof payload.action !== 'object') {
+    throw new Error('Git action payload is invalid')
+  }
+
+  const actor = await createDesktopActorContext(prisma)
+  const project = await prisma.project.findFirst({ where: { id: payload.projectId, workspaceId: actor.workspaceId } })
+  if (!project) throw new Error('Project not found')
+  if (!project.repositoryRoot) throw new Error('Project is not connected to a repository')
+
+  const correlationId = createCorrelationId()
+  const service = createGitService({
+    run: runGit,
+    audit: event => createExecutionEventRepository(prisma).append(createExecutionEvent({
+      type: 'git.action', executionKind: 'git', correlationId,
+      actor: { type: 'user', id: actor.actorId, name: actor.actorName },
+      target: { type: 'project', id: project.id, name: project.name }, data: { ...event },
+    })),
+    requestApproval: ({ action }) => createApprovalService(prisma).create({
+      actorType: 'user', actorId: actor.actorId, actorName: actor.actorName, workspaceId: actor.workspaceId,
+      capability: `git.${action.action}`, operation: action.action, resource: project.repositoryRoot!,
+      risk: action.force || action.action === 'clean' ? 'critical' : 'high', reason: 'Protected Git operation',
+      preview: action, protectedAction: true, correlationId, expiresAt: new Date(Date.now() + 15 * 60_000),
+    }),
+  })
+
+  return service.execute({
+    projectId: project.id, name: project.name, root: project.repositoryRoot,
+    defaultBranch: project.defaultBranch, remoteUrl: project.remoteUrl,
+    policy: parseWorkspacePolicy(project.workspacePolicy),
+  }, payload.action, { type: 'user', id: actor.actorId, name: actor.actorName })
+}
+
 async function listWorkspaceAccessState() {
   const actor = await createDesktopActorContext(prisma)
   const service = createTeamAdminService(prisma)
@@ -3564,6 +3603,10 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:assign-collection-project', async (_event, payload: { collectionId: string; projectId: string | null }) => {
     return assignDesktopCollectionToProject(payload.collectionId, payload.projectId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:run-git-action', async (_event, payload: { projectId: string; action: GitAction }) => {
+    return runDesktopGitAction(payload)
   })
 
   ipcMain.handle('scriptmanager:runtime:list-server-profiles', async () => {

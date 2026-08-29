@@ -8,6 +8,7 @@ import { buildRemoteCommand } from '../src/lib/executionSafety'
 import { hasStoredOpsSecret, revealOpsSecret } from '../src/lib/opsSecretStore'
 import { resolveResourceSecret, storeResourceSecret } from '../src/lib/secrets/migration'
 import { getDesktopWorkspaceLayout } from '../src/lib/workspaceLayout'
+import { parseWorkspacePolicy } from '../src/lib/git/policy'
 
 const prisma = new PrismaClient({
   log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
@@ -21,6 +22,10 @@ type ProjectDto = {
   description: string
   environment: 'development' | 'qa' | 'uat' | 'production'
   color: string
+  repository_root: string | null
+  default_branch: string
+  remote_url: string | null
+  workspace_policy: import('../src/lib/git/types').WorkspacePolicy
   collection_ids: string[]
   created_at: string
   updated_at: string
@@ -68,6 +73,10 @@ function serializeProject(project: any): ProjectDto {
     description: project.description,
     environment: project.environment,
     color: project.color,
+    repository_root: project.repositoryRoot ?? null,
+    default_branch: project.defaultBranch ?? 'main',
+    remote_url: project.remoteUrl ?? null,
+    workspace_policy: parseWorkspacePolicy(project.workspacePolicy),
     collection_ids: project.collections?.map((collection: any) => collection.id) ?? [],
     created_at: project.createdAt.toISOString(),
     updated_at: project.updatedAt.toISOString(),
@@ -267,7 +276,17 @@ export async function listProjects(): Promise<ProjectDto[]> {
   return projects.map(serializeProject)
 }
 
-export async function saveProject(payload: { id?: string; name?: string; description?: string; environment?: string; color?: string }) {
+export async function saveProject(payload: {
+  id?: string
+  name?: string
+  description?: string
+  environment?: string
+  color?: string
+  repository_root?: string | null
+  default_branch?: string
+  remote_url?: string | null
+  workspace_policy?: import('../src/lib/git/types').WorkspacePolicy
+}) {
   const validEnvironments = ['development', 'qa', 'uat', 'production']
   const environment = validEnvironments.includes(payload.environment ?? '') ? payload.environment! : 'development'
   if (!payload.id && !payload.name?.trim()) {
@@ -281,6 +300,10 @@ export async function saveProject(payload: { id?: string; name?: string; descrip
         ...(payload.description !== undefined && { description: payload.description }),
         ...(payload.environment !== undefined && { environment }),
         ...(payload.color !== undefined && { color: payload.color }),
+        ...(payload.repository_root !== undefined && { repositoryRoot: payload.repository_root?.trim() || null }),
+        ...(payload.default_branch !== undefined && { defaultBranch: payload.default_branch.trim() || 'main' }),
+        ...(payload.remote_url !== undefined && { remoteUrl: payload.remote_url?.trim() || null }),
+        ...(payload.workspace_policy !== undefined && { workspacePolicy: JSON.stringify(payload.workspace_policy) }),
       },
       include: { collections: { select: { id: true } } },
     })
@@ -290,6 +313,10 @@ export async function saveProject(payload: { id?: string; name?: string; descrip
         description: payload.description ?? '',
         environment,
         color: payload.color ?? '#6366f1',
+        repositoryRoot: payload.repository_root?.trim() || null,
+        defaultBranch: payload.default_branch?.trim() || 'main',
+        remoteUrl: payload.remote_url?.trim() || null,
+        workspacePolicy: JSON.stringify(payload.workspace_policy ?? {}),
       },
       include: { collections: { select: { id: true } } },
     })

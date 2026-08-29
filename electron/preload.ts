@@ -193,6 +193,8 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     deleteProject: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-project', id) as Promise<string>,
     assignCollectionToProject: (payload: { collectionId: string; projectId: string | null }) =>
       ipcRenderer.invoke('scriptmanager:runtime:assign-collection-project', payload) as Promise<unknown>,
+    runGitAction: (payload: { projectId: string; action: import('../src/lib/git/types').GitAction }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:run-git-action', payload) as Promise<unknown>,
     listServerProfiles: () => ipcRenderer.invoke('scriptmanager:runtime:list-server-profiles') as Promise<unknown[]>,
     saveServerProfile: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-server-profile', payload) as Promise<unknown>,
     deleteServerProfile: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-server-profile', id) as Promise<string>,

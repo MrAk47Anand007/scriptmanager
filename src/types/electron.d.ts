@@ -171,6 +171,7 @@ declare global {
         saveProject: (payload: unknown) => Promise<unknown>
         deleteProject: (id: string) => Promise<string>
         assignCollectionToProject: (payload: { collectionId: string; projectId: string | null }) => Promise<unknown>
+        runGitAction: (payload: { projectId: string; action: import('@/lib/git/types').GitAction }) => Promise<unknown>
         listServerProfiles: () => Promise<unknown[]>
         saveServerProfile: (payload: unknown) => Promise<unknown>
         deleteServerProfile: (id: string) => Promise<string>
