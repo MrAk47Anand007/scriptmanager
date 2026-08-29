@@ -5,6 +5,7 @@ import { createProviderClient } from './index'
 import { getDecryptedStorageProvider } from './providerStore'
 import type { RemoteFile, StorageProviderClient } from './types'
 import { resolveScriptFilePath } from '../scriptPathResolver'
+import { atomicWriteLocalFile, getConflictCopyPath } from './localFile'
 
 // Cloud sync engine: pull-on-run, push-on-save, and manual per-collection sync.
 // All functions take the PrismaClient as the first argument (web passes the
@@ -77,20 +78,6 @@ function localMtimeMs(filePath: string): number | null {
   }
 }
 
-function conflictCopyPath(filePath: string): string {
-  const ext = path.extname(filePath)
-  const base = filePath.slice(0, filePath.length - ext.length)
-  const now = new Date()
-  const pad = (value: number) => String(value).padStart(2, '0')
-  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  return `${base}.conflict-${stamp}${ext}`
-}
-
-function writeLocalFile(filePath: string, content: Buffer): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true })
-  fs.writeFileSync(filePath, content)
-}
-
 async function markSynced(prisma: PrismaClient, scriptId: string, etag: string): Promise<void> {
   await prisma.script.update({
     where: { id: scriptId },
@@ -146,7 +133,7 @@ export async function ensureFreshScript(
 
     try {
       const content = await client.pull(remoteFile.path)
-      writeLocalFile(localPath, content)
+      atomicWriteLocalFile(localPath, content)
       await markSynced(prisma, script.id, remoteFile.etag)
       return { ok: true, pulled: true }
     } catch (error) {
@@ -291,18 +278,18 @@ export async function syncCollection(
 
         if (localMtime === null) {
           // No local copy → pull.
-          writeLocalFile(localPath, await client.pull(remoteFile.path))
+          atomicWriteLocalFile(localPath, await client.pull(remoteFile.path))
           await markSynced(prisma, script.id, remoteFile.etag)
           summary.pulled += 1
         } else if (remoteChanged && locallyEdited) {
           // Both sides changed → remote wins, local preserved as a conflict copy.
-          fs.copyFileSync(localPath, conflictCopyPath(localPath))
-          writeLocalFile(localPath, await client.pull(remoteFile.path))
+          fs.copyFileSync(localPath, getConflictCopyPath(localPath))
+          atomicWriteLocalFile(localPath, await client.pull(remoteFile.path))
           await markSynced(prisma, script.id, remoteFile.etag)
           summary.conflicts += 1
           summary.pulled += 1
         } else if (remoteChanged) {
-          writeLocalFile(localPath, await client.pull(remoteFile.path))
+          atomicWriteLocalFile(localPath, await client.pull(remoteFile.path))
           await markSynced(prisma, script.id, remoteFile.etag)
           summary.pulled += 1
         } else if (locallyEdited || script.remoteSyncedAt === null) {
@@ -349,7 +336,7 @@ export async function syncCollection(
       try {
         const content = await client.pull(remoteFile.path)
         const localPath = resolveScriptFilePath({ filename: relative, collection }, scriptsRoot)
-        writeLocalFile(localPath, content)
+        atomicWriteLocalFile(localPath, content)
 
         const baseName = relative.slice(0, relative.length - ext.length)
         let name = baseName
