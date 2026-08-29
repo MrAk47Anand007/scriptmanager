@@ -14,6 +14,7 @@ model Script {
   filename                String
   sourcePath              String?   @map("source_path")
   sourceAvailable         Boolean   @default(true) @map("source_available")
+  sourceFingerprint       String?   @map("source_fingerprint")
   description             String    @default("")
   language                String    @default("python")
   interpreter             String?

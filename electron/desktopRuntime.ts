@@ -1024,6 +1024,11 @@ function resolveScriptPath(script: {
   return path.resolve(getScriptsDir(), path.basename(script.filename))
 }
 
+async function getCanonicalSourceFingerprint(sourcePath: string): Promise<string> {
+  const content = await fs.promises.readFile(sourcePath)
+  return crypto.createHash('sha256').update(content).digest('hex')
+}
+
 async function getCollectionRecord(collectionId: string) {
   return prisma.collection.findUnique({
     where: { id: collectionId },
@@ -1837,15 +1842,16 @@ async function openLocalFolder(payload: OpenFolderPayload) {
 
   const existingScripts = await prisma.script.findMany({
     where: { collectionId: collection.id, sourcePath: { not: null } },
-    select: { id: true, sourcePath: true },
+    select: { id: true, sourcePath: true, sourceFingerprint: true },
   })
   const existingBySourcePath = new Map(
     existingScripts
-      .filter((script): script is { id: string; sourcePath: string } => Boolean(script.sourcePath))
+      .filter((script): script is { id: string; sourcePath: string; sourceFingerprint: string | null } => Boolean(script.sourcePath))
       .map((script) => [script.sourcePath, script]),
   )
 
   const activeSourcePaths = new Set<string>()
+  const claimedScriptIds = new Set<string>()
   const linkedScripts: Array<{ id: string; name: string }> = []
 
   for (const filePath of files) {
@@ -1854,9 +1860,16 @@ async function openLocalFolder(payload: OpenFolderPayload) {
     const uniqueName = await buildUniqueScriptName(`${getFolderDisplayName(resolvedFolderPath)}/${baseName}`, filePath)
     const filename = path.basename(filePath)
     const language = inferScriptLanguage(filePath)
-    const existing = existingBySourcePath.get(filePath)
+    const fingerprint = await getCanonicalSourceFingerprint(filePath)
+    const existing = existingBySourcePath.get(filePath) ?? existingScripts.find((script) =>
+      !claimedScriptIds.has(script.id) &&
+      script.sourcePath &&
+      !activeSourcePaths.has(script.sourcePath) &&
+      script.sourceFingerprint === fingerprint,
+    )
 
     if (existing) {
+      claimedScriptIds.add(existing.id)
       const updated = await prisma.script.update({
         where: { id: existing.id },
         data: {
@@ -1864,6 +1877,7 @@ async function openLocalFolder(payload: OpenFolderPayload) {
           filename,
           sourcePath: filePath,
           sourceAvailable: true,
+          sourceFingerprint: fingerprint,
           language,
           collectionId: collection.id,
         },
@@ -1877,6 +1891,7 @@ async function openLocalFolder(payload: OpenFolderPayload) {
         name: uniqueName,
         filename,
         sourcePath: filePath,
+        sourceFingerprint: fingerprint,
         language,
         collectionId: collection.id,
         webhookToken: crypto.randomUUID().replace(/-/g, ''),
@@ -1886,7 +1901,7 @@ async function openLocalFolder(payload: OpenFolderPayload) {
   }
 
   const staleScriptIds = existingScripts
-    .filter((script) => script.sourcePath && !activeSourcePaths.has(script.sourcePath))
+    .filter((script) => script.sourcePath && !activeSourcePaths.has(script.sourcePath) && !claimedScriptIds.has(script.id))
     .map((script) => script.id)
 
   if (staleScriptIds.length > 0) {
