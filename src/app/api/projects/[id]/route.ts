@@ -1,17 +1,20 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { DEFAULT_WORKSPACE_POLICY } from '@/lib/git/types'
+import { parseWorkspacePolicy } from '@/lib/git/policy'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 const projectJson = (project: any) => ({ id: project.id, name: project.name, description: project.description,
   environment: project.environment, color: project.color, repository_root: project.repositoryRoot,
   default_branch: project.defaultBranch, remote_url: project.remoteUrl,
-  workspace_policy: JSON.parse(project.workspacePolicy || '{}'), collection_ids: project.collections.map((c: { id: string }) => c.id),
+  workspace_policy: parseWorkspacePolicy(project.workspacePolicy), collection_ids: project.collections.map((c: { id: string }) => c.id),
   created_at: project.createdAt.toISOString(), updated_at: project.updatedAt.toISOString() })
 
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'git', 'read')
+  if (authorization.response) return authorization.response
   const { id } = await params
 
   const project = await prisma.project.findUnique({
@@ -19,7 +22,7 @@ export async function GET(
     include: { collections: { select: { id: true } } }
   })
 
-  if (!project) {
+  if (!project || project.workspaceId !== authorization.context.workspaceId) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 })
   }
 
@@ -30,10 +33,12 @@ export async function PUT(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'git', 'update')
+  if (authorization.response) return authorization.response
   const { id } = await params
   const { name, description, environment, color, repository_root, default_branch, remote_url, workspace_policy } = await req.json()
 
-  const project = await prisma.project.findUnique({ where: { id } })
+  const project = await prisma.project.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
   if (!project) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 })
   }
@@ -50,7 +55,7 @@ export async function PUT(
       ...(repository_root !== undefined && { repositoryRoot: repository_root?.trim() || null }),
       ...(default_branch !== undefined && { defaultBranch: default_branch?.trim() || 'main' }),
       ...(remote_url !== undefined && { remoteUrl: remote_url?.trim() || null }),
-      ...(workspace_policy !== undefined && { workspacePolicy: JSON.stringify({ ...DEFAULT_WORKSPACE_POLICY, ...workspace_policy }) }),
+      ...(workspace_policy !== undefined && { workspacePolicy: JSON.stringify(parseWorkspacePolicy(JSON.stringify(workspace_policy))) }),
     },
     include: { collections: { select: { id: true } } }
   })
@@ -62,9 +67,11 @@ export async function DELETE(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'git', 'delete')
+  if (authorization.response) return authorization.response
   const { id } = await params
 
-  const project = await prisma.project.findUnique({ where: { id } })
+  const project = await prisma.project.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
   if (!project) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 })
   }

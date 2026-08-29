@@ -1,15 +1,21 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { cache } from '@/lib/cache'
+import { filterPublicSettings } from '@/lib/settingsVisibility'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 /**
  * Bootstrap endpoint — returns scripts, collections, and settings in a single round-trip.
  * Replaces three separate fetches on app startup, reducing latency by ~2 HTTP round-trips.
  */
-export async function GET() {
+export async function GET(request: Request) {
+    const authorization = await authorizeRequest(request, 'script', 'read')
+    if (authorization.response) return authorization.response
+    const workspaceId = authorization.context.workspaceId
+    const scriptsCacheKey = `all_scripts:${workspaceId}`
     const [cachedScripts, cachedSettings] = await Promise.all([
-        cache.get('all_scripts'),
-        cache.get('settings'),
+        cache.get(scriptsCacheKey),
+        cache.get<Record<string, string>>('settings'),
     ])
 
     const [scripts, collections, settings] = await Promise.all([
@@ -17,6 +23,7 @@ export async function GET() {
         cachedScripts
             ? Promise.resolve(cachedScripts)
             : prisma.script.findMany({
+                where: { workspaceId },
                 orderBy: { name: 'asc' },
                 include: { collection: true, tags: { include: { tag: true } } },
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,7 +54,7 @@ export async function GET() {
                     webhook_secret_set: !!s.webhookSecret,
                     source_path: s.sourcePath,
                 }))
-                void cache.set('all_scripts', result, 60 * 5)
+                void cache.set(scriptsCacheKey, result, 60 * 5)
                 return result
             }),
 
@@ -72,8 +79,8 @@ export async function GET() {
         }))),
 
         // Settings (with cache)
-        cachedSettings
-            ? Promise.resolve(cachedSettings)
+            cachedSettings
+            ? Promise.resolve(filterPublicSettings(cachedSettings))
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             : prisma.setting.findMany().then((rows: any[]) => {
                 const result: Record<string, string> = {}
@@ -81,8 +88,9 @@ export async function GET() {
                 for (const s of rows as any[]) {
                     if (s.value !== null) result[s.key] = s.value
                 }
-                void cache.set('settings', result, 60 * 60)
-                return result
+                const publicSettings = filterPublicSettings(result)
+                void cache.set('settings', publicSettings, 60 * 60)
+                return publicSettings
             }),
     ])
 

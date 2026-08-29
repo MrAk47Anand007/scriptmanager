@@ -1,16 +1,19 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { DEFAULT_WORKSPACE_POLICY } from '@/lib/git/types'
+import { parseWorkspacePolicy } from '@/lib/git/policy'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 const projectJson = (p: any) => ({
   id: p.id, name: p.name, description: p.description, environment: p.environment, color: p.color,
   repository_root: p.repositoryRoot, default_branch: p.defaultBranch, remote_url: p.remoteUrl,
-  workspace_policy: JSON.parse(p.workspacePolicy || '{}'), collection_ids: p.collections.map((c: { id: string }) => c.id),
+  workspace_policy: parseWorkspacePolicy(p.workspacePolicy), collection_ids: p.collections.map((c: { id: string }) => c.id),
   created_at: p.createdAt.toISOString(), updated_at: p.updatedAt.toISOString(),
 })
 
 export async function GET(req: Request) {
-  const workspaceId = (req as Request | undefined)?.headers.get('x-scriptmanager-workspace-id') ?? 'default'
+  const authorization = await authorizeRequest(req, 'git', 'read')
+  if (authorization.response) return authorization.response
+  const workspaceId = authorization.context.workspaceId
   const projects = await prisma.project.findMany({
     where: { workspaceId },
     orderBy: { name: 'asc' },
@@ -23,7 +26,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const workspaceId = req.headers.get('x-scriptmanager-workspace-id') ?? 'default'
+  const authorization = await authorizeRequest(req, 'git', 'create')
+  if (authorization.response) return authorization.response
+  const workspaceId = authorization.context.workspaceId
   const { name, description, environment, color, repository_root, default_branch, remote_url, workspace_policy } = await req.json()
 
   if (!name?.trim()) {
@@ -43,7 +48,7 @@ export async function POST(req: Request) {
       repositoryRoot: repository_root?.trim() || null,
       defaultBranch: default_branch?.trim() || 'main',
       remoteUrl: remote_url?.trim() || null,
-      workspacePolicy: JSON.stringify({ ...DEFAULT_WORKSPACE_POLICY, ...(workspace_policy ?? {}) }),
+      workspacePolicy: JSON.stringify(parseWorkspacePolicy(workspace_policy === undefined ? undefined : JSON.stringify(workspace_policy))),
     },
     include: { collections: { select: { id: true } } }
   })
