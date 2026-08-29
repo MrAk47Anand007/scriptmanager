@@ -12,15 +12,7 @@ import { useRouter } from 'next/navigation'
 import { isDesktopRenderer } from '@/lib/runtime/desktopMode'
 
 export const SecuritySection = () => {
-    if (isDesktopRenderer()) {
-        return (
-            <section>
-                <h2 className="text-lg font-semibold">Security</h2>
-                <p className="text-sm text-muted-foreground">Desktop mode uses the local app context. Password, session, and API-token controls are available in hosted web mode.</p>
-            </section>
-        )
-    }
-
+    const desktop = isDesktopRenderer()
     const router = useRouter()
 
     // Password change state
@@ -39,10 +31,20 @@ export const SecuritySection = () => {
     const [isApiTokenLoading, setIsApiTokenLoading] = useState(false)
 
     useEffect(() => {
+        if (desktop) return
         axios.get('/api/auth/api-token')
             .then((res) => setHasApiToken(!!res.data?.has_token))
             .catch(() => setHasApiToken(false))
-    }, [])
+    }, [desktop])
+
+    if (desktop) {
+        return (
+            <section>
+                <h2 className="text-lg font-semibold">Security</h2>
+                <p className="text-sm text-muted-foreground">Desktop mode uses the local app context. Password, session, and API-token controls are available in hosted web mode.</p>
+            </section>
+        )
+    }
 
     const handleChangePassword = async () => {
         setPasswordError('')
