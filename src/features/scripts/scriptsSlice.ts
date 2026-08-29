@@ -34,6 +34,7 @@ import {
     saveDesktopScript,
     syncDesktopScriptToGist,
     deleteDesktopGist,
+    startDesktopLocalRun,
     updateDesktopCollection,
 } from '@/lib/scriptsRuntimeClient'
 
@@ -382,6 +383,9 @@ export const saveScript = createAsyncThunk('scripts/saveScript', async (data: { 
 })
 
 export const runScript = createAsyncThunk('scripts/runScript', async ({ id, paramValues, buildId }: { id: string; paramValues?: Record<string, string>; buildId?: string }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return startDesktopLocalRun(id, paramValues, buildId)
+    }
     const response = await axios.post(`/api/scripts/${id}/run`, { paramValues, buildId })
     return response.data
 })

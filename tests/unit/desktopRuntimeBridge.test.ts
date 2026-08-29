@@ -9,6 +9,7 @@ import { loadWorkspaceAccessRuntime } from '@/lib/workspacesRuntimeClient'
 import { listWorkflowsRuntime } from '@/lib/workflowsRuntimeClient'
 import { clearGithubGistSettingsRuntime, readGithubGistSettingsRuntime, saveGithubGistSettingsRuntime } from '@/lib/gistCredentialsRuntimeClient'
 import { deleteDesktopGist, readScriptContentRuntime, syncDesktopScriptToGist } from '@/lib/scriptsRuntimeClient'
+import { runScript as runScriptThunk } from '@/features/scripts/scriptsSlice'
 import { listDesktopBuilds, readDesktopBuildOutput } from '@/lib/scriptsRuntimeClient'
 import {
   listDesktopScriptEnv,
@@ -94,6 +95,18 @@ describe('desktop runtime bridge', () => {
 
     await expect(readScriptContentRuntime('script-1')).resolves.toBe('print(1)')
     expect(readScript).toHaveBeenCalledWith('script-1')
+  })
+
+  it('runs scheduled scripts through desktop IPC', async () => {
+    const runScript = vi.fn().mockResolvedValue({ buildId: 'build-1', status: 'started' })
+    window.scriptManagerDesktop = { runtime: { runScript } } as never
+
+    const dispatch = vi.fn()
+    const getState = vi.fn().mockReturnValue({})
+    const result = await runScriptThunk({ id: 'script-1', paramValues: { ENV: 'test' } })(dispatch, getState, undefined)
+
+    expect(result.payload).toEqual({ buildId: 'build-1', status: 'started' })
+    expect(runScript).toHaveBeenCalledWith({ scriptId: 'script-1', paramValues: { ENV: 'test' }, buildId: undefined })
   })
 
   it('uses desktop IPC for build history and build output', async () => {
