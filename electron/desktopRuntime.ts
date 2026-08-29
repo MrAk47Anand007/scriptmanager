@@ -118,7 +118,7 @@ type ScriptDto = {
 
 type ScriptContentDto = Pick<
   ScriptDto,
-  'id' | 'name' | 'filename' | 'language' | 'interpreter' | 'parameters' | 'source_path' | 'created_at' | 'updated_at'
+  'id' | 'name' | 'filename' | 'language' | 'interpreter' | 'parameters' | 'source_path' | 'source_available' | 'created_at' | 'updated_at'
 > & {
   content: string
 }
@@ -984,6 +984,7 @@ async function getScriptRecord(scriptId: string) {
       name: true,
       filename: true,
       sourcePath: true,
+      sourceAvailable: true,
       language: true,
       interpreter: true,
       timeoutMs: true,
@@ -1058,6 +1059,8 @@ async function hydrateCollectionPythonMetadata(collection: CollectionRecord): Pr
 }
 
 async function getScriptExecutionContext(script: {
+  sourcePath?: string | null
+  sourceAvailable?: boolean
   collection?: {
     folderPath: string | null
     pythonToolchainEnabled: boolean
@@ -1065,6 +1068,9 @@ async function getScriptExecutionContext(script: {
     pythonInterpreterPath: string | null
   } | null
 }): Promise<ScriptExecutionContext> {
+  if (script.sourcePath && script.sourceAvailable === false) {
+    throw new Error('Canonical script source is unavailable')
+  }
   const cwd = script.collection?.folderPath ? path.resolve(script.collection.folderPath) : await getWorkspaceRoot()
   const inspection = script.collection?.folderPath ? inspectFolderState(script.collection.folderPath) : { hasVenv: false, venvPath: null, interpreterPath: null, manifests: [] }
   const venvPath = script.collection?.pythonToolchainEnabled ? (script.collection.pythonVenvPath ?? inspection.venvPath) : null
