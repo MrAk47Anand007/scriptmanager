@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
     FileCode, Plus, Folder, MoreVertical, Trash2, ChevronRight, ChevronDown,
-    GripVertical, LayoutTemplate, Copy, Loader2, Layers, FolderOpen, Cloud, RefreshCw,
+    GripVertical, LayoutTemplate, Copy, Loader2, Layers, FolderOpen, Cloud, RefreshCw, AlertTriangle,
 } from 'lucide-react';
 import {
     DropdownMenu,
@@ -258,6 +258,9 @@ const ScriptRow = memo(({
                     <div className="w-4 flex-shrink-0" />
                     <FileCode className={cn("h-4 w-4 flex-shrink-0", isActive ? "text-blue-600 dark:text-blue-400" : "text-slate-500")} />
                     <span className="truncate text-[13px] flex-1">{script.name}<UnsavedIndicator scriptId={script.id} /></span>
+                    {script.source_path && script.source_available === false && (
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-label="Canonical source unavailable" />
+                    )}
                     <GripVertical className="h-3.5 w-3.5 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-auto" />
                 </div>
             </ContextMenuTrigger>
