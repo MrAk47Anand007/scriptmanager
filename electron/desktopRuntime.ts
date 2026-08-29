@@ -33,7 +33,7 @@ import { createWorkflowRepository } from '../src/lib/workflows/repository'
 import { parseWorkflowDefinition } from '../src/lib/workflows/schema'
 import { createWorkflowTriggerService } from '../src/lib/workflows/triggers'
 import { validateWorkflowGraph } from '../src/lib/workflows/graph'
-import { assertPublicSettingKey, filterPublicSettings } from '../src/lib/settingsVisibility'
+import { filterPublicSettings, parsePublicSettings } from '../src/lib/settingsVisibility'
 import { getDesktopWorkspaceLayout, ensureDesktopWorkspaceLayout, sanitizeWorkspaceName } from '../src/lib/workspaceLayout'
 import {
   deleteStorageProvider as deleteDesktopStorageProvider,
@@ -433,9 +433,9 @@ async function readSettingsMap(): Promise<Record<string, string>> {
 }
 
 async function saveSettingsMap(nextSettings: Record<string, string>): Promise<Record<string, string>> {
-  for (const key of Object.keys(nextSettings)) assertPublicSettingKey(key)
+  const settings = parsePublicSettings(nextSettings)
   await prisma.$transaction(
-    Object.entries(nextSettings).map(([key, value]) =>
+    Object.entries(settings).map(([key, value]) =>
       prisma.setting.upsert({
         where: { key },
         update: { value: value ?? '' },

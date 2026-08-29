@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { assertPublicSettingKey, filterPublicSettings } from '@/lib/settingsVisibility'
+import { filterPublicSettings, parsePublicSettings } from '@/lib/settingsVisibility'
+import { resolveTrustedRequestContext } from '@/lib/rbac/requestContext'
 
 import { cache } from '@/lib/cache'
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!await resolveTrustedRequestContext(request, prisma)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const cachedSettings = await cache.get('settings')
   if (cachedSettings) {
     return NextResponse.json(cachedSettings)
@@ -26,8 +28,13 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const data = await req.json() as Record<string, string>
-  for (const key of Object.keys(data)) assertPublicSettingKey(key)
+  if (!await resolveTrustedRequestContext(req, prisma)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  let data: Record<string, string>
+  try {
+    data = parsePublicSettings(await req.json())
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Settings payload is invalid' }, { status: 400 })
+  }
   await cache.del('settings') // Invalidate settings cache
 
 
