@@ -63,7 +63,9 @@ import {
     buildBrowserTerminalCommand,
     DEFAULT_TERMINAL_SESSION_ID,
     hasDesktopScriptsRuntime,
+    listCanonicalRecoveryDrafts,
     runScriptInDesktopTerminal,
+    discardCanonicalRecoveryDraft,
     saveCanonicalRecoveryDraft,
     setDesktopTerminalContext,
     startBrowserRun,
@@ -72,6 +74,7 @@ import {
     subscribeToDesktopBuildEvents,
 } from '@/lib/scriptsRuntimeClient';
 import { getCanonicalFolderReloadAction } from '@/lib/canonicalFolderReload';
+import type { CanonicalRecoveryDraft } from '@/lib/scriptsRuntimeClient';
 
 const LANGUAGE_OPTIONS = [
     { value: 'python', label: 'Python' },
@@ -433,6 +436,7 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
     const [scriptContent, setScriptContent] = useState('');
     const [buildOutput, setBuildOutput] = useState('');
     const [canonicalFolderNotice, setCanonicalFolderNotice] = useState<string | null>(null);
+    const [recoveryDrafts, setRecoveryDrafts] = useState<CanonicalRecoveryDraft[]>([]);
 
     // Parameters state
     const [scriptParameters, setScriptParameters] = useState<ScriptParameter[]>([]);
@@ -534,6 +538,30 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
             dispatch(fetchScriptContent(activeScriptId));
         });
     }, [activeScript, activeScriptId, dispatch, isDesktopRuntime, scriptContent]);
+
+    useEffect(() => {
+        if (!isDesktopRuntime || !activeScriptId) {
+            setRecoveryDrafts([]);
+            return;
+        }
+        let cancelled = false;
+        void listCanonicalRecoveryDrafts(activeScriptId).then((drafts) => {
+            if (!cancelled) setRecoveryDrafts(drafts);
+        }).catch(() => {
+            if (!cancelled) setRecoveryDrafts([]);
+        });
+        return () => { cancelled = true; };
+    }, [activeScriptId, canonicalFolderNotice, isDesktopRuntime]);
+
+    const handleRestoreRecoveryDraft = useCallback((draft: CanonicalRecoveryDraft) => {
+        setScriptContent(draft.content);
+        setCanonicalFolderNotice('Recovery draft restored to the editor. Save to write it to the canonical file.');
+    }, []);
+
+    const handleDiscardRecoveryDraft = useCallback(async (draftId: string) => {
+        await discardCanonicalRecoveryDraft(draftId);
+        setRecoveryDrafts((drafts) => drafts.filter((draft) => draft.id !== draftId));
+    }, []);
 
     // Also update language + params when active script updates (after fetch)
     useEffect(() => {
@@ -1440,6 +1468,25 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
                                 language={scriptLanguage}
                                 onRestore={handleRestoreVersionContent}
                             />
+                            {isDesktopRuntime && recoveryDrafts.length > 0 && (
+                                <div className="border-b bg-amber-50 p-4 dark:border-slate-800 dark:bg-amber-950/10">
+                                    <div className="mb-2 flex items-center justify-between">
+                                        <span className="text-sm font-medium text-amber-900 dark:text-amber-200">Recovery Drafts</span>
+                                        <span className="rounded-full bg-amber-200 px-1.5 py-0.5 text-[10px] text-amber-900 dark:bg-amber-900/50 dark:text-amber-100">{recoveryDrafts.length}</span>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {recoveryDrafts.map((draft) => (
+                                            <div key={draft.id} className="rounded border border-amber-200 bg-white p-2 dark:border-amber-900/40 dark:bg-slate-900">
+                                                <p className="mb-2 text-[11px] text-slate-500">{new Date(draft.createdAt).toLocaleString()}</p>
+                                                <div className="flex gap-2">
+                                                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleRestoreRecoveryDraft(draft)}>Restore</Button>
+                                                    <Button size="sm" variant="ghost" className="h-7 text-xs text-slate-500" onClick={() => void handleDiscardRecoveryDraft(draft.id)}>Discard</Button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </>
                     )}
                 </div>

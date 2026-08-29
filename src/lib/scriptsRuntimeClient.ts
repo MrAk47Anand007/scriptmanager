@@ -45,6 +45,11 @@ type CanonicalRecoveryDraftPayload = {
   content: string
 }
 
+export type CanonicalRecoveryDraft = CanonicalRecoveryDraftPayload & {
+  id: string
+  createdAt: string
+}
+
 export type CanonicalFolderChange = {
   type: 'changed' | 'deleted'
   collectionId: string
@@ -275,7 +280,7 @@ export async function rescanCanonicalFolder(collectionId: string) {
 
 export async function listCanonicalRecoveryDrafts(scriptId: string) {
   if (!window.scriptManagerDesktop?.runtime?.listCanonicalRecoveryDrafts) throw new Error('Desktop runtime unavailable')
-  return window.scriptManagerDesktop.runtime.listCanonicalRecoveryDrafts(scriptId)
+  return window.scriptManagerDesktop.runtime.listCanonicalRecoveryDrafts(scriptId) as Promise<CanonicalRecoveryDraft[]>
 }
 
 export async function saveCanonicalRecoveryDraft(payload: CanonicalRecoveryDraftPayload) {
