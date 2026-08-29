@@ -138,20 +138,30 @@ export function createWorkflowRepository(database: Database) {
       })
     },
 
-    async requestCancellation(runId: string) {
+    async requestCancellation(runId: string, workspaceId?: string) {
+      if (workspaceId) {
+        const run = await database.workflowRun.findFirst({ where: { id: runId, workflow: { workspaceId } }, select: { id: true } })
+        if (!run) throw new Error('Workflow run not found')
+      }
       return database.workflowRun.update({ where: { id: runId }, data: { cancelRequestedAt: new Date() } })
     },
 
-    async getRun(runId: string) {
-      return database.workflowRun.findUniqueOrThrow({ where: { id: runId }, include: { version: true, nodeRuns: true } })
+    async getRun(runId: string, workspaceId?: string) {
+      const run = await database.workflowRun.findFirst({ where: { id: runId, workflow: workspaceId ? { workspaceId } : undefined }, include: { version: true, nodeRuns: true } })
+      if (!run) throw new Error('Workflow run not found')
+      return run
     },
 
     listRuns(workflowId: string) {
       return database.workflowRun.findMany({ where: { workflowId }, orderBy: { createdAt: 'desc' }, include: { nodeRuns: true }, take: 50 })
     },
 
-    async retryNode(runId: string, nodeId: string) {
+    async retryNode(runId: string, nodeId: string, workspaceId?: string) {
       return database.$transaction(async (tx) => {
+        if (workspaceId) {
+          const run = await tx.workflowRun.findFirst({ where: { id: runId, workflow: { workspaceId } }, select: { id: true } })
+          if (!run) throw new Error('Workflow run not found')
+        }
         const node = await tx.workflowNodeRun.findUniqueOrThrow({ where: { runId_nodeId: { runId, nodeId } } })
         if (!['failed', 'interrupted'].includes(node.status)) throw new Error(`Cannot retry node with status: ${node.status}`)
         await tx.workflowNodeRun.update({ where: { id: node.id }, data: { status: 'pending', errorJson: null, finishedAt: null } })
