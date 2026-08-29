@@ -6,6 +6,7 @@ import { getDecryptedStorageProvider } from './providerStore'
 import type { RemoteFile, StorageProviderClient } from './types'
 import { resolveScriptFilePath } from '../scriptPathResolver'
 import { atomicWriteLocalFile, getConflictCopyPath } from './localFile'
+import { withStorageRetry } from './retry'
 
 // Cloud sync engine: pull-on-run, push-on-save, and manual per-collection sync.
 // All functions take the PrismaClient as the first argument (web passes the
@@ -114,7 +115,7 @@ export async function ensureFreshScript(
 
     let remoteFiles: RemoteFile[]
     try {
-      remoteFiles = await client.list(normalizeRemotePrefix(collection.remotePrefix))
+      remoteFiles = await withStorageRetry(() => client.list(normalizeRemotePrefix(collection.remotePrefix)))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.warn(`[CloudSync] ensureFreshScript: remote list failed for script ${scriptId}: ${message}`)
@@ -132,7 +133,7 @@ export async function ensureFreshScript(
     }
 
     try {
-      const content = await client.pull(remoteFile.path)
+      const content = await withStorageRetry(() => client.pull(remoteFile.path))
       atomicWriteLocalFile(localPath, content)
       await markSynced(prisma, script.id, remoteFile.etag)
       return { ok: true, pulled: true }
@@ -184,7 +185,7 @@ export async function pushScript(
 
     const content = fs.readFileSync(localPath)
     const remotePath = buildRemotePath(script.collection.remotePrefix, script.filename)
-    const { etag } = await client.push(remotePath, content)
+    const { etag } = await withStorageRetry(() => client.push(remotePath, content))
     await markSynced(prisma, script.id, etag)
     return { ok: true, pushed: true }
   } catch (error) {
@@ -240,7 +241,7 @@ export async function syncCollection(
     const prefix = normalizeRemotePrefix(collection.remotePrefix)
     let remoteFiles: RemoteFile[]
     try {
-      remoteFiles = await client.list(prefix)
+      remoteFiles = await withStorageRetry(() => client.list(prefix))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return { ...summary, ok: false, error: `Remote unreachable: ${message}` }
@@ -261,7 +262,7 @@ export async function syncCollection(
             summary.skipped.push(`${script.filename} (missing locally and remotely)`)
             continue
           }
-          const { etag } = await client.push(remotePath, fs.readFileSync(localPath))
+          const { etag } = await withStorageRetry(() => client.push(remotePath, fs.readFileSync(localPath)))
           await markSynced(prisma, script.id, etag)
           summary.pushed += 1
           continue
@@ -278,23 +279,23 @@ export async function syncCollection(
 
         if (localMtime === null) {
           // No local copy → pull.
-          atomicWriteLocalFile(localPath, await client.pull(remoteFile.path))
+          atomicWriteLocalFile(localPath, await withStorageRetry(() => client.pull(remoteFile.path)))
           await markSynced(prisma, script.id, remoteFile.etag)
           summary.pulled += 1
         } else if (remoteChanged && locallyEdited) {
           // Both sides changed → remote wins, local preserved as a conflict copy.
           fs.copyFileSync(localPath, getConflictCopyPath(localPath))
-          atomicWriteLocalFile(localPath, await client.pull(remoteFile.path))
+          atomicWriteLocalFile(localPath, await withStorageRetry(() => client.pull(remoteFile.path)))
           await markSynced(prisma, script.id, remoteFile.etag)
           summary.conflicts += 1
           summary.pulled += 1
         } else if (remoteChanged) {
-          atomicWriteLocalFile(localPath, await client.pull(remoteFile.path))
+          atomicWriteLocalFile(localPath, await withStorageRetry(() => client.pull(remoteFile.path)))
           await markSynced(prisma, script.id, remoteFile.etag)
           summary.pulled += 1
         } else if (locallyEdited || script.remoteSyncedAt === null) {
           // Remote unchanged but the local copy is newer (or never synced) → push.
-          const { etag } = await client.push(remotePath, fs.readFileSync(localPath))
+          const { etag } = await withStorageRetry(() => client.push(remotePath, fs.readFileSync(localPath)))
           await markSynced(prisma, script.id, etag)
           summary.pushed += 1
         }
@@ -334,7 +335,7 @@ export async function syncCollection(
       }
 
       try {
-        const content = await client.pull(remoteFile.path)
+        const content = await withStorageRetry(() => client.pull(remoteFile.path))
         const localPath = resolveScriptFilePath({ filename: relative, collection }, scriptsRoot)
         atomicWriteLocalFile(localPath, content)
 

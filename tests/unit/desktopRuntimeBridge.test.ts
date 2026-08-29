@@ -9,6 +9,18 @@ import { loadWorkspaceAccessRuntime } from '@/lib/workspacesRuntimeClient'
 import { listWorkflowsRuntime } from '@/lib/workflowsRuntimeClient'
 import { clearGithubGistSettingsRuntime, readGithubGistSettingsRuntime, saveGithubGistSettingsRuntime } from '@/lib/gistCredentialsRuntimeClient'
 import { deleteDesktopGist, syncDesktopScriptToGist } from '@/lib/scriptsRuntimeClient'
+import { listDesktopBuilds, readDesktopBuildOutput } from '@/lib/scriptsRuntimeClient'
+import {
+  listDesktopScriptEnv,
+  listDesktopScriptVersions,
+  readDesktopScriptSchedule,
+  readDesktopScriptVersion,
+  regenerateDesktopWebhook,
+  regenerateDesktopWebhookSecret,
+  saveDesktopScriptEnv,
+  saveDesktopScriptSchedule,
+  toggleDesktopWebhookSignature,
+} from '@/lib/scriptsRuntimeClient'
 
 afterEach(() => {
   delete window.scriptManagerDesktop
@@ -69,5 +81,41 @@ describe('desktop runtime bridge', () => {
     await expect(deleteDesktopGist('script-1')).resolves.toEqual({ ok: true })
     expect(syncGist).toHaveBeenCalledWith('script-1')
     expect(deleteGist).toHaveBeenCalledWith('script-1')
+  })
+
+  it('uses desktop IPC for build history and build output', async () => {
+    const listBuilds = vi.fn().mockResolvedValue([{ id: 'build-1', script_id: 'script-1', status: 'cancelled' }])
+    const readBuildOutput = vi.fn().mockResolvedValue('cancelled output')
+    window.scriptManagerDesktop = { runtime: { listBuilds, readBuildOutput } } as never
+
+    await expect(listDesktopBuilds('script-1')).resolves.toHaveLength(1)
+    await expect(readDesktopBuildOutput('script-1', 'build-1')).resolves.toBe('cancelled output')
+    expect(listBuilds).toHaveBeenCalledWith('script-1')
+    expect(readBuildOutput).toHaveBeenCalledWith({ scriptId: 'script-1', buildId: 'build-1' })
+  })
+
+  it('uses desktop IPC for script metadata and webhook controls', async () => {
+    const readSchedule = vi.fn().mockResolvedValue({ schedule_cron: '* * * * *', schedule_enabled: true, next_run_time: null })
+    const saveSchedule = vi.fn().mockResolvedValue({ schedule_cron: null, schedule_enabled: false, next_run_time: null })
+    const listEnv = vi.fn().mockResolvedValue([])
+    const saveEnv = vi.fn().mockResolvedValue({ id: 'env-1', key: 'TOKEN', value: '', is_secret: true })
+    const listVersions = vi.fn().mockResolvedValue([])
+    const readVersion = vi.fn().mockResolvedValue({ id: 'version-1', content: 'print(1)' })
+    const regenerateWebhook = vi.fn().mockResolvedValue({ webhook_token: 'token-1' })
+    const regenerateWebhookSecret = vi.fn().mockResolvedValue({ webhook_secret: 'secret-1' })
+    const toggleWebhookSignature = vi.fn().mockResolvedValue({ require_webhook_signature: true, webhook_secret: 'secret-2' })
+    window.scriptManagerDesktop = { runtime: { readSchedule, saveSchedule, listEnv, saveEnv, listVersions, readVersion, regenerateWebhook, regenerateWebhookSecret, toggleWebhookSignature } } as never
+
+    await expect(readDesktopScriptSchedule('script-1')).resolves.toMatchObject({ schedule_enabled: true })
+    await expect(saveDesktopScriptSchedule({ scriptId: 'script-1', cron: '', enabled: false })).resolves.toMatchObject({ schedule_enabled: false })
+    await expect(listDesktopScriptEnv('script-1')).resolves.toEqual([])
+    await expect(saveDesktopScriptEnv({ scriptId: 'script-1', key: 'token', value: 'value-1', isSecret: true })).resolves.toMatchObject({ is_secret: true })
+    await expect(listDesktopScriptVersions('script-1')).resolves.toEqual([])
+    await expect(readDesktopScriptVersion('script-1', 'version-1')).resolves.toMatchObject({ id: 'version-1' })
+    await expect(regenerateDesktopWebhook('script-1')).resolves.toEqual({ webhook_token: 'token-1' })
+    await expect(regenerateDesktopWebhookSecret('script-1')).resolves.toEqual({ webhook_secret: 'secret-1' })
+    await expect(toggleDesktopWebhookSignature('script-1', true)).resolves.toMatchObject({ require_webhook_signature: true })
+    expect(saveSchedule).toHaveBeenCalledWith({ scriptId: 'script-1', cron: '', enabled: false })
+    expect(saveEnv).toHaveBeenCalledWith({ scriptId: 'script-1', key: 'token', value: 'value-1', isSecret: true })
   })
 })

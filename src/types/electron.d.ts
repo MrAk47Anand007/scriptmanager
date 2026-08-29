@@ -10,7 +10,7 @@ declare global {
   type ScriptManagerDesktopBuildEvent =
     | { type: 'started'; buildId: string }
     | { type: 'line'; buildId: string; line: string }
-    | { type: 'done'; buildId: string; status: 'success' | 'failure' | 'timeout'; exitCode: number }
+    | { type: 'done'; buildId: string; status: 'success' | 'failure' | 'timeout' | 'cancelled'; exitCode: number }
     | { type: 'error'; buildId: string; message: string }
 
   type ScriptManagerDesktopRemoteExecEvent =
@@ -91,6 +91,19 @@ declare global {
         saveScript: (payload: unknown) => Promise<unknown>
         syncGist: (scriptId: string) => Promise<{ gist_id: string; gist_url: string; gist_filename: string }>
         deleteGist: (scriptId: string) => Promise<{ ok: boolean }>
+        listBuilds: (scriptId: string) => Promise<unknown[]>
+        readBuildOutput: (payload: { scriptId: string; buildId: string }) => Promise<string>
+        readSchedule: (scriptId: string) => Promise<unknown>
+        saveSchedule: (payload: { scriptId: string; cron: string; enabled: boolean }) => Promise<unknown>
+        deleteSchedule: (scriptId: string) => Promise<unknown>
+        listEnv: (scriptId: string) => Promise<unknown[]>
+        saveEnv: (payload: { scriptId: string; key: string; value: string; isSecret: boolean }) => Promise<unknown>
+        deleteEnv: (payload: { scriptId: string; key: string }) => Promise<unknown>
+        listVersions: (scriptId: string) => Promise<unknown[]>
+        readVersion: (payload: { scriptId: string; versionId: string }) => Promise<unknown>
+        regenerateWebhook: (scriptId: string) => Promise<unknown>
+        regenerateWebhookSecret: (scriptId: string) => Promise<unknown>
+        toggleWebhookSignature: (payload: { scriptId: string; requireSignature: boolean }) => Promise<unknown>
         moveScript?: (payload: { scriptId: string; collectionId: string | null }) => Promise<unknown>
         deleteScript: (payload: { id: string }) => Promise<string>
         duplicateScript: (scriptId: string) => Promise<unknown>

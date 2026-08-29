@@ -29,6 +29,22 @@ type DesktopSaveScriptPayload = {
   collection_id?: string | null
 }
 
+export type DesktopBuildRecord = {
+  id: string
+  script_id: string
+  status: 'pending' | 'running' | 'success' | 'failure' | 'timeout' | 'cancelled'
+  started_at: string
+  completed_at: string | null
+  exit_code: number | null
+  triggered_by: string
+}
+
+export type DesktopScriptSchedule = { schedule_cron: string | null; schedule_enabled: boolean; next_run_time: string | null }
+export type DesktopScriptEnv = { id: string; key: string; value: string; is_secret: boolean }
+export type DesktopScriptVersion = { id: string; snapshot_number: number; saved_at: string }
+export type DesktopScriptVersionContent = DesktopScriptVersion & { content: string }
+export type DesktopWebhookToggle = { require_webhook_signature: boolean; webhook_secret?: string }
+
 type DesktopOpenFolderPayload = {
   folderPath: string
   mode: 'temporary' | 'collection'
@@ -250,6 +266,71 @@ export async function syncDesktopScriptToGist(scriptId: string): Promise<{ gist_
 export async function deleteDesktopGist(scriptId: string): Promise<{ ok: boolean }> {
   if (!window.scriptManagerDesktop?.runtime?.deleteGist) throw new Error('Desktop runtime unavailable')
   return window.scriptManagerDesktop.runtime.deleteGist(scriptId)
+}
+
+export async function listDesktopBuilds(scriptId: string): Promise<DesktopBuildRecord[]> {
+  if (!window.scriptManagerDesktop?.runtime?.listBuilds) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.listBuilds(scriptId) as Promise<DesktopBuildRecord[]>
+}
+
+export async function readDesktopBuildOutput(scriptId: string, buildId: string): Promise<string> {
+  if (!window.scriptManagerDesktop?.runtime?.readBuildOutput) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.readBuildOutput({ scriptId, buildId }) as Promise<string>
+}
+
+export async function readDesktopScriptSchedule(scriptId: string): Promise<DesktopScriptSchedule> {
+  if (!window.scriptManagerDesktop?.runtime?.readSchedule) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.readSchedule(scriptId) as Promise<DesktopScriptSchedule>
+}
+
+export async function saveDesktopScriptSchedule(payload: { scriptId: string; cron: string; enabled: boolean }): Promise<DesktopScriptSchedule> {
+  if (!window.scriptManagerDesktop?.runtime?.saveSchedule) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.saveSchedule(payload) as Promise<DesktopScriptSchedule>
+}
+
+export async function deleteDesktopScriptSchedule(scriptId: string) {
+  if (!window.scriptManagerDesktop?.runtime?.deleteSchedule) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.deleteSchedule(scriptId)
+}
+
+export async function listDesktopScriptEnv(scriptId: string): Promise<DesktopScriptEnv[]> {
+  if (!window.scriptManagerDesktop?.runtime?.listEnv) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.listEnv(scriptId) as Promise<DesktopScriptEnv[]>
+}
+
+export async function saveDesktopScriptEnv(payload: { scriptId: string; key: string; value: string; isSecret: boolean }): Promise<DesktopScriptEnv> {
+  if (!window.scriptManagerDesktop?.runtime?.saveEnv) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.saveEnv(payload) as Promise<DesktopScriptEnv>
+}
+
+export async function deleteDesktopScriptEnv(payload: { scriptId: string; key: string }): Promise<null> {
+  if (!window.scriptManagerDesktop?.runtime?.deleteEnv) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.deleteEnv(payload) as Promise<null>
+}
+
+export async function listDesktopScriptVersions(scriptId: string): Promise<DesktopScriptVersion[]> {
+  if (!window.scriptManagerDesktop?.runtime?.listVersions) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.listVersions(scriptId) as Promise<DesktopScriptVersion[]>
+}
+
+export async function readDesktopScriptVersion(scriptId: string, versionId: string): Promise<DesktopScriptVersionContent> {
+  if (!window.scriptManagerDesktop?.runtime?.readVersion) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.readVersion({ scriptId, versionId }) as Promise<DesktopScriptVersionContent>
+}
+
+export async function regenerateDesktopWebhook(scriptId: string): Promise<{ webhook_token: string }> {
+  if (!window.scriptManagerDesktop?.runtime?.regenerateWebhook) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.regenerateWebhook(scriptId) as Promise<{ webhook_token: string }>
+}
+
+export async function regenerateDesktopWebhookSecret(scriptId: string): Promise<{ webhook_secret: string }> {
+  if (!window.scriptManagerDesktop?.runtime?.regenerateWebhookSecret) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.regenerateWebhookSecret(scriptId) as Promise<{ webhook_secret: string }>
+}
+
+export async function toggleDesktopWebhookSignature(scriptId: string, requireSignature: boolean): Promise<DesktopWebhookToggle> {
+  if (!window.scriptManagerDesktop?.runtime?.toggleWebhookSignature) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.toggleWebhookSignature({ scriptId, requireSignature }) as Promise<DesktopWebhookToggle>
 }
 
 export async function moveDesktopScript(scriptId: string, collectionId: string | null): Promise<{ scriptId: string; collectionId: string | null }> {

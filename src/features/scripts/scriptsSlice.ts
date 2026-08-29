@@ -9,10 +9,23 @@ import {
     duplicateDesktopScript,
     hasDesktopScriptsRuntime,
     listDesktopCollections,
+    listDesktopBuilds,
     listDesktopScripts,
+    listDesktopScriptEnv,
+    listDesktopScriptVersions,
     moveDesktopScript,
     openDesktopScriptsFolder,
     readDesktopScript,
+    readDesktopBuildOutput,
+    readDesktopScriptSchedule,
+    readDesktopScriptVersion,
+    regenerateDesktopWebhook,
+    regenerateDesktopWebhookSecret,
+    saveDesktopScriptEnv,
+    saveDesktopScriptSchedule,
+    toggleDesktopWebhookSignature,
+    deleteDesktopScriptEnv,
+    deleteDesktopScriptSchedule,
     saveDesktopScript,
     syncDesktopScriptToGist,
     deleteDesktopGist,
@@ -68,9 +81,9 @@ export interface EnvVar {
 export interface Build {
     id: string
     script_id: string
-    status: 'pending' | 'running' | 'success' | 'failure' | 'timeout'
+    status: 'pending' | 'running' | 'success' | 'failure' | 'timeout' | 'cancelled'
     started_at: string
-    completed_at?: string
+    completed_at?: string | null
     triggered_by: string
 }
 
@@ -354,26 +367,43 @@ export const runScript = createAsyncThunk('scripts/runScript', async ({ id, para
 })
 
 export const fetchBuilds = createAsyncThunk('scripts/fetchBuilds', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopBuilds(scriptId)
+    }
     const response = await axios.get(`/api/builds/${scriptId}`)
     return response.data
 })
 
 export const fetchBuildOutput = createAsyncThunk('scripts/fetchBuildOutput', async ({ scriptId, buildId }: { scriptId: string; buildId: string }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return readDesktopBuildOutput(scriptId, buildId)
+    }
     const response = await axios.get(`/api/builds/output/${scriptId}/${buildId}`)
     return response.data.output
 })
 
 export const regenerateWebhook = createAsyncThunk('scripts/regenerateWebhook', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        const result = await regenerateDesktopWebhook(scriptId)
+        return { scriptId, token: result.webhook_token }
+    }
     const response = await axios.post(`/api/scripts/${scriptId}/webhook/regenerate`)
     return { scriptId, token: response.data.webhook_token }
 })
 
 export const regenerateWebhookSecret = createAsyncThunk('scripts/regenerateWebhookSecret', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        const result = await regenerateDesktopWebhookSecret(scriptId)
+        return { scriptId, secret: result.webhook_secret }
+    }
     const response = await axios.post(`/api/scripts/${scriptId}/webhook/secret`)
     return { scriptId, secret: response.data.webhook_secret as string }
 })
 
 export const toggleWebhookSignature = createAsyncThunk('scripts/toggleWebhookSignature', async ({ scriptId, requireSignature }: { scriptId: string; requireSignature: boolean }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return { scriptId, ...(await toggleDesktopWebhookSignature(scriptId, requireSignature)) }
+    }
     const response = await axios.put(`/api/scripts/${scriptId}/webhook/secret`, { require_signature: requireSignature })
     return {
         scriptId,
@@ -384,16 +414,25 @@ export const toggleWebhookSignature = createAsyncThunk('scripts/toggleWebhookSig
 })
 
 export const fetchSchedule = createAsyncThunk('scripts/fetchSchedule', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return readDesktopScriptSchedule(scriptId)
+    }
     const response = await axios.get(`/api/scripts/${scriptId}/schedule`)
     return response.data
 })
 
 export const saveSchedule = createAsyncThunk('scripts/saveSchedule', async (data: { scriptId: string; cron: string; enabled: boolean }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return saveDesktopScriptSchedule(data)
+    }
     const response = await axios.put(`/api/scripts/${data.scriptId}/schedule`, { cron: data.cron, enabled: data.enabled })
     return response.data
 })
 
 export const deleteSchedule = createAsyncThunk('scripts/deleteSchedule', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return deleteDesktopScriptSchedule(scriptId)
+    }
     await axios.delete(`/api/scripts/${scriptId}/schedule`)
     return null
 })
@@ -552,16 +591,26 @@ export const updateCollectionCloudBinding = createAsyncThunk(
 // --- Env Var Thunks ---
 
 export const fetchEnvVars = createAsyncThunk('scripts/fetchEnvVars', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopScriptEnv(scriptId)
+    }
     const response = await axios.get(`/api/scripts/${scriptId}/env`)
     return response.data as EnvVar[]
 })
 
 export const upsertEnvVar = createAsyncThunk('scripts/upsertEnvVar', async ({ scriptId, key, value, isSecret }: { scriptId: string; key: string; value: string; isSecret: boolean }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return saveDesktopScriptEnv({ scriptId, key, value, isSecret })
+    }
     const response = await axios.post(`/api/scripts/${scriptId}/env`, { key, value, is_secret: isSecret })
     return response.data as EnvVar
 })
 
 export const deleteEnvVar = createAsyncThunk('scripts/deleteEnvVar', async ({ scriptId, key }: { scriptId: string; key: string }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        await deleteDesktopScriptEnv({ scriptId, key })
+        return key
+    }
     await axios.delete(`/api/scripts/${scriptId}/env?key=${encodeURIComponent(key)}`)
     return key
 })
@@ -569,6 +618,9 @@ export const deleteEnvVar = createAsyncThunk('scripts/deleteEnvVar', async ({ sc
 // --- Version History Thunks ---
 
 export const fetchVersions = createAsyncThunk('scripts/fetchVersions', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopScriptVersions(scriptId)
+    }
     const response = await axios.get(`/api/scripts/${scriptId}/versions`)
     return response.data as ScriptVersionMeta[]
 })
@@ -576,6 +628,9 @@ export const fetchVersions = createAsyncThunk('scripts/fetchVersions', async (sc
 export const fetchVersionContent = createAsyncThunk(
     'scripts/fetchVersionContent',
     async ({ scriptId, versionId }: { scriptId: string; versionId: string }) => {
+        if (isDesktopScriptsRuntimeAvailable()) {
+            return readDesktopScriptVersion(scriptId, versionId)
+        }
         const response = await axios.get(`/api/scripts/${scriptId}/versions/${versionId}`)
         return response.data as { id: string; snapshot_number: number; content: string; saved_at: string }
     }

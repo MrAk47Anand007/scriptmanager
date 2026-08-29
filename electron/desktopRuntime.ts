@@ -16,6 +16,8 @@ import { vaultNotificationConfig } from '../src/lib/secrets/notificationConfig'
 import { resolveScriptEnvironment } from '../src/lib/secrets/runtime'
 import { createSecretVaultService } from '../src/lib/secrets/service'
 import { createServerSecretStore } from '../src/lib/secrets/serverStore'
+import { parseSecretReference, serializeSecretReference } from '../src/lib/secrets/references'
+import { getNextRunTime } from '../src/lib/schedulerService'
 import { notifyWorkflowWorker } from '../src/lib/workflows/workerLoop'
 import { createWorkflowRepository } from '../src/lib/workflows/repository'
 import { parseWorkflowDefinition } from '../src/lib/workflows/schema'
@@ -1731,6 +1733,184 @@ async function deleteLocalGist(scriptId: string) {
   return { ok: true }
 }
 
+async function listLocalBuilds(scriptId: string) {
+  const actor = await createDesktopActorContext(prisma)
+  const script = await prisma.script.findUnique({ where: { id: scriptId }, select: { id: true, workspaceId: true } })
+  if (!script || script.workspaceId !== actor.workspaceId) throw new Error('Script not found')
+  const builds = await prisma.build.findMany({ where: { scriptId }, orderBy: { createdAt: 'desc' }, take: 50 })
+  return builds.map((build) => ({
+    id: build.id,
+    script_id: build.scriptId,
+    status: build.status,
+    triggered_by: build.triggeredBy,
+    started_at: build.startedAt?.toISOString() ?? build.createdAt.toISOString(),
+    completed_at: build.finishedAt?.toISOString() ?? null,
+    exit_code: build.exitCode,
+  }))
+}
+
+async function readLocalBuildOutput(payload: { scriptId: string; buildId: string }) {
+  const actor = await createDesktopActorContext(prisma)
+  const script = await prisma.script.findUnique({ where: { id: payload.scriptId }, select: { id: true, workspaceId: true } })
+  if (!script || script.workspaceId !== actor.workspaceId) throw new Error('Script not found')
+  const build = await prisma.build.findFirst({ where: { id: payload.buildId, scriptId: payload.scriptId } })
+  if (!build) throw new Error('Build not found')
+  if (!build.logFile || !fs.existsSync(build.logFile)) return ''
+  try {
+    return fs.readFileSync(build.logFile, 'utf8')
+  } catch {
+    return '(could not read log file)'
+  }
+}
+
+async function getAuthorizedDesktopScript(scriptId: string) {
+  const actor = await createDesktopActorContext(prisma)
+  const script = await prisma.script.findUnique({ where: { id: scriptId }, include: { collection: true } })
+  if (!script || script.workspaceId !== actor.workspaceId) throw new Error('Script not found')
+  return { actor, script }
+}
+
+function serializeDesktopEnvVar(entry: { id: string; key: string; value: string; isSecret: boolean }) {
+  return { id: entry.id, key: entry.key, value: entry.isSecret ? '' : entry.value, is_secret: entry.isSecret }
+}
+
+async function readLocalSchedule(scriptId: string) {
+  const { script } = await getAuthorizedDesktopScript(scriptId)
+  return {
+    schedule_cron: script.scheduleCron,
+    schedule_enabled: script.scheduleEnabled,
+    next_run_time: script.scheduleCron && script.scheduleEnabled ? getNextRunTime(script.scheduleCron) : null,
+  }
+}
+
+async function saveLocalSchedule(payload: { scriptId: string; cron: string; enabled: boolean }) {
+  await getAuthorizedDesktopScript(payload.scriptId)
+  const cron = payload.cron.trim()
+  if (cron && getNextRunTime(cron) === null) throw new Error('Invalid cron expression')
+  const script = await prisma.script.update({
+    where: { id: payload.scriptId },
+    data: { scheduleCron: cron || null, scheduleEnabled: Boolean(payload.enabled) },
+  })
+  return {
+    schedule_cron: script.scheduleCron,
+    schedule_enabled: script.scheduleEnabled,
+    next_run_time: script.scheduleCron && script.scheduleEnabled ? getNextRunTime(script.scheduleCron) : null,
+  }
+}
+
+async function deleteLocalSchedule(scriptId: string) {
+  await getAuthorizedDesktopScript(scriptId)
+  await prisma.script.update({ where: { id: scriptId }, data: { scheduleCron: null, scheduleEnabled: false } })
+  return null
+}
+
+async function saveDesktopScriptEnv(payload: { scriptId: string; key: string; value: string; isSecret: boolean }) {
+  const { actor } = await getAuthorizedDesktopScript(payload.scriptId)
+  const key = payload.key.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
+  if (!key) throw new Error('key is required')
+  const value = payload.value ?? ''
+  const existing = await prisma.scriptEnvVar.findUnique({ where: { scriptId_key: { scriptId: payload.scriptId, key } } })
+  let persistedValue = value
+
+  if (payload.isSecret) {
+    const vault = getDesktopSecretVaultService()
+    let secretId: string
+    if (existing?.isSecret && existing.value.startsWith('secretref:')) {
+      secretId = parseSecretReference(existing.value)
+      await vault.rotateSecret(secretId, value, {
+        actorType: 'user', actorId: actor.actorId, workspaceId: actor.workspaceId, capability: 'secret:write', resource: `script:${payload.scriptId}`, reason: 'script environment update',
+      })
+    } else {
+      const secret = await vault.createSecret({ name: `script:${payload.scriptId}:${key}:${crypto.randomUUID()}`, plaintext: value, description: `Environment variable ${key}`, scope: 'resource', workspaceId: actor.workspaceId, createdBy: actor.actorId })
+      secretId = secret.id
+    }
+    await vault.bindSecret(secretId, { resourceType: 'script', resourceId: payload.scriptId, field: key, workspaceId: actor.workspaceId, createdBy: actor.actorId })
+    persistedValue = serializeSecretReference(secretId)
+  } else if (existing?.isSecret && existing.value.startsWith('secretref:')) {
+    await getDesktopSecretVaultService().disableSecret(parseSecretReference(existing.value), {
+      actorType: 'user', actorId: actor.actorId, workspaceId: actor.workspaceId, capability: 'secret:write', resource: `script:${payload.scriptId}`, reason: 'script environment converted to plaintext',
+    })
+  }
+
+  const envVar = await prisma.scriptEnvVar.upsert({
+    where: { scriptId_key: { scriptId: payload.scriptId, key } },
+    update: { value: persistedValue, isSecret: payload.isSecret },
+    create: { scriptId: payload.scriptId, key, value: persistedValue, isSecret: payload.isSecret },
+  })
+  return serializeDesktopEnvVar(envVar)
+}
+
+async function listDesktopScriptEnv(scriptId: string) {
+  await getAuthorizedDesktopScript(scriptId)
+  const entries = await prisma.scriptEnvVar.findMany({ where: { scriptId }, orderBy: { key: 'asc' } })
+  return entries.map(serializeDesktopEnvVar)
+}
+
+async function deleteDesktopScriptEnv(payload: { scriptId: string; key: string }) {
+  const { actor } = await getAuthorizedDesktopScript(payload.scriptId)
+  const key = payload.key.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
+  const existing = await prisma.scriptEnvVar.findUnique({ where: { scriptId_key: { scriptId: payload.scriptId, key } } })
+  if (existing?.isSecret && existing.value.startsWith('secretref:')) {
+    await getDesktopSecretVaultService().disableSecret(parseSecretReference(existing.value), {
+      actorType: 'user', actorId: actor.actorId, workspaceId: actor.workspaceId, capability: 'secret:write', resource: `script:${payload.scriptId}`, reason: 'script environment removed',
+    })
+  }
+  await prisma.scriptEnvVar.deleteMany({ where: { scriptId: payload.scriptId, key } })
+  return null
+}
+
+async function listLocalScriptVersions(scriptId: string) {
+  await getAuthorizedDesktopScript(scriptId)
+  const versions = await prisma.scriptVersion.findMany({ where: { scriptId }, orderBy: { snapshotNumber: 'desc' }, select: { id: true, snapshotNumber: true, savedAt: true } })
+  return versions.map((version) => ({ id: version.id, snapshot_number: version.snapshotNumber, saved_at: version.savedAt.toISOString() }))
+}
+
+async function readLocalScriptVersion(payload: { scriptId: string; versionId: string }) {
+  await getAuthorizedDesktopScript(payload.scriptId)
+  const version = await prisma.scriptVersion.findFirst({ where: { id: payload.versionId, scriptId: payload.scriptId } })
+  if (!version) throw new Error('Version not found')
+  return { id: version.id, snapshot_number: version.snapshotNumber, content: version.content, saved_at: version.savedAt.toISOString() }
+}
+
+async function regenerateLocalWebhook(scriptId: string) {
+  await getAuthorizedDesktopScript(scriptId)
+  const token = crypto.randomUUID().replace(/-/g, '')
+  await prisma.script.update({ where: { id: scriptId }, data: { webhookToken: token } })
+  return { webhook_token: token }
+}
+
+async function writeDesktopWebhookSecret(scriptId: string, actorId: string, workspaceId: string) {
+  const secret = crypto.randomBytes(32).toString('hex')
+  const existing = await prisma.script.findUnique({ where: { id: scriptId }, select: { webhookSecret: true } })
+  const vault = getDesktopSecretVaultService()
+  let secretId: string
+  if (existing?.webhookSecret?.startsWith('secretref:')) {
+    secretId = parseSecretReference(existing.webhookSecret)
+    await vault.rotateSecret(secretId, secret, { actorType: 'user', actorId, workspaceId, capability: 'secret:write', resource: `script:${scriptId}`, reason: 'webhook secret rotation' })
+  } else {
+    const created = await vault.createSecret({ name: `script:${scriptId}:webhook-signing:${crypto.randomUUID()}`, plaintext: secret, description: 'Webhook signing secret', scope: 'resource', workspaceId, createdBy: actorId })
+    secretId = created.id
+  }
+  await vault.bindSecret(secretId, { resourceType: 'script', resourceId: scriptId, field: 'webhook-signing', workspaceId, createdBy: actorId })
+  await prisma.script.update({ where: { id: scriptId }, data: { webhookSecret: serializeSecretReference(secretId) } })
+  return secret
+}
+
+async function regenerateLocalWebhookSecret(scriptId: string) {
+  const { actor } = await getAuthorizedDesktopScript(scriptId)
+  return { webhook_secret: await writeDesktopWebhookSecret(scriptId, actor.actorId, actor.workspaceId) }
+}
+
+async function toggleLocalWebhookSignature(payload: { scriptId: string; requireSignature: boolean }) {
+  const { actor, script } = await getAuthorizedDesktopScript(payload.scriptId)
+  let revealedSecret: string | undefined
+  if (payload.requireSignature && !script.webhookSecret) {
+    revealedSecret = await writeDesktopWebhookSecret(payload.scriptId, actor.actorId, actor.workspaceId)
+  }
+  const updated = await prisma.script.update({ where: { id: payload.scriptId }, data: { requireWebhookSignature: payload.requireSignature } })
+  return { require_webhook_signature: updated.requireWebhookSignature, ...(revealedSecret ? { webhook_secret: revealedSecret } : {}) }
+}
+
 async function moveLocalScript(payload: { scriptId: string; collectionId: string | null }) {
   const script = await prisma.script.findUnique({ where: { id: payload.scriptId } })
   if (!script) throw new Error('Script not found')
@@ -2316,7 +2496,7 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
     scriptPath,
   )
   const runtime = getRuntime(window.id)
-  const scriptEnv = await resolveScriptEnvironment(prisma, script.id, envVars)
+  const scriptEnv = await resolveScriptEnvironment(prisma, script.id, envVars, getDesktopSecretVaultService())
 
   const paramEnv: Record<string, string> = {}
   if (payload.paramValues) {
@@ -2772,6 +2952,58 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:delete-gist', async (_event, scriptId: string) => {
     return deleteLocalGist(scriptId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-builds', async (_event, scriptId: string) => {
+    return listLocalBuilds(scriptId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:read-build-output', async (_event, payload: { scriptId: string; buildId: string }) => {
+    return readLocalBuildOutput(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:read-schedule', async (_event, scriptId: string) => {
+    return readLocalSchedule(scriptId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-schedule', async (_event, payload: { scriptId: string; cron: string; enabled: boolean }) => {
+    return saveLocalSchedule(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:delete-schedule', async (_event, scriptId: string) => {
+    return deleteLocalSchedule(scriptId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-env', async (_event, scriptId: string) => {
+    return listDesktopScriptEnv(scriptId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-env', async (_event, payload: { scriptId: string; key: string; value: string; isSecret: boolean }) => {
+    return saveDesktopScriptEnv(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:delete-env', async (_event, payload: { scriptId: string; key: string }) => {
+    return deleteDesktopScriptEnv(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-versions', async (_event, scriptId: string) => {
+    return listLocalScriptVersions(scriptId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:read-version', async (_event, payload: { scriptId: string; versionId: string }) => {
+    return readLocalScriptVersion(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:regenerate-webhook', async (_event, scriptId: string) => {
+    return regenerateLocalWebhook(scriptId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:regenerate-webhook-secret', async (_event, scriptId: string) => {
+    return regenerateLocalWebhookSecret(scriptId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:toggle-webhook-signature', async (_event, payload: { scriptId: string; requireSignature: boolean }) => {
+    return toggleLocalWebhookSignature(payload)
   })
 
   ipcMain.handle('scriptmanager:runtime:move-script', async (_event, payload: { scriptId: string; collectionId: string | null }) => {
