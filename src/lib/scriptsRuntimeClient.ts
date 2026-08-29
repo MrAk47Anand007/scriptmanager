@@ -129,6 +129,7 @@ type DesktopCreateCollectionPayload = {
 type DesktopUpdateCollectionPayload = {
   id: string
   name?: string
+  isTemporary?: boolean
   projectId?: string | null
   parentId?: string | null
   storageProviderId?: string | null
@@ -346,6 +347,26 @@ export async function addDesktopTag(payload: { scriptId: string; name: string; c
 export async function removeDesktopTag(payload: { scriptId: string; tagId: string }) {
   if (!window.scriptManagerDesktop?.runtime?.removeTag) throw new Error('Desktop runtime unavailable')
   return window.scriptManagerDesktop.runtime.removeTag(payload) as Promise<null>
+}
+
+export type DesktopTemplatePayload = {
+  name: string
+  description: string
+  category: string
+  language: string
+  interpreter?: string | null
+  content: string
+  parameters?: unknown[]
+}
+
+export async function listDesktopTemplates() {
+  if (!window.scriptManagerDesktop?.runtime?.listTemplates) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.listTemplates() as Promise<unknown[]>
+}
+
+export async function saveDesktopTemplate(payload: DesktopTemplatePayload) {
+  if (!window.scriptManagerDesktop?.runtime?.saveTemplate) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.saveTemplate(payload)
 }
 
 export async function moveDesktopScript(scriptId: string, collectionId: string | null): Promise<{ scriptId: string; collectionId: string | null }> {

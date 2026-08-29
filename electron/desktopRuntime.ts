@@ -70,6 +70,7 @@ import {
   transferScript as transferDesktopRemoteScript,
 } from './opsRuntime'
 import { scanForScripts, type ScanForScriptsResult } from './scriptScanner'
+import { BUILT_IN_TEMPLATES } from '../src/lib/templateCatalog'
 
 type TerminalEvent =
   | { sessionId: string; type: 'connected' }
@@ -204,6 +205,7 @@ type CreateCollectionPayload = {
 type UpdateCollectionPayload = {
   id: string
   name?: string
+  isTemporary?: boolean
   projectId?: string | null
   parentId?: string | null
   storageProviderId?: string | null
@@ -229,6 +231,16 @@ type ImportScannedScriptsPayload = {
 type ManageCollectionPythonEnvPayload = {
   collectionId: string
   recreate?: boolean
+}
+
+type SaveTemplatePayload = {
+  name: string
+  description?: string
+  category?: string
+  language?: string
+  interpreter?: string | null
+  content: string
+  parameters?: unknown[]
 }
 
 type CollectionRecord = {
@@ -1451,6 +1463,7 @@ async function updateLocalCollection(payload: UpdateCollectionPayload): Promise<
         where: { id: entry.id },
         data: {
           name: isRoot ? nextName : entry.name,
+          isTemporary: isRoot && payload.isTemporary !== undefined ? payload.isTemporary : entry.isTemporary,
           projectId: nextProjectId,
           parentId: isRoot ? nextParentId : entry.parentId,
           folderPath: oldRootFolderPath && nextRootFolderPath
@@ -1895,6 +1908,53 @@ async function removeLocalTag(payload: { scriptId: string; tagId: string }) {
   await getAuthorizedDesktopScript(payload.scriptId)
   await prisma.scriptTag.deleteMany({ where: { scriptId: payload.scriptId, tagId: payload.tagId } })
   return null
+}
+
+function serializeLocalTemplate(template: { id: string; name: string; description: string; category: string; language: string; interpreter: string | null; content: string; parameters: string; isBuiltIn: boolean; createdAt: Date }) {
+  return {
+    id: template.id,
+    name: template.name,
+    description: template.description,
+    category: template.category,
+    language: template.language,
+    interpreter: template.interpreter,
+    content: template.content,
+    parameters: (() => { try { return JSON.parse(template.parameters || '[]') } catch { return [] } })(),
+    is_built_in: template.isBuiltIn,
+    created_at: template.createdAt.toISOString(),
+  }
+}
+
+async function listLocalTemplates() {
+  await createDesktopActorContext(prisma)
+  if (await prisma.scriptTemplate.count() === 0) {
+    await prisma.scriptTemplate.createMany({ data: BUILT_IN_TEMPLATES })
+  }
+  const templates = await prisma.scriptTemplate.findMany({ orderBy: [{ isBuiltIn: 'desc' }, { name: 'asc' }] })
+  return templates.map(serializeLocalTemplate)
+}
+
+async function saveLocalTemplate(payload: SaveTemplatePayload) {
+  await createDesktopActorContext(prisma)
+  const name = payload.name.trim()
+  if (!name) throw new Error('Name is required')
+  if (payload.content === undefined || payload.content === null) throw new Error('Content is required')
+  const existing = await prisma.scriptTemplate.findUnique({ where: { name } })
+  if (existing) throw new Error('A template with this name already exists')
+  const parameters = Array.isArray(payload.parameters) ? JSON.stringify(payload.parameters) : '[]'
+  const template = await prisma.scriptTemplate.create({
+    data: {
+      name,
+      description: payload.description?.trim() ?? '',
+      category: payload.category?.trim() || 'general',
+      language: payload.language ?? 'python',
+      interpreter: payload.language === 'custom' ? (payload.interpreter ?? null) : null,
+      content: payload.content,
+      parameters,
+      isBuiltIn: false,
+    },
+  })
+  return serializeLocalTemplate(template)
 }
 
 async function regenerateLocalWebhook(scriptId: string) {
@@ -3041,6 +3101,14 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:remove-tag', async (_event, payload: { scriptId: string; tagId: string }) => {
     return removeLocalTag(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-templates', async () => {
+    return listLocalTemplates()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-template', async (_event, payload: SaveTemplatePayload) => {
+    return saveLocalTemplate(payload)
   })
 
   ipcMain.handle('scriptmanager:runtime:move-script', async (_event, payload: { scriptId: string; collectionId: string | null }) => {

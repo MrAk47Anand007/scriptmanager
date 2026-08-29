@@ -29,6 +29,8 @@ import {
     addDesktopTag,
     listDesktopTags,
     removeDesktopTag,
+    listDesktopTemplates,
+    saveDesktopTemplate,
     saveDesktopScript,
     syncDesktopScriptToGist,
     deleteDesktopGist,
@@ -223,8 +225,8 @@ export const createScript = createAsyncThunk('scripts/createScript', async (payl
     const parameters = typeof payload === 'string' ? undefined : payload.parameters
     const collectionId = typeof payload === 'string' ? undefined : payload.collectionId
 
-    if (isDesktopScriptsRuntimeAvailable() && !syncToGist) {
-        return createDesktopScript({
+    if (isDesktopScriptsRuntimeAvailable()) {
+        const created = await createDesktopScript({
             name,
             description,
             syncToGist,
@@ -234,6 +236,15 @@ export const createScript = createAsyncThunk('scripts/createScript', async (payl
             parameters,
             collectionId,
         })
+        if (syncToGist) {
+            try {
+                const gist = await syncDesktopScriptToGist(created.id)
+                return { ...created, ...gist, sync_to_gist: true }
+            } catch (error) {
+                console.warn('[Gist] Desktop sync failed after local create:', error)
+            }
+        }
+        return created
     }
 
     const response = await axios.post('/api/scripts', {
@@ -307,6 +318,9 @@ export const importScriptsFolder = createAsyncThunk(
 )
 
 export const fetchTemplates = createAsyncThunk('scripts/fetchTemplates', async () => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopTemplates()
+    }
     const response = await axios.get('/api/templates')
     return response.data
 })
@@ -323,6 +337,9 @@ export const saveAsTemplate = createAsyncThunk(
         parameters?: ScriptParameter[]
     }, { rejectWithValue }) => {
         try {
+            if (isDesktopScriptsRuntimeAvailable()) {
+                return await saveDesktopTemplate(payload)
+            }
             const response = await axios.post('/api/templates', payload)
             return response.data
         } catch (err: unknown) {
@@ -535,6 +552,10 @@ export const removeTemporaryCollection = createAsyncThunk(
 export const convertTemporaryCollection = createAsyncThunk(
     'scripts/convertTemporaryCollection',
     async ({ id, name }: { id: string; name: string }) => {
+        if (isDesktopScriptsRuntimeAvailable()) {
+            const result = await updateDesktopCollection({ id, name, isTemporary: false })
+            return result.updatedCollections[0]
+        }
         const response = await axios.put(`/api/collections/${id}`, {
             name,
             is_temporary: false,

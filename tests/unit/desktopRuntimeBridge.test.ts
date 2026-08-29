@@ -23,6 +23,8 @@ import {
   addDesktopTag,
   listDesktopTags,
   removeDesktopTag,
+  listDesktopTemplates,
+  saveDesktopTemplate,
 } from '@/lib/scriptsRuntimeClient'
 
 afterEach(() => {
@@ -133,5 +135,15 @@ describe('desktop runtime bridge', () => {
     await expect(removeDesktopTag({ scriptId: 'script-1', tagId: 'tag-1' })).resolves.toBeNull()
     expect(addTag).toHaveBeenCalledWith({ scriptId: 'script-1', name: 'release' })
     expect(removeTag).toHaveBeenCalledWith({ scriptId: 'script-1', tagId: 'tag-1' })
+  })
+
+  it('uses desktop IPC for templates', async () => {
+    const listTemplates = vi.fn().mockResolvedValue([])
+    const saveTemplate = vi.fn().mockResolvedValue({ id: 'template-1', name: 'Release', is_built_in: false })
+    window.scriptManagerDesktop = { runtime: { listTemplates, saveTemplate } } as never
+
+    await expect(listDesktopTemplates()).resolves.toEqual([])
+    await expect(saveDesktopTemplate({ name: 'Release', description: '', category: 'general', language: 'python', content: 'print(1)' })).resolves.toMatchObject({ id: 'template-1' })
+    expect(saveTemplate).toHaveBeenCalledWith({ name: 'Release', description: '', category: 'general', language: 'python', content: 'print(1)' })
   })
 })
