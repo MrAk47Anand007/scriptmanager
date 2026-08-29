@@ -6,6 +6,7 @@ import path from 'path'
 import { prisma } from './db'
 import { revealOpsSecret } from './opsSecretStore'
 import { resolveResourceSecret } from './secrets/migration'
+import { buildRemoteChmodCommand, normalizeFilePermissions, normalizeRemotePath } from './executionSafety'
 import { getScriptResolvedFilePath } from './scriptRunner'
 
 // Module-level map: remoteExecId -> EventEmitter (mirrors buildEmitters in scriptRunner.ts)
@@ -82,7 +83,16 @@ export async function scpScript(opts: {
     permissions?: string
     workspaceId?: string
 }): Promise<{ success: boolean; remote_path: string; error?: string }> {
-    const { profileId, scriptId, remotePath, permissions = '755', workspaceId = 'default' } = opts
+    const { profileId, scriptId, remotePath, permissions, workspaceId = 'default' } = opts
+
+    let normalizedRemotePath: string
+    let normalizedPermissions: string
+    try {
+        normalizedRemotePath = normalizeRemotePath(remotePath)
+        normalizedPermissions = normalizeFilePermissions(permissions)
+    } catch (err) {
+        return { success: false, remote_path: '', error: (err as Error).message }
+    }
 
     const script = await prisma.script.findFirst({ where: { id: scriptId, workspaceId } })
     if (!script) return { success: false, remote_path: '', error: 'Script not found' }
@@ -92,9 +102,9 @@ export async function scpScript(opts: {
         return { success: false, remote_path: '', error: `Local script file not found: ${localPath}` }
     }
 
-    const remoteFilePath = remotePath.endsWith('/')
-        ? remotePath + script.filename
-        : remotePath + '/' + script.filename
+    const remoteFilePath = normalizedRemotePath.endsWith('/')
+        ? normalizedRemotePath + script.filename
+        : normalizedRemotePath + '/' + script.filename
 
     let client: SshClient | null = null
     try {
@@ -122,7 +132,7 @@ export async function scpScript(opts: {
         })
 
         // Apply chmod
-        await execCommand(client, `chmod ${permissions} "${remoteFilePath}"`)
+        await execCommand(client, buildRemoteChmodCommand(remoteFilePath, normalizedPermissions))
 
         return { success: true, remote_path: remoteFilePath }
     } catch (err) {

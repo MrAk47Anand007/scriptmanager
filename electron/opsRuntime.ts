@@ -4,7 +4,7 @@ import { EventEmitter } from 'events'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { buildRemoteCommand } from '../src/lib/executionSafety'
+import { buildRemoteChmodCommand, buildRemoteCommand, normalizeFilePermissions, normalizeRemotePath } from '../src/lib/executionSafety'
 import { hasStoredOpsSecret, revealOpsSecret } from '../src/lib/opsSecretStore'
 import { resolveResourceSecret, storeResourceSecret } from '../src/lib/secrets/migration'
 import { createDesktopActorContext } from '../src/lib/runtime/trustedContext'
@@ -450,6 +450,14 @@ export async function testConnection(profileId: string) {
 
 export async function transferScript(payload: { profileId: string; scriptId: string; remotePath: string; permissions?: string }) {
   const actor = await createDesktopActorContext(prisma)
+  let remotePath: string
+  let permissions: string
+  try {
+    remotePath = normalizeRemotePath(payload.remotePath)
+    permissions = normalizeFilePermissions(payload.permissions)
+  } catch (error) {
+    return { success: false, remote_path: '', error: error instanceof Error ? error.message : String(error) }
+  }
   const profile = await prisma.serverProfile.findFirst({ where: { id: payload.profileId, workspaceId: actor.workspaceId } })
   const script = await prisma.script.findFirst({ where: { id: payload.scriptId, workspaceId: actor.workspaceId } })
   if (!profile) {
@@ -460,7 +468,7 @@ export async function transferScript(payload: { profileId: string; scriptId: str
   }
 
   const localPath = await resolveScriptPath(payload.scriptId, actor.workspaceId)
-  const remoteFilePath = (payload.remotePath.endsWith('/') ? payload.remotePath : `${payload.remotePath}/`) + script.filename
+  const remoteFilePath = (remotePath.endsWith('/') ? remotePath : `${remotePath}/`) + script.filename
 
   let client: SshClient | null = null
   try {
@@ -484,7 +492,7 @@ export async function transferScript(payload: { profileId: string; scriptId: str
       })
     })
 
-    await execCommand(client, `chmod ${payload.permissions ?? '755'} "${remoteFilePath}"`)
+    await execCommand(client, buildRemoteChmodCommand(remoteFilePath, permissions))
     return { success: true, remote_path: remoteFilePath }
   } catch (error) {
     return {

@@ -1,6 +1,9 @@
 import path from 'path'
 
 const SAFE_FILENAME_CHARS = /[^a-zA-Z0-9_.-]/g
+const REMOTE_PATH_CONTROL_CHARS = /[\u0000-\u001f\u007f]/
+const MAX_REMOTE_PATH_LENGTH = 4096
+const FILE_PERMISSION_MODE = /^[0-7]{3,4}$/
 
 export function sanitizeScriptFilename(name: string, fallbackExtension = '.py'): string {
   const trimmed = name.trim()
@@ -23,6 +26,31 @@ export function shellEscape(value: string): string {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`
 }
 
+export function normalizeRemotePath(value: unknown, fallback = '/tmp/'): string {
+  if (value === undefined || value === null) return fallback
+  if (typeof value !== 'string') throw new Error('Remote path is invalid')
+  if (REMOTE_PATH_CONTROL_CHARS.test(value)) throw new Error('Remote path is invalid')
+
+  const normalized = value.trim()
+  if (!normalized) return fallback
+  if (normalized.length > MAX_REMOTE_PATH_LENGTH) throw new Error('Remote path is invalid')
+  return normalized
+}
+
+export function normalizeFilePermissions(value: unknown, fallback = '755'): string {
+  if (value === undefined || value === null) return fallback
+  if (typeof value !== 'string' || !FILE_PERMISSION_MODE.test(value)) {
+    throw new Error('File permissions are invalid')
+  }
+  return value
+}
+
+export function buildRemoteChmodCommand(remoteFilePath: string, permissions?: unknown): string {
+  const normalizedPath = normalizeRemotePath(remoteFilePath, '')
+  if (!normalizedPath) throw new Error('Remote file path is invalid')
+  return `chmod ${normalizeFilePermissions(permissions)} ${shellEscape(normalizedPath)}`
+}
+
 function powerShellEscape(value: string): string {
   return `'${value.replace(/'/g, `''`)}'`
 }
@@ -33,7 +61,7 @@ export function buildRemoteCommand(
   paramValues?: Record<string, string>
 ): string {
   const safeFilename = assertSafeStoredFilename(filename)
-  const normalizedDir = remotePath?.trim() ? remotePath.trim() : '/tmp/'
+  const normalizedDir = normalizeRemotePath(remotePath)
   const dirWithSlash = normalizedDir.endsWith('/') ? normalizedDir : `${normalizedDir}/`
   const scriptPath = `${dirWithSlash}${safeFilename}`
 
