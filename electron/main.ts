@@ -11,6 +11,7 @@ import {
   runScriptForWindow,
   setDesktopNotificationsEnabled,
   setLastRunScriptListener,
+  persistDesktopAgentEvent,
 } from './desktopRuntime'
 import { OAUTH_ENDPOINTS, runOAuthFlow } from './oauthFlow'
 import { getDefaultClientId } from './oauthDefaults'
@@ -33,7 +34,11 @@ let splashWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 
 registerAgentRuntimeIpc(ipcMain, (sessionId, event) => {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scriptmanager:agents:event', { sessionId, event })
+  void persistDesktopAgentEvent(sessionId, event).catch((error) => {
+    console.warn('[Electron] Failed to persist agent event:', error)
+  }).finally(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scriptmanager:agents:event', { sessionId, event })
+  })
 })
 
 // 16x16 terracotta rounded square, embedded so the tray works without bundled assets.

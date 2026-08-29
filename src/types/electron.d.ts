@@ -90,6 +90,13 @@ declare global {
         exportScripts: () => Promise<unknown>
         exportScript: (scriptId: string) => Promise<unknown>
         importScripts: (payload: unknown) => Promise<unknown>
+        listAgentProfiles: () => Promise<unknown[]>
+        createAgentProfile: (payload: unknown) => Promise<unknown>
+        listAgentRuns: () => Promise<unknown[]>
+        readAgentRun: (id: string) => Promise<unknown>
+        createAgentRun: (payload: unknown) => Promise<unknown>
+        appendAgentMessage: (payload: unknown) => Promise<unknown>
+        updateAgentRun: (payload: unknown) => Promise<unknown>
         createScript: (payload: unknown) => Promise<unknown>
         saveScript: (payload: unknown) => Promise<unknown>
         syncGist: (scriptId: string) => Promise<{ gist_id: string; gist_url: string; gist_filename: string }>

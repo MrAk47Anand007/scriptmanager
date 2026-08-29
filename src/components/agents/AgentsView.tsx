@@ -1,6 +1,15 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
 import { Bot, FolderOpen, Pause, Play, ShieldCheck } from 'lucide-react'
+import { listProjectsRuntime } from '@/lib/opsRuntimeClient'
+import {
+  createAgentProfileRuntime,
+  createAgentRunRuntime,
+  listAgentProfilesRuntime,
+  listAgentRunsRuntime,
+  readAgentRunRuntime,
+  updateAgentRunRuntime,
+} from '@/lib/agentRuntimeClient'
 
 type Profile = { id: string; name: string; provider: 'codex' | 'claude'; accessLevel: 'observe' | 'develop' | 'full'; projectId?: string | null; model?: string | null }
 type Project = { id: string; name: string; repository_root: string | null }
@@ -13,15 +22,78 @@ export function AgentsView() {
   const [projects, setProjects] = useState<Project[]>([]); const [projectId, setProjectId] = useState('')
   const [name, setName] = useState('Developer agent'); const [provider, setProvider] = useState<'codex' | 'claude'>('codex'); const [accessLevel, setAccessLevel] = useState<'observe' | 'develop' | 'full'>('observe')
   const [prompt, setPrompt] = useState('Inspect this workspace and summarize the next useful change.'); const [cwd, setCwd] = useState(''); const [error, setError] = useState('')
-  const load = useCallback(async () => { const [p, r, j] = await Promise.all([fetch('/api/agents/profiles').then(x => x.json()), fetch('/api/agents/runs').then(x => x.json()), fetch('/api/projects').then(x => x.json())]); setProfiles(p); setRuns(r); setProjects(j.filter((item: Project) => item.repository_root)) }, [])
-  const selectRun = useCallback(async (id: string) => setDetail(await fetch(`/api/agents/runs/${id}`).then(x => x.json())), [])
+  const load = useCallback(async () => {
+    try {
+      const [p, r, j] = await Promise.all([listAgentProfilesRuntime(), listAgentRunsRuntime(), listProjectsRuntime()])
+      setProfiles(p)
+      setRuns(r)
+      setProjects((j as Project[]).filter((item) => item.repository_root))
+    } catch (value) {
+      setError(value instanceof Error ? value.message : 'Failed to load agents')
+    }
+  }, [])
+  const selectRun = useCallback(async (id: string) => {
+    try {
+      setDetail(await readAgentRunRuntime(id))
+    } catch (value) {
+      setError(value instanceof Error ? value.message : 'Failed to load agent run')
+    }
+  }, [])
   useEffect(() => { void load() }, [load])
-  useEffect(() => window.scriptManagerDesktop?.agents?.onEvent(async ({ sessionId, event }) => { const value = event as { type?: string; message?: { role?: string; content?: string } }; if (value.type === 'message' && value.message?.content) await fetch(`/api/agents/runs/${sessionId}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: value.message.role ?? 'assistant', content: value.message.content }) }); await selectRun(sessionId); await load() }), [load, selectRun])
-  async function createProfile() { setError(''); const config = await fetch('/api/agents/providers', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider, name: `${name} provider`, executable: provider === 'codex' ? 'codex-acp' : 'claude-agent-acp' }) }).then(x => x.json()); const response = await fetch('/api/agents/profiles', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, provider, providerConfigId: config.id, accessLevel, projectId: projectId || undefined }) }); if (!response.ok) return setError((await response.json()).error); await load() }
+  useEffect(() => {
+    const unsubscribe = window.scriptManagerDesktop?.agents?.onEvent(({ sessionId }) => {
+      void Promise.all([selectRun(sessionId), load()])
+    })
+    return unsubscribe
+  }, [load, selectRun])
+  async function createProfile() {
+    setError('')
+    try {
+      await createAgentProfileRuntime({ name, provider, accessLevel, projectId: projectId || null })
+      await load()
+    } catch (value) {
+      setError(value instanceof Error ? value.message : 'Failed to create agent profile')
+    }
+  }
   async function chooseFolder() { const selected = await window.scriptManagerDesktop?.selectFolder(); if (selected) setCwd(selected) }
-  async function launch(profile: Profile) { if (!desktop) return setError('Open ScriptManager Desktop to launch Codex or Claude.'); const projectRoot = projects.find(item => item.id === profile.projectId)?.repository_root; const workspace = projectRoot || cwd; if (!workspace) return setError('Select a repository project or choose a context folder.'); const response = await fetch('/api/agents/runs', { method: 'POST', headers: { 'content-type': 'application/json', 'x-scriptmanager-desktop': '1' }, body: JSON.stringify({ profileId: profile.id, prompt, cwd: workspace }) }); const run = await response.json(); if (!response.ok) return setError(run.error); await window.scriptManagerDesktop!.agents!.launch({ provider: profile.provider, sessionId: run.id, profileId: profile.id, cwd: workspace }); await window.scriptManagerDesktop!.agents!.input({ sessionId: run.id, message: { role: 'user', content: prompt } }); await load(); await selectRun(run.id) }
-  async function interrupt(run: Run) { await window.scriptManagerDesktop?.agents?.interrupt(run.id); await fetch(`/api/agents/runs/${run.id}/interrupt`, { method: 'POST', headers: { 'x-scriptmanager-desktop': '1' } }); await load(); await selectRun(run.id) }
-  async function resume(run: Run) { await window.scriptManagerDesktop?.agents?.input({ sessionId: run.id, message: { role: 'user', content: prompt } }); await fetch(`/api/agents/runs/${run.id}/resume`, { method: 'POST', headers: { 'x-scriptmanager-desktop': '1' } }); await load(); await selectRun(run.id) }
+  async function launch(profile: Profile) {
+    if (!desktop) return setError('Open ScriptManager Desktop to launch Codex or Claude.')
+    const projectRoot = projects.find((item) => item.id === profile.projectId)?.repository_root
+    const workspace = projectRoot || cwd
+    if (!workspace) return setError('Select a repository project or choose a context folder.')
+    setError('')
+    let run: Run | null = null
+    try {
+      run = await createAgentRunRuntime({ profileId: profile.id, prompt, cwd: workspace })
+      await window.scriptManagerDesktop!.agents!.launch({ provider: profile.provider, sessionId: run.id, profileId: profile.id, cwd: workspace })
+      await window.scriptManagerDesktop!.agents!.input({ sessionId: run.id, message: { role: 'user', content: prompt } })
+      await load()
+      await selectRun(run.id)
+    } catch (value) {
+      if (run) await updateAgentRunRuntime(run.id, 'failed').catch(() => undefined)
+      setError(value instanceof Error ? value.message : 'Failed to launch agent')
+    }
+  }
+  async function interrupt(run: Run) {
+    try {
+      await window.scriptManagerDesktop?.agents?.interrupt(run.id)
+      await updateAgentRunRuntime(run.id, 'interrupted')
+      await load()
+      await selectRun(run.id)
+    } catch (value) {
+      setError(value instanceof Error ? value.message : 'Failed to interrupt agent')
+    }
+  }
+  async function resume(run: Run) {
+    try {
+      await window.scriptManagerDesktop?.agents?.input({ sessionId: run.id, message: { role: 'user', content: prompt } })
+      await updateAgentRunRuntime(run.id, 'running')
+      await load()
+      await selectRun(run.id)
+    } catch (value) {
+      setError(value instanceof Error ? value.message : 'Failed to resume agent')
+    }
+  }
   return <div className="grid h-full grid-cols-[320px_1fr] bg-background text-foreground">
     <aside className="overflow-y-auto border-r border-wb-border bg-wb-sidepanel p-4"><div className="mb-4 flex items-center gap-2"><Bot className="h-5 w-5"/><div><h1 className="font-semibold">Agents</h1><p className="text-xs text-muted-foreground">Codex and Claude via ACP</p></div></div>
       {!desktop && <div className="mb-4 rounded border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300"><strong>Desktop host required.</strong><br/>You can inspect runs here, but local providers launch only in ScriptManager Desktop.</div>}
