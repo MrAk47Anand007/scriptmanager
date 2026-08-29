@@ -20,6 +20,9 @@ import {
   saveDesktopScriptEnv,
   saveDesktopScriptSchedule,
   toggleDesktopWebhookSignature,
+  addDesktopTag,
+  listDesktopTags,
+  removeDesktopTag,
 } from '@/lib/scriptsRuntimeClient'
 
 afterEach(() => {
@@ -117,5 +120,18 @@ describe('desktop runtime bridge', () => {
     await expect(toggleDesktopWebhookSignature('script-1', true)).resolves.toMatchObject({ require_webhook_signature: true })
     expect(saveSchedule).toHaveBeenCalledWith({ scriptId: 'script-1', cron: '', enabled: false })
     expect(saveEnv).toHaveBeenCalledWith({ scriptId: 'script-1', key: 'token', value: 'value-1', isSecret: true })
+  })
+
+  it('uses desktop IPC for tags', async () => {
+    const listTags = vi.fn().mockResolvedValue([])
+    const addTag = vi.fn().mockResolvedValue({ id: 'tag-1', name: 'release', color: '#123456' })
+    const removeTag = vi.fn().mockResolvedValue(null)
+    window.scriptManagerDesktop = { runtime: { listTags, addTag, removeTag } } as never
+
+    await expect(listDesktopTags()).resolves.toEqual([])
+    await expect(addDesktopTag({ scriptId: 'script-1', name: 'release' })).resolves.toMatchObject({ id: 'tag-1' })
+    await expect(removeDesktopTag({ scriptId: 'script-1', tagId: 'tag-1' })).resolves.toBeNull()
+    expect(addTag).toHaveBeenCalledWith({ scriptId: 'script-1', name: 'release' })
+    expect(removeTag).toHaveBeenCalledWith({ scriptId: 'script-1', tagId: 'tag-1' })
   })
 })

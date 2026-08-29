@@ -1872,6 +1872,31 @@ async function readLocalScriptVersion(payload: { scriptId: string; versionId: st
   return { id: version.id, snapshot_number: version.snapshotNumber, content: version.content, saved_at: version.savedAt.toISOString() }
 }
 
+async function listLocalTags() {
+  await createDesktopActorContext(prisma)
+  const tags = await prisma.tag.findMany({ orderBy: { name: 'asc' }, include: { _count: { select: { scripts: true } } } })
+  return tags.map((tag) => ({ id: tag.id, name: tag.name, color: tag.color, script_count: tag._count.scripts, created_at: tag.createdAt.toISOString() }))
+}
+
+async function addLocalTag(payload: { scriptId: string; name: string; color?: string }) {
+  await getAuthorizedDesktopScript(payload.scriptId)
+  const name = payload.name.trim().toLowerCase()
+  if (!name) throw new Error('Tag name is required')
+  const tag = await prisma.tag.upsert({ where: { name }, update: {}, create: { name, color: payload.color ?? '#6366f1' } })
+  await prisma.scriptTag.upsert({
+    where: { scriptId_tagId: { scriptId: payload.scriptId, tagId: tag.id } },
+    update: {},
+    create: { scriptId: payload.scriptId, tagId: tag.id },
+  })
+  return { id: tag.id, name: tag.name, color: tag.color }
+}
+
+async function removeLocalTag(payload: { scriptId: string; tagId: string }) {
+  await getAuthorizedDesktopScript(payload.scriptId)
+  await prisma.scriptTag.deleteMany({ where: { scriptId: payload.scriptId, tagId: payload.tagId } })
+  return null
+}
+
 async function regenerateLocalWebhook(scriptId: string) {
   await getAuthorizedDesktopScript(scriptId)
   const token = crypto.randomUUID().replace(/-/g, '')
@@ -3004,6 +3029,18 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:toggle-webhook-signature', async (_event, payload: { scriptId: string; requireSignature: boolean }) => {
     return toggleLocalWebhookSignature(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-tags', async () => {
+    return listLocalTags()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:add-tag', async (_event, payload: { scriptId: string; name: string; color?: string }) => {
+    return addLocalTag(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:remove-tag', async (_event, payload: { scriptId: string; tagId: string }) => {
+    return removeLocalTag(payload)
   })
 
   ipcMain.handle('scriptmanager:runtime:move-script', async (_event, payload: { scriptId: string; collectionId: string | null }) => {

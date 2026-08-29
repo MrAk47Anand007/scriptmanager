@@ -26,6 +26,9 @@ import {
     toggleDesktopWebhookSignature,
     deleteDesktopScriptEnv,
     deleteDesktopScriptSchedule,
+    addDesktopTag,
+    listDesktopTags,
+    removeDesktopTag,
     saveDesktopScript,
     syncDesktopScriptToGist,
     deleteDesktopGist,
@@ -639,16 +642,26 @@ export const fetchVersionContent = createAsyncThunk(
 // --- Tag Thunks ---
 
 export const fetchAllTags = createAsyncThunk('scripts/fetchAllTags', async () => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopTags()
+    }
     const response = await axios.get('/api/tags')
     return response.data as Tag[]
 })
 
 export const addTagToScript = createAsyncThunk('scripts/addTagToScript', async ({ scriptId, name, color }: { scriptId: string; name: string; color?: string }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return { scriptId, tag: await addDesktopTag({ scriptId, name, color }) }
+    }
     const response = await axios.post(`/api/scripts/${scriptId}/tags`, { name, color })
     return { scriptId, tag: response.data as Tag }
 })
 
 export const removeTagFromScript = createAsyncThunk('scripts/removeTagFromScript', async ({ scriptId, tagId }: { scriptId: string; tagId: string }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        await removeDesktopTag({ scriptId, tagId })
+        return { scriptId, tagId }
+    }
     await axios.delete(`/api/scripts/${scriptId}/tags?tagId=${tagId}`)
     return { scriptId, tagId }
 })

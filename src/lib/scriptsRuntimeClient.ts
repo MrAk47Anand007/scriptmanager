@@ -333,6 +333,21 @@ export async function toggleDesktopWebhookSignature(scriptId: string, requireSig
   return window.scriptManagerDesktop.runtime.toggleWebhookSignature({ scriptId, requireSignature }) as Promise<DesktopWebhookToggle>
 }
 
+export async function listDesktopTags() {
+  if (!window.scriptManagerDesktop?.runtime?.listTags) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.listTags() as Promise<Array<{ id: string; name: string; color: string }>>
+}
+
+export async function addDesktopTag(payload: { scriptId: string; name: string; color?: string }) {
+  if (!window.scriptManagerDesktop?.runtime?.addTag) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.addTag(payload) as Promise<{ id: string; name: string; color: string }>
+}
+
+export async function removeDesktopTag(payload: { scriptId: string; tagId: string }) {
+  if (!window.scriptManagerDesktop?.runtime?.removeTag) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.removeTag(payload) as Promise<null>
+}
+
 export async function moveDesktopScript(scriptId: string, collectionId: string | null): Promise<{ scriptId: string; collectionId: string | null }> {
   if (!window.scriptManagerDesktop?.runtime?.moveScript) throw new Error('Desktop runtime unavailable')
   return window.scriptManagerDesktop.runtime.moveScript({ scriptId, collectionId }) as Promise<{ scriptId: string; collectionId: string | null }>

@@ -117,6 +117,9 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     regenerateWebhook: (scriptId: string) => ipcRenderer.invoke('scriptmanager:runtime:regenerate-webhook', scriptId) as Promise<unknown>,
     regenerateWebhookSecret: (scriptId: string) => ipcRenderer.invoke('scriptmanager:runtime:regenerate-webhook-secret', scriptId) as Promise<unknown>,
     toggleWebhookSignature: (payload: { scriptId: string; requireSignature: boolean }) => ipcRenderer.invoke('scriptmanager:runtime:toggle-webhook-signature', payload) as Promise<unknown>,
+    listTags: () => ipcRenderer.invoke('scriptmanager:runtime:list-tags') as Promise<unknown[]>,
+    addTag: (payload: { scriptId: string; name: string; color?: string }) => ipcRenderer.invoke('scriptmanager:runtime:add-tag', payload) as Promise<unknown>,
+    removeTag: (payload: { scriptId: string; tagId: string }) => ipcRenderer.invoke('scriptmanager:runtime:remove-tag', payload) as Promise<unknown>,
     moveScript: (payload: { scriptId: string; collectionId: string | null }) =>
       ipcRenderer.invoke('scriptmanager:runtime:move-script', payload) as Promise<unknown>,
     deleteScript: (payload: { id: string }) => ipcRenderer.invoke('scriptmanager:runtime:delete-script', payload) as Promise<string>,

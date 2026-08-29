@@ -104,6 +104,9 @@ declare global {
         regenerateWebhook: (scriptId: string) => Promise<unknown>
         regenerateWebhookSecret: (scriptId: string) => Promise<unknown>
         toggleWebhookSignature: (payload: { scriptId: string; requireSignature: boolean }) => Promise<unknown>
+        listTags: () => Promise<unknown[]>
+        addTag: (payload: { scriptId: string; name: string; color?: string }) => Promise<unknown>
+        removeTag: (payload: { scriptId: string; tagId: string }) => Promise<unknown>
         moveScript?: (payload: { scriptId: string; collectionId: string | null }) => Promise<unknown>
         deleteScript: (payload: { id: string }) => Promise<string>
         duplicateScript: (scriptId: string) => Promise<unknown>
