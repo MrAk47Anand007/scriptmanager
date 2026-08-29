@@ -8,7 +8,7 @@ import { listApprovalsRuntime } from '@/lib/approvalsRuntimeClient'
 import { loadWorkspaceAccessRuntime } from '@/lib/workspacesRuntimeClient'
 import { listWorkflowsRuntime } from '@/lib/workflowsRuntimeClient'
 import { clearGithubGistSettingsRuntime, readGithubGistSettingsRuntime, saveGithubGistSettingsRuntime } from '@/lib/gistCredentialsRuntimeClient'
-import { deleteDesktopGist, exportScriptsRuntime, importScriptsRuntime, readScriptContentRuntime, syncDesktopScriptToGist } from '@/lib/scriptsRuntimeClient'
+import { deleteDesktopGist, exportScriptRuntime, exportScriptsRuntime, importScriptsRuntime, readScriptContentRuntime, syncDesktopScriptToGist } from '@/lib/scriptsRuntimeClient'
 import { runScript as runScriptThunk } from '@/features/scripts/scriptsSlice'
 import { listDesktopBuilds, readDesktopBuildOutput } from '@/lib/scriptsRuntimeClient'
 import {
@@ -118,6 +118,14 @@ describe('desktop runtime bridge', () => {
     await expect(importScriptsRuntime({ _export_version: 1, scripts: [] })).resolves.toMatchObject({ message: expect.stringContaining('Imported') })
     expect(exportScripts).toHaveBeenCalledOnce()
     expect(importScripts).toHaveBeenCalledWith({ _export_version: 1, scripts: [] })
+  })
+
+  it('uses desktop IPC for single-script export', async () => {
+    const exportScript = vi.fn().mockResolvedValue({ _export_version: 1, name: 'Deploy', content: 'print(1)' })
+    window.scriptManagerDesktop = { runtime: { exportScript } } as never
+
+    await expect(exportScriptRuntime('script-1')).resolves.toMatchObject({ name: 'Deploy', content: 'print(1)' })
+    expect(exportScript).toHaveBeenCalledWith('script-1')
   })
 
   it('uses desktop IPC for build history and build output', async () => {

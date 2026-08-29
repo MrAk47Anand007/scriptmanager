@@ -88,6 +88,7 @@ declare global {
         manageCollectionPythonEnv: (payload: { collectionId: string; recreate?: boolean }) => Promise<unknown>
         readScript: (scriptId: string) => Promise<unknown>
         exportScripts: () => Promise<unknown>
+        exportScript: (scriptId: string) => Promise<unknown>
         importScripts: (payload: unknown) => Promise<unknown>
         createScript: (payload: unknown) => Promise<unknown>
         saveScript: (payload: unknown) => Promise<unknown>

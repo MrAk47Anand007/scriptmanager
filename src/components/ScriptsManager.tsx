@@ -72,6 +72,7 @@ import {
     startDesktopLocalRun,
     subscribeToCanonicalFolderChanges,
     subscribeToDesktopBuildEvents,
+    exportScriptRuntime,
 } from '@/lib/scriptsRuntimeClient';
 import { readGithubGistSettingsRuntime } from '@/lib/gistCredentialsRuntimeClient';
 import { getCanonicalFolderReloadAction } from '@/lib/canonicalFolderReload';
@@ -780,6 +781,23 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
         return false;
     };
 
+    const handleExportScript = useCallback(async () => {
+        if (!activeScriptId) return;
+        try {
+            const bundle = await exportScriptRuntime(activeScriptId);
+            const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            const name = typeof bundle.name === 'string' && bundle.name.trim() ? bundle.name : 'script';
+            anchor.download = `${name.replace(/[^a-zA-Z0-9_-]/g, '_')}.scriptmanager.json`;
+            anchor.click();
+            window.setTimeout(() => URL.revokeObjectURL(url), 0);
+        } catch (error) {
+            setCanonicalFolderNotice(error instanceof Error ? error.message : 'Failed to export script');
+        }
+    }, [activeScriptId]);
+
     // Auto-save effect (Local DB only)
     useEffect(() => {
         if (!autoSaveEnabled || !activeScriptId || saveStatus === 'saving') return;
@@ -1328,11 +1346,7 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
                                     variant="outline"
                                     className="h-7 shrink-0 text-xs gap-1"
                                     title="Export script as JSON"
-                                    onClick={() => {
-                                        if (activeScriptId) {
-                                            window.open(`/api/scripts/${activeScriptId}/export`, '_blank')
-                                        }
-                                    }}
+                                    onClick={() => void handleExportScript()}
                                 >
                                     <Download className="h-3 w-3" />
                                 </Button>

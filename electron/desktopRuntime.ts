@@ -1358,6 +1358,33 @@ async function exportLocalScripts(): Promise<ScriptExportBundle & { _export_vers
   }
 }
 
+async function exportLocalScript(scriptId: string) {
+  const script = await prisma.script.findUnique({
+    where: { id: scriptId },
+    include: { tags: { include: { tag: true } }, collection: true },
+  })
+  if (!script) throw new Error('Script not found')
+
+  let content = ''
+  try {
+    content = fs.readFileSync(await resolveScriptPath(script), 'utf8')
+  } catch {
+    // Preserve metadata when the source file is unavailable.
+  }
+
+  return {
+    _export_version: 1,
+    exported_at: new Date().toISOString(),
+    name: script.name,
+    description: script.description,
+    language: script.language,
+    interpreter: script.interpreter,
+    content,
+    parameters: serializeParameters(script.parameters),
+    tags: script.tags.map((entry) => ({ name: entry.tag.name, color: entry.tag.color })),
+  }
+}
+
 async function importLocalScripts(payload: ScriptExportBundle): Promise<{ message: string; results: Array<{ name: string; id: string; status: 'created' | 'skipped' }> }> {
   const toImport = Array.isArray(payload?.scripts)
     ? payload.scripts
@@ -3148,6 +3175,10 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:export-scripts', async () => {
     return exportLocalScripts()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:export-script', async (_event, scriptId: string) => {
+    return exportLocalScript(scriptId)
   })
 
   ipcMain.handle('scriptmanager:runtime:import-scripts', async (_event, payload: ScriptExportBundle) => {

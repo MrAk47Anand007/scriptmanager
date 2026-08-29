@@ -101,6 +101,7 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
       ipcRenderer.invoke('scriptmanager:runtime:manage-collection-python-env', payload) as Promise<unknown>,
     readScript: (scriptId: string) => ipcRenderer.invoke('scriptmanager:runtime:read-script', scriptId) as Promise<unknown>,
     exportScripts: () => ipcRenderer.invoke('scriptmanager:runtime:export-scripts') as Promise<unknown>,
+    exportScript: (scriptId: string) => ipcRenderer.invoke('scriptmanager:runtime:export-script', scriptId) as Promise<unknown>,
     importScripts: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:import-scripts', payload) as Promise<unknown>,
     createScript: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:create-script', payload) as Promise<unknown>,
     saveScript: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-script', payload) as Promise<unknown>,
