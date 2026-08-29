@@ -45,6 +45,38 @@ describe('remote execution approval routes', () => {
     await prisma.userSession.deleteMany({ where: { userId: 'local-admin' } })
   })
 
+  it('rejects unauthenticated remote execution requests', async () => {
+    const script = await prisma.script.create({ data: { id: 'script-unauth', name: 'Deploy', filename: 'deploy.sh' } })
+    const profile = await prisma.serverProfile.create({ data: { id: 'profile-unauth', name: 'SSH', host: 'example.test', username: 'deploy' } })
+
+    const { POST } = await import('@/app/api/ops/remote-exec/route')
+    const response = await POST(new Request('http://localhost/api/ops/remote-exec', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ profileId: profile.id, scriptId: script.id }),
+    }))
+
+    expect(response.status).toBe(401)
+    expect(execRemoteMock).not.toHaveBeenCalled()
+  })
+
+  it('does not approve an execution whose script is outside the profile workspace', async () => {
+    const script = await prisma.script.create({ data: { id: 'script-foreign-workspace', workspaceId: 'foreign-workspace', name: 'Foreign deploy', filename: 'deploy.sh' } })
+    const profile = await prisma.serverProfile.create({ data: { id: 'profile-default-workspace', workspaceId: 'default', name: 'SSH', host: 'example.test', username: 'deploy' } })
+    const execution = await prisma.remoteExecution.create({
+      data: { id: 'remote-foreign-script', scriptId: script.id, profileId: profile.id, scriptName: script.name, profileName: profile.name, serverHost: profile.host, status: 'pending_approval' },
+    })
+
+    const response = await approve(new Request('http://localhost/api/ops/remote-exec/remote-foreign-script/approve', {
+      method: 'POST',
+      headers: { cookie: sessionCookie },
+    }), { params: Promise.resolve({ id: execution.id }) })
+
+    expect(response.status).toBe(404)
+    expect((await prisma.remoteExecution.findUniqueOrThrow({ where: { id: execution.id } })).status).toBe('pending_approval')
+    expect(execRemoteMock).not.toHaveBeenCalled()
+  })
+
   it('approves with the authenticated actor instead of a forged approver_name', async () => {
     const script = await prisma.script.create({
       data: {

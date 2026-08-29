@@ -4,8 +4,11 @@ import { execRemote } from '@/lib/sshService'
 import crypto from 'crypto'
 import { buildRemoteCommand } from '@/lib/executionSafety'
 import { executionTelemetry } from '@/lib/execution'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function GET(req: Request) {
+    const authorization = await authorizeRequest(req, 'ops', 'read')
+    if (authorization.response) return authorization.response
     const { searchParams } = new URL(req.url)
     const profileId = searchParams.get('profileId') ?? undefined
     const scriptId = searchParams.get('scriptId') ?? undefined
@@ -13,6 +16,7 @@ export async function GET(req: Request) {
     const offset = parseInt(searchParams.get('offset') ?? '0', 10)
 
     const where = {
+        profile: { workspaceId: authorization.context.workspaceId },
         ...(profileId ? { profileId } : {}),
         ...(scriptId ? { scriptId } : {}),
     }
@@ -45,20 +49,23 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+    const authorization = await authorizeRequest(req, 'ops', 'run')
+    if (authorization.response) return authorization.response
     const correlationId = executionTelemetry.correlationId(req)
-    const body = await req.json()
+    const body = await req.json().catch(() => null)
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: 'Request body is invalid' }, { status: 400 })
     const { profileId, scriptId, paramValues, remotePath } = body
 
     if (!profileId) return NextResponse.json({ error: 'profileId is required' }, { status: 400 })
     if (!scriptId) return NextResponse.json({ error: 'scriptId is required' }, { status: 400 })
 
-    const profile = await prisma.serverProfile.findUnique({
-        where: { id: profileId },
+    const profile = await prisma.serverProfile.findFirst({
+        where: { id: profileId, workspaceId: authorization.context.workspaceId },
         include: { project: true },
     })
     if (!profile) return NextResponse.json({ error: 'Server profile not found' }, { status: 404 })
 
-    const script = await prisma.script.findUnique({ where: { id: scriptId } })
+    const script = await prisma.script.findFirst({ where: { id: scriptId, workspaceId: authorization.context.workspaceId } })
     if (!script) return NextResponse.json({ error: 'Script not found' }, { status: 404 })
 
     const remoteExecId = crypto.randomUUID()
@@ -88,7 +95,7 @@ export async function POST(req: Request) {
         const remoteCommand = buildRemoteCommand(script.filename, remotePath, paramValues)
         execRemote({
             profileId, command: remoteCommand, remoteExecId,
-            context: { correlationId, actor: { type: 'user', id: 'session-user' }, trigger: 'remote' },
+            context: { correlationId, actor: { type: 'user', id: authorization.context.userId }, trigger: 'remote' },
         }).catch(console.error)
     }
 

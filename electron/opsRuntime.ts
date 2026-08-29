@@ -7,6 +7,7 @@ import path from 'path'
 import { buildRemoteCommand } from '../src/lib/executionSafety'
 import { hasStoredOpsSecret, revealOpsSecret } from '../src/lib/opsSecretStore'
 import { resolveResourceSecret, storeResourceSecret } from '../src/lib/secrets/migration'
+import { createDesktopActorContext } from '../src/lib/runtime/trustedContext'
 import { getDesktopWorkspaceLayout } from '../src/lib/workspaceLayout'
 import { parseWorkspacePolicy } from '../src/lib/git/policy'
 
@@ -129,9 +130,9 @@ async function getWorkspaceRoot() {
   ).scriptsRoot
 }
 
-async function resolveScriptPath(scriptId: string) {
-  const script = await prisma.script.findUnique({
-    where: { id: scriptId },
+async function resolveScriptPath(scriptId: string, workspaceId: string) {
+  const script = await prisma.script.findFirst({
+    where: { id: scriptId, workspaceId },
     select: {
       id: true,
       filename: true,
@@ -147,8 +148,8 @@ async function resolveScriptPath(scriptId: string) {
   return path.resolve(await getWorkspaceRoot(), path.basename(script.filename))
 }
 
-async function buildConnectConfig(profileId: string): Promise<ConnectConfig> {
-  const profile = await prisma.serverProfile.findUnique({ where: { id: profileId } })
+async function buildConnectConfig(profileId: string, workspaceId = 'default'): Promise<ConnectConfig> {
+  const profile = await prisma.serverProfile.findFirst({ where: { id: profileId, workspaceId } })
   if (!profile) throw new Error(`Server profile not found: ${profileId}`)
 
   const config: ConnectConfig = {
@@ -163,7 +164,7 @@ async function buildConnectConfig(profileId: string): Promise<ConnectConfig> {
     config.privateKey = fs.readFileSync(profile.keyPath)
   } else if (profile.encryptedSecret) {
     config.password = profile.encryptedSecret.startsWith('secretref:')
-      ? await resolveResourceSecret(prisma, profile.encryptedSecret, { resourceType: 'server-profile', resourceId: profile.id, field: 'password' }, 'desktop-ssh-runtime') ?? undefined
+      ? await resolveResourceSecret(prisma, profile.encryptedSecret, { resourceType: 'server-profile', resourceId: profile.id, field: 'password', workspaceId }, 'desktop-ssh-runtime') ?? undefined
       : await revealOpsSecret(profile.encryptedSecret) ?? undefined
   }
 
@@ -192,7 +193,7 @@ function execCommand(client: SshClient, command: string): Promise<string> {
   })
 }
 
-async function executeRemote(profileId: string, command: string, remoteExecId: string): Promise<void> {
+async function executeRemote(profileId: string, command: string, remoteExecId: string, workspaceId: string): Promise<void> {
   const emitter = remoteExecEmitters.get(remoteExecId) ?? new EventEmitter()
   remoteExecEmitters.set(remoteExecId, emitter)
 
@@ -206,7 +207,7 @@ async function executeRemote(profileId: string, command: string, remoteExecId: s
   let exitCode = 1
 
   try {
-    const config = await buildConnectConfig(profileId)
+    const config = await buildConnectConfig(profileId, workspaceId)
     client = await createSshClient(config)
 
     await new Promise<void>((resolve, reject) => {
@@ -269,7 +270,9 @@ export function getRemoteExecEmitter(remoteExecId: string) {
 }
 
 export async function listProjects(): Promise<ProjectDto[]> {
+  const actor = await createDesktopActorContext(prisma)
   const projects = await prisma.project.findMany({
+    where: { workspaceId: actor.workspaceId },
     orderBy: { name: 'asc' },
     include: { collections: { select: { id: true } } },
   })
@@ -287,10 +290,15 @@ export async function saveProject(payload: {
   remote_url?: string | null
   workspace_policy?: import('../src/lib/git/types').WorkspacePolicy
 }) {
+  const actor = await createDesktopActorContext(prisma)
   const validEnvironments = ['development', 'qa', 'uat', 'production']
   const environment = validEnvironments.includes(payload.environment ?? '') ? payload.environment! : 'development'
   if (!payload.id && !payload.name?.trim()) {
     throw new Error('Name is required')
+  }
+  if (payload.id) {
+    const existing = await prisma.project.findFirst({ where: { id: payload.id, workspaceId: actor.workspaceId } })
+    if (!existing) throw new Error('Project not found')
   }
   const project = payload.id
     ? await prisma.project.update({
@@ -309,6 +317,7 @@ export async function saveProject(payload: {
     })
     : await prisma.project.create({
       data: {
+        workspaceId: actor.workspaceId,
         name: payload.name!.trim(),
         description: payload.description ?? '',
         environment,
@@ -324,11 +333,18 @@ export async function saveProject(payload: {
 }
 
 export async function deleteProject(id: string) {
-  await prisma.project.delete({ where: { id } })
+  const actor = await createDesktopActorContext(prisma)
+  const result = await prisma.project.deleteMany({ where: { id, workspaceId: actor.workspaceId } })
+  if (result.count === 0) throw new Error('Project not found')
   return id
 }
 
 export async function assignCollectionToProject(collectionId: string, projectId: string | null) {
+  const actor = await createDesktopActorContext(prisma)
+  if (projectId) {
+    const project = await prisma.project.findFirst({ where: { id: projectId, workspaceId: actor.workspaceId } })
+    if (!project) throw new Error('Project not found')
+  }
   await prisma.collection.update({
     where: { id: collectionId },
     data: { projectId },
@@ -337,7 +353,8 @@ export async function assignCollectionToProject(collectionId: string, projectId:
 }
 
 export async function listServerProfiles(): Promise<ServerProfileDto[]> {
-  const profiles = await prisma.serverProfile.findMany({ orderBy: { name: 'asc' } })
+  const actor = await createDesktopActorContext(prisma)
+  const profiles = await prisma.serverProfile.findMany({ where: { workspaceId: actor.workspaceId }, orderBy: { name: 'asc' } })
   return profiles.map(serializeProfile)
 }
 
@@ -353,16 +370,25 @@ export async function saveServerProfile(payload: {
   project_id?: string | null
   notes?: string
 }) {
+  const actor = await createDesktopActorContext(prisma)
   if (!payload.id && (!payload.name?.trim() || !payload.host?.trim() || !payload.username?.trim())) {
     throw new Error('Name, host, and username are required')
   }
+  if (payload.project_id) {
+    const project = await prisma.project.findFirst({ where: { id: payload.project_id, workspaceId: actor.workspaceId } })
+    if (!project) throw new Error('Project not found')
+  }
   const profileId = payload.id ?? crypto.randomUUID()
+  if (payload.id) {
+    const existing = await prisma.serverProfile.findFirst({ where: { id: payload.id, workspaceId: actor.workspaceId } })
+    if (!existing) throw new Error('Server profile not found')
+  }
   let encryptedSecretJson: string | null | undefined
   if (payload.secret !== undefined) {
     if (!payload.secret) {
       encryptedSecretJson = null
     } else {
-      encryptedSecretJson = await storeResourceSecret(prisma, { resourceType: 'server-profile', resourceId: profileId, field: 'password', name: `ops:${profileId}:password` }, payload.secret)
+      encryptedSecretJson = await storeResourceSecret(prisma, { resourceType: 'server-profile', resourceId: profileId, field: 'password', name: `ops:${profileId}:password`, workspaceId: actor.workspaceId }, payload.secret, actor.actorId)
     }
   }
 
@@ -393,6 +419,7 @@ export async function saveServerProfile(payload: {
         keyPath: payload.key_path ?? null,
         projectId: payload.project_id ?? null,
         notes: payload.notes ?? '',
+        workspaceId: actor.workspaceId,
       },
     })
 
@@ -400,15 +427,18 @@ export async function saveServerProfile(payload: {
 }
 
 export async function deleteServerProfile(id: string) {
-  await prisma.serverProfile.delete({ where: { id } })
+  const actor = await createDesktopActorContext(prisma)
+  const result = await prisma.serverProfile.deleteMany({ where: { id, workspaceId: actor.workspaceId } })
+  if (result.count === 0) throw new Error('Server profile not found')
   return id
 }
 
 export async function testConnection(profileId: string) {
+  const actor = await createDesktopActorContext(prisma)
   const start = Date.now()
   let client: SshClient | null = null
   try {
-    const config = await buildConnectConfig(profileId)
+    const config = await buildConnectConfig(profileId, actor.workspaceId)
     client = await createSshClient(config)
     return { success: true, latency_ms: Date.now() - start }
   } catch (error) {
@@ -419,17 +449,22 @@ export async function testConnection(profileId: string) {
 }
 
 export async function transferScript(payload: { profileId: string; scriptId: string; remotePath: string; permissions?: string }) {
-  const script = await prisma.script.findUnique({ where: { id: payload.scriptId } })
+  const actor = await createDesktopActorContext(prisma)
+  const profile = await prisma.serverProfile.findFirst({ where: { id: payload.profileId, workspaceId: actor.workspaceId } })
+  const script = await prisma.script.findFirst({ where: { id: payload.scriptId, workspaceId: actor.workspaceId } })
+  if (!profile) {
+    return { success: false, remote_path: '', error: 'Server profile not found' }
+  }
   if (!script) {
     return { success: false, remote_path: '', error: 'Script not found' }
   }
 
-  const localPath = await resolveScriptPath(payload.scriptId)
+  const localPath = await resolveScriptPath(payload.scriptId, actor.workspaceId)
   const remoteFilePath = (payload.remotePath.endsWith('/') ? payload.remotePath : `${payload.remotePath}/`) + script.filename
 
   let client: SshClient | null = null
   try {
-    const config = await buildConnectConfig(payload.profileId)
+    const config = await buildConnectConfig(payload.profileId, actor.workspaceId)
     client = await createSshClient(config)
 
     await new Promise<void>((resolve, reject) => {
@@ -463,16 +498,17 @@ export async function transferScript(payload: { profileId: string; scriptId: str
 }
 
 export async function startRemoteExec(payload: { profileId: string; scriptId: string; remotePath?: string; paramValues?: Record<string, string> }) {
-  const profile = await prisma.serverProfile.findUnique({
-    where: { id: payload.profileId },
+  const actor = await createDesktopActorContext(prisma)
+  const scopedProfile = await prisma.serverProfile.findFirst({
+    where: { id: payload.profileId, workspaceId: actor.workspaceId },
     include: { project: true },
   })
-  const script = await prisma.script.findUnique({ where: { id: payload.scriptId } })
-  if (!profile) throw new Error('Server profile not found')
+  const script = await prisma.script.findFirst({ where: { id: payload.scriptId, workspaceId: actor.workspaceId } })
+  if (!scopedProfile) throw new Error('Server profile not found')
   if (!script) throw new Error('Script not found')
 
   const remoteExecId = crypto.randomUUID()
-  const environment = profile.project?.environment ?? 'development'
+  const environment = scopedProfile.project?.environment ?? 'development'
   const requiresApproval = environment === 'production' || environment === 'uat'
 
   await prisma.remoteExecution.create({
@@ -481,8 +517,8 @@ export async function startRemoteExec(payload: { profileId: string; scriptId: st
       scriptId: payload.scriptId,
       profileId: payload.profileId,
       scriptName: script.name,
-      profileName: profile.name,
-      serverHost: profile.host,
+      profileName: scopedProfile.name,
+      serverHost: scopedProfile.host,
       status: requiresApproval ? 'pending_approval' : 'approved',
       remotePath: payload.remotePath ?? null,
       paramValues: payload.paramValues ? JSON.stringify(payload.paramValues) : '{}',
@@ -492,7 +528,7 @@ export async function startRemoteExec(payload: { profileId: string; scriptId: st
   if (!requiresApproval) {
     remoteExecEmitters.set(remoteExecId, new EventEmitter())
     const command = buildRemoteCommand(script.filename, payload.remotePath, payload.paramValues)
-    void executeRemote(payload.profileId, command, remoteExecId)
+    void executeRemote(payload.profileId, command, remoteExecId, actor.workspaceId)
   }
 
   return {
@@ -503,7 +539,7 @@ export async function startRemoteExec(payload: { profileId: string; scriptId: st
 }
 
 export async function approveExecution(id: string, approverName: string) {
-  const execution = await prisma.remoteExecution.findUnique({ where: { id } })
+  const execution = await prisma.remoteExecution.findUnique({ where: { id }, include: { profile: true } })
   if (!execution) throw new Error('Remote execution not found')
   if (execution.status !== 'pending_approval') throw new Error(`Cannot approve execution with status: ${execution.status}`)
 
@@ -516,12 +552,12 @@ export async function approveExecution(id: string, approverName: string) {
     },
   })
 
-  const script = await prisma.script.findUnique({ where: { id: execution.scriptId } })
+  const script = await prisma.script.findFirst({ where: { id: execution.scriptId, workspaceId: execution.profile.workspaceId } })
   if (!script) throw new Error('Script not found')
   remoteExecEmitters.set(id, new EventEmitter())
   const paramValues = execution.paramValues ? JSON.parse(execution.paramValues) : {}
   const command = buildRemoteCommand(script.filename, execution.remotePath ?? undefined, paramValues as Record<string, string>)
-  void executeRemote(execution.profileId, command, id)
+  void executeRemote(execution.profileId, command, id, execution.profile.workspaceId)
   return id
 }
 
@@ -537,7 +573,9 @@ export async function rejectExecution(id: string) {
 }
 
 export async function listAuditLog(params?: { profileId?: string; scriptId?: string; limit?: number; offset?: number }) {
+  const actor = await createDesktopActorContext(prisma)
   const where = {
+    profile: { workspaceId: actor.workspaceId },
     ...(params?.profileId ? { profileId: params.profileId } : {}),
     ...(params?.scriptId ? { scriptId: params.scriptId } : {}),
   }

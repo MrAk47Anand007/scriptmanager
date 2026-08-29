@@ -23,6 +23,11 @@ export async function approveRemoteExecution(id: string, actor: TrustedActorCont
 
   ensureWorkspaceAccess(actor, execution.profile.workspaceId)
 
+  const script = await prisma.script.findFirst({ where: { id: execution.scriptId, workspaceId: execution.profile.workspaceId } })
+  if (!script) {
+    throw new Error('Script not found')
+  }
+
   await prisma.remoteExecution.update({
     where: { id },
     data: {
@@ -31,11 +36,6 @@ export async function approveRemoteExecution(id: string, actor: TrustedActorCont
       approvedAt: new Date(),
     },
   })
-
-  const script = await prisma.script.findUnique({ where: { id: execution.scriptId } })
-  if (!script) {
-    throw new Error('Script not found')
-  }
 
   const paramValues = execution.paramValues ? JSON.parse(execution.paramValues) : {}
   const command = buildRemoteCommand(script.filename, execution.remotePath ?? undefined, paramValues as Record<string, string>)
