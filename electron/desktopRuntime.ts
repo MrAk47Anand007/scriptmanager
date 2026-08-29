@@ -1659,6 +1659,23 @@ async function saveLocalScript(payload: SaveScriptPayload): Promise<ScriptDto> {
   return serializeScriptRecord(updated)
 }
 
+async function moveLocalScript(payload: { scriptId: string; collectionId: string | null }) {
+  const script = await prisma.script.findUnique({ where: { id: payload.scriptId } })
+  if (!script) throw new Error('Script not found')
+  if (script.sourcePath) {
+    throw new Error('Canonical scripts must be moved on disk, then the folder rescanned')
+  }
+  const collection = payload.collectionId
+    ? await prisma.collection.findUnique({ where: { id: payload.collectionId } })
+    : null
+  if (payload.collectionId && !collection) throw new Error('Collection not found')
+  const updated = await prisma.script.update({
+    where: { id: script.id },
+    data: { collectionId: payload.collectionId },
+  })
+  return { scriptId: updated.id, collectionId: updated.collectionId }
+}
+
 async function deleteLocalScript(payload: DeleteScriptPayload): Promise<string> {
   const script = await prisma.script.findUnique({ where: { id: payload.id }, include: { collection: true } })
   if (!script) {
@@ -2663,6 +2680,10 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:save-script', async (_event, payload: SaveScriptPayload) => {
     return saveLocalScript(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:move-script', async (_event, payload: { scriptId: string; collectionId: string | null }) => {
+    return moveLocalScript(payload)
   })
 
   ipcMain.handle('scriptmanager:runtime:delete-script', async (_event, payload: DeleteScriptPayload) => {

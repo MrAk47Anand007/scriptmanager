@@ -6,6 +6,7 @@ import {
   listCanonicalRecoveryDrafts,
   rescanCanonicalFolder,
   cancelDesktopRun,
+  moveDesktopScript,
   saveCanonicalRecoveryDraft,
   subscribeToCanonicalFolderChanges,
 } from '@/lib/scriptsRuntimeClient'
@@ -69,5 +70,13 @@ describe('desktop canonical folder bridge', () => {
 
     await expect(cancelDesktopRun('build-1')).resolves.toEqual({ ok: true })
     expect(cancel).toHaveBeenCalledWith('build-1')
+  })
+
+  it('moves a script through preload in desktop mode', async () => {
+    const move = vi.fn().mockResolvedValue({ scriptId: 'script-1', collectionId: 'collection-2' })
+    window.scriptManagerDesktop = { runtime: { moveScript: move } } as never
+
+    await expect(moveDesktopScript('script-1', 'collection-2')).resolves.toEqual({ scriptId: 'script-1', collectionId: 'collection-2' })
+    expect(move).toHaveBeenCalledWith({ scriptId: 'script-1', collectionId: 'collection-2' })
   })
 })

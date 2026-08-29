@@ -10,6 +10,7 @@ import {
     hasDesktopScriptsRuntime,
     listDesktopCollections,
     listDesktopScripts,
+    moveDesktopScript,
     openDesktopScriptsFolder,
     readDesktopScript,
     saveDesktopScript,
@@ -482,6 +483,9 @@ export const convertTemporaryCollection = createAsyncThunk(
 )
 
 export const moveScript = createAsyncThunk('scripts/moveScript', async ({ scriptId, collectionId }: { scriptId: string, collectionId: string | null }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return moveDesktopScript(scriptId, collectionId)
+    }
     const response = await axios.put(`/api/scripts/${scriptId}/move`, { collection_id: collectionId })
     return { scriptId, collectionId: response.data.collection_id }
 })

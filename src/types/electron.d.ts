@@ -86,6 +86,7 @@ declare global {
         readScript: (scriptId: string) => Promise<unknown>
         createScript: (payload: unknown) => Promise<unknown>
         saveScript: (payload: unknown) => Promise<unknown>
+        moveScript?: (payload: { scriptId: string; collectionId: string | null }) => Promise<unknown>
         deleteScript: (payload: { id: string }) => Promise<string>
         duplicateScript: (scriptId: string) => Promise<unknown>
         openFolder: (payload: unknown) => Promise<unknown>
