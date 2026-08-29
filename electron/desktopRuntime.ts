@@ -248,11 +248,25 @@ type CollectionRecord = {
 let canonicalFolderWatcher: ReturnType<typeof createCanonicalFolderWatcher> | null = null
 
 async function forwardCanonicalFolderChange(change: CanonicalFolderChange) {
-  const script = await prisma.script.findFirst({
+  const previousScript = await prisma.script.findFirst({
     where: { collectionId: change.collectionId, sourcePath: change.sourcePath },
     select: { id: true },
   })
-  const payload = { ...change, scriptId: script?.id }
+  const collection = await prisma.collection.findUnique({ where: { id: change.collectionId } })
+  if (collection?.folderPath && !collection.isTemporary) {
+    await openLocalFolder({
+      folderPath: collection.folderPath,
+      mode: 'collection',
+      collectionName: collection.name,
+      runtimePreset: normalizeRuntimePreset(collection.runtimePreset),
+      pythonToolchainEnabled: collection.pythonToolchainEnabled,
+    }).catch(() => undefined)
+  }
+  const currentScript = await prisma.script.findFirst({
+    where: { collectionId: change.collectionId, sourcePath: change.sourcePath },
+    select: { id: true },
+  })
+  const payload = { ...change, scriptId: currentScript?.id ?? previousScript?.id }
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
       window.webContents.send('scriptmanager:runtime:canonical-folder-change', payload)
