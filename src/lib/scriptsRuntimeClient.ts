@@ -242,6 +242,16 @@ export async function saveDesktopScript(payload: DesktopSaveScriptPayload): Prom
   return window.scriptManagerDesktop.runtime.saveScript(payload) as Promise<DesktopScriptRecord>
 }
 
+export async function syncDesktopScriptToGist(scriptId: string): Promise<{ gist_id: string; gist_url: string; gist_filename: string }> {
+  if (!window.scriptManagerDesktop?.runtime?.syncGist) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.syncGist(scriptId)
+}
+
+export async function deleteDesktopGist(scriptId: string): Promise<{ ok: boolean }> {
+  if (!window.scriptManagerDesktop?.runtime?.deleteGist) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.deleteGist(scriptId)
+}
+
 export async function moveDesktopScript(scriptId: string, collectionId: string | null): Promise<{ scriptId: string; collectionId: string | null }> {
   if (!window.scriptManagerDesktop?.runtime?.moveScript) throw new Error('Desktop runtime unavailable')
   return window.scriptManagerDesktop.runtime.moveScript({ scriptId, collectionId }) as Promise<{ scriptId: string; collectionId: string | null }>

@@ -74,6 +74,7 @@ import {
     subscribeToCanonicalFolderChanges,
     subscribeToDesktopBuildEvents,
 } from '@/lib/scriptsRuntimeClient';
+import { readGithubGistSettingsRuntime } from '@/lib/gistCredentialsRuntimeClient';
 import { getCanonicalFolderReloadAction } from '@/lib/canonicalFolderReload';
 import type { CanonicalRecoveryDraft } from '@/lib/scriptsRuntimeClient';
 
@@ -824,9 +825,12 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
     }, [activeScriptId, gistDirty, activeScript]);
 
     const toggleGistSync = async (enabled: boolean) => {
-        if (enabled && !settings['github_token']) {
-            alert("Please configure your GitHub Token in Settings first.");
-            return;
+        if (enabled) {
+            const gistSettings = await readGithubGistSettingsRuntime();
+            if (!gistSettings.configured) {
+                alert("Please configure your GitHub Token in Settings first.");
+                return;
+            }
         }
 
         try {

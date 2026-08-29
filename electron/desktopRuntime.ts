@@ -9,6 +9,8 @@ import path from 'path'
 import { createApprovalService } from '../src/lib/approvals/service'
 import { createPluginRegistry } from '../src/lib/plugins/registry'
 import { createTeamAdminService } from '../src/lib/rbac/adminService'
+import { createGithubGistCredentialService } from '../src/lib/gistCredentials'
+import { createGistService } from '../src/lib/gistService'
 import { createDesktopActorContext } from '../src/lib/runtime/trustedContext'
 import { vaultNotificationConfig } from '../src/lib/secrets/notificationConfig'
 import { resolveScriptEnvironment } from '../src/lib/secrets/runtime'
@@ -19,6 +21,7 @@ import { createWorkflowRepository } from '../src/lib/workflows/repository'
 import { parseWorkflowDefinition } from '../src/lib/workflows/schema'
 import { createWorkflowTriggerService } from '../src/lib/workflows/triggers'
 import { validateWorkflowGraph } from '../src/lib/workflows/graph'
+import { assertPublicSettingKey, filterPublicSettings } from '../src/lib/settingsVisibility'
 import { getDesktopWorkspaceLayout, ensureDesktopWorkspaceLayout, sanitizeWorkspaceName } from '../src/lib/workspaceLayout'
 import {
   deleteStorageProvider as deleteDesktopStorageProvider,
@@ -339,6 +342,40 @@ function getDesktopSecretVaultService() {
   }
 }
 
+function getDesktopGithubGistCredentialService() {
+  return createGithubGistCredentialService(prisma, getDesktopSecretVaultService())
+}
+
+async function readDesktopGithubGistSettings() {
+  const actor = await createDesktopActorContext(prisma)
+  const [status, setting] = await Promise.all([
+    getDesktopGithubGistCredentialService().getStatus(actor.workspaceId),
+    prisma.setting.findUnique({ where: { key: 'gist_sync_enabled' } }),
+  ])
+  return { configured: status.configured, syncEnabled: setting?.value === 'true' }
+}
+
+async function saveDesktopGithubGistSettings(payload: { token?: string; syncEnabled: boolean }) {
+  if (typeof payload.syncEnabled !== 'boolean') throw new Error('syncEnabled must be a boolean')
+  const actor = await createDesktopActorContext(prisma)
+  if (payload.token?.trim()) {
+    await getDesktopGithubGistCredentialService().saveToken(payload.token, actor)
+  }
+  await prisma.setting.upsert({
+    where: { key: 'gist_sync_enabled' },
+    update: { value: String(payload.syncEnabled) },
+    create: { key: 'gist_sync_enabled', value: String(payload.syncEnabled) },
+  })
+  return readDesktopGithubGistSettings()
+}
+
+async function clearDesktopGithubGistSettings() {
+  const actor = await createDesktopActorContext(prisma)
+  await getDesktopGithubGistCredentialService().clearToken(actor)
+  await prisma.setting.deleteMany({ where: { key: 'gist_sync_enabled' } })
+  return { configured: false, syncEnabled: false }
+}
+
 async function readSettingsMap(): Promise<Record<string, string>> {
   const settings = await prisma.setting.findMany()
   const result: Record<string, string> = {}
@@ -349,10 +386,11 @@ async function readSettingsMap(): Promise<Record<string, string>> {
     }
   }
 
-  return result
+  return filterPublicSettings(result)
 }
 
 async function saveSettingsMap(nextSettings: Record<string, string>): Promise<Record<string, string>> {
+  for (const key of Object.keys(nextSettings)) assertPublicSettingKey(key)
   await prisma.$transaction(
     Object.entries(nextSettings).map(([key, value]) =>
       prisma.setting.upsert({
@@ -1659,6 +1697,40 @@ async function saveLocalScript(payload: SaveScriptPayload): Promise<ScriptDto> {
   return serializeScriptRecord(updated)
 }
 
+async function syncLocalScriptToGist(scriptId: string) {
+  const actor = await createDesktopActorContext(prisma)
+  const script = await prisma.script.findUnique({ where: { id: scriptId }, include: { collection: true } })
+  if (!script || script.workspaceId !== actor.workspaceId) throw new Error('Script not found')
+  if (script.sourcePath && !script.sourceAvailable) throw new Error('Canonical script source is unavailable')
+
+  const filePath = resolveScriptPath(script)
+  if (!fs.existsSync(filePath)) throw new Error('Script file not found on disk')
+  const content = fs.readFileSync(filePath, 'utf8')
+  return createGistService(prisma, {
+    vault: getDesktopSecretVaultService(),
+    workspaceId: actor.workspaceId,
+    actorId: actor.actorId,
+  }).syncScriptToGist(script, content)
+}
+
+async function deleteLocalGist(scriptId: string) {
+  const actor = await createDesktopActorContext(prisma)
+  const script = await prisma.script.findUnique({ where: { id: scriptId } })
+  if (!script || script.workspaceId !== actor.workspaceId) throw new Error('Script not found')
+  if (script.gistId) {
+    await createGistService(prisma, {
+      vault: getDesktopSecretVaultService(),
+      workspaceId: actor.workspaceId,
+      actorId: actor.actorId,
+    }).deleteGistFromGitHub(script.gistId, actor.workspaceId)
+  }
+  await prisma.script.update({
+    where: { id: script.id },
+    data: { gistId: null, gistUrl: null, gistFilename: null, syncToGist: false },
+  })
+  return { ok: true }
+}
+
 async function moveLocalScript(payload: { scriptId: string; collectionId: string | null }) {
   const script = await prisma.script.findUnique({ where: { id: payload.scriptId } })
   if (!script) throw new Error('Script not found')
@@ -2513,6 +2585,18 @@ export function initDesktopRuntimeIpc() {
     return saveSettingsMap(settings)
   })
 
+  ipcMain.handle('scriptmanager:runtime:read-github-gist-settings', async () => {
+    return readDesktopGithubGistSettings()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:save-github-gist-settings', async (_event, payload: { token?: string; syncEnabled: boolean }) => {
+    return saveDesktopGithubGistSettings(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:clear-github-gist-settings', async () => {
+    return clearDesktopGithubGistSettings()
+  })
+
   ipcMain.handle('scriptmanager:runtime:list-secrets', async () => {
     const actor = await createDesktopActorContext(prisma)
     return getDesktopSecretVaultService().listSecrets(actor.workspaceId)
@@ -2680,6 +2764,14 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:save-script', async (_event, payload: SaveScriptPayload) => {
     return saveLocalScript(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:sync-gist', async (_event, scriptId: string) => {
+    return syncLocalScriptToGist(scriptId)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:delete-gist', async (_event, scriptId: string) => {
+    return deleteLocalGist(scriptId)
   })
 
   ipcMain.handle('scriptmanager:runtime:move-script', async (_event, payload: { scriptId: string; collectionId: string | null }) => {

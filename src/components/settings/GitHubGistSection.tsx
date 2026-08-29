@@ -1,44 +1,66 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
-import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { saveSettings } from '@/features/settings/settingsSlice'
-import { selectSettings, selectSettingsStatus } from '@/features/settings/selectors'
+import { clearGithubGistSettingsRuntime, readGithubGistSettingsRuntime, saveGithubGistSettingsRuntime } from '@/lib/gistCredentialsRuntimeClient'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Loader2, Save, Github } from 'lucide-react'
+import { Loader2, Save, Github, Trash2 } from 'lucide-react'
 
 export const GitHubGistSection = () => {
-    const dispatch = useAppDispatch()
-    const settings = useAppSelector(selectSettings)
-    const status = useAppSelector(selectSettingsStatus)
-
     const [githubToken, setGithubToken] = useState('')
+    const [tokenConfigured, setTokenConfigured] = useState(false)
     const [gistSyncEnabled, setGistSyncEnabled] = useState(false)
     const [isSaving, setIsSaving] = useState(false)
+    const [isLoading, setIsLoading] = useState(true)
 
     useEffect(() => {
-        if (status === 'succeeded') {
-            setGithubToken(settings['github_token'] || '')
-            setGistSyncEnabled(settings['gist_sync_enabled'] === 'true')
-        }
-    }, [settings, status])
+        let active = true
+        void readGithubGistSettingsRuntime().then((settings) => {
+            if (!active) return
+            setTokenConfigured(settings.configured)
+            setGistSyncEnabled(settings.syncEnabled)
+        }).catch((err) => {
+            console.error(err)
+            if (active) toast.error('Failed to load GitHub settings')
+        }).finally(() => {
+            if (active) setIsLoading(false)
+        })
+        return () => { active = false }
+    }, [])
 
     const handleSave = async () => {
         setIsSaving(true)
         try {
-            await dispatch(saveSettings({
-                'github_token': githubToken,
-                'gist_sync_enabled': String(gistSyncEnabled),
-            })).unwrap()
+            const result = await saveGithubGistSettingsRuntime({
+                token: githubToken.trim() || undefined,
+                syncEnabled: gistSyncEnabled,
+            })
+            setTokenConfigured(result.configured)
+            setGithubToken('')
             toast.success('GitHub settings saved')
         } catch (err) {
             console.error(err)
             toast.error('Failed to save settings')
+        } finally {
+            setIsSaving(false)
+        }
+    }
+
+    const handleClear = async () => {
+        setIsSaving(true)
+        try {
+            const result = await clearGithubGistSettingsRuntime()
+            setTokenConfigured(result.configured)
+            setGistSyncEnabled(result.syncEnabled)
+            setGithubToken('')
+            toast.success('GitHub token cleared')
+        } catch (err) {
+            console.error(err)
+            toast.error('Failed to clear GitHub token')
         } finally {
             setIsSaving(false)
         }
@@ -64,10 +86,11 @@ export const GitHubGistSection = () => {
                         <Input
                             id="github_token"
                             type="password"
-                            placeholder="ghp_..."
+                            placeholder={tokenConfigured ? 'Token is stored securely' : 'ghp_...'}
                             value={githubToken}
                             onChange={(e) => setGithubToken(e.target.value)}
                         />
+                        {tokenConfigured && <p className="text-xs text-emerald-600">A GitHub token is configured in the encrypted secret vault.</p>}
                         <p className="text-xs text-muted-foreground">
                             Required scope: <code>gist</code>. Generate at{' '}
                             <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer" className="underline text-accent-brand">
@@ -91,10 +114,13 @@ export const GitHubGistSection = () => {
                     </div>
 
                     <div className="flex justify-end">
-                        <Button onClick={handleSave} disabled={isSaving}>
-                            {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                        <div className="flex gap-2">
+                            {tokenConfigured && <Button type="button" variant="outline" onClick={handleClear} disabled={isSaving}><Trash2 className="mr-2 h-4 w-4" />Clear token</Button>}
+                            <Button onClick={handleSave} disabled={isSaving || isLoading}>
+                                {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                             Save Settings
-                        </Button>
+                            </Button>
+                        </div>
                     </div>
                 </CardContent>
             </Card>

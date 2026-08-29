@@ -14,6 +14,8 @@ import {
     openDesktopScriptsFolder,
     readDesktopScript,
     saveDesktopScript,
+    syncDesktopScriptToGist,
+    deleteDesktopGist,
     updateDesktopCollection,
 } from '@/lib/scriptsRuntimeClient'
 
@@ -320,7 +322,8 @@ export const deleteTemplate = createAsyncThunk('scripts/deleteTemplate', async (
 })
 
 export const deleteScript = createAsyncThunk('scripts/deleteScript', async ({ id, deleteGist }: { id: string; deleteGist: boolean }) => {
-    if (isDesktopScriptsRuntimeAvailable() && !deleteGist) {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        if (deleteGist) await deleteDesktopGist(id)
         await deleteDesktopScript(id)
         return id
     }
@@ -329,8 +332,17 @@ export const deleteScript = createAsyncThunk('scripts/deleteScript', async ({ id
 })
 
 export const saveScript = createAsyncThunk('scripts/saveScript', async (data: { id: string; name: string; content: string; sync_to_gist?: boolean; language?: string; interpreter?: string | null; parameters?: ScriptParameter[]; timeout_ms?: number | null; skipGist?: boolean }) => {
-    if (isDesktopScriptsRuntimeAvailable() && (!data.sync_to_gist || data.skipGist)) {
-        return saveDesktopScript(data)
+    if (isDesktopScriptsRuntimeAvailable()) {
+        const saved = await saveDesktopScript(data)
+        if (data.sync_to_gist && !data.skipGist) {
+            try {
+                const gist = await syncDesktopScriptToGist(data.id)
+                return { ...saved, ...gist, sync_to_gist: true }
+            } catch (error) {
+                console.warn('[Gist] Desktop sync failed after local save:', error)
+            }
+        }
+        return saved
     }
     const response = await axios.post('/api/scripts', data)
     return response.data
@@ -387,11 +399,18 @@ export const deleteSchedule = createAsyncThunk('scripts/deleteSchedule', async (
 })
 
 export const forceSyncGist = createAsyncThunk('scripts/forceSyncGist', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return { scriptId, ...(await syncDesktopScriptToGist(scriptId)) }
+    }
     const response = await axios.post(`/api/scripts/${scriptId}/gist/sync`)
     return { scriptId, ...response.data }
 })
 
 export const deleteGist = createAsyncThunk('scripts/deleteGist', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        await deleteDesktopGist(scriptId)
+        return scriptId
+    }
     await axios.delete(`/api/scripts/${scriptId}/gist`)
     return scriptId
 })

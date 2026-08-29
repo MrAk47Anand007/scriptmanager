@@ -1,20 +1,19 @@
+import type { PrismaClient } from '@prisma/client'
 import { prisma } from '@/lib/db'
+import { createGithubGistCredentialService } from './gistCredentials'
+import { createSecretVaultService } from './secrets/service'
+import { createServerSecretStore } from './secrets/serverStore'
 
 interface ScriptForGist {
   id: string
   name: string
+  workspaceId?: string
   gistId?: string | null
   gistFilename?: string | null
   collection?: { name: string } | null
 }
 
-async function getGithubToken(): Promise<string> {
-  const setting = await prisma.setting.findUnique({ where: { key: 'github_token' } })
-  if (!setting?.value) {
-    throw new Error('No GitHub token configured. Please set your GitHub token in Settings.')
-  }
-  return setting.value
-}
+type SecretVaultService = ReturnType<typeof createSecretVaultService>
 
 function calculateGistFilename(scriptName: string, collectionName?: string): string {
   if (collectionName) {
@@ -24,84 +23,96 @@ function calculateGistFilename(scriptName: string, collectionName?: string): str
   return scriptName
 }
 
-export async function syncScriptToGist(script: ScriptForGist, content: string): Promise<{ gist_id: string; gist_url: string; gist_filename: string }> {
-  const token = await getGithubToken()
-  const newFilename = calculateGistFilename(script.name, script.collection?.name ?? undefined)
-  const oldFilename = script.gistFilename
+export function createGistService(
+  database: PrismaClient = prisma,
+  options: { vault?: SecretVaultService; workspaceId?: string; actorId?: string } = {},
+) {
+  const vault = options.vault ?? createSecretVaultService(database, createServerSecretStore())
+  const credentials = createGithubGistCredentialService(database, vault)
 
-  const headers: Record<string, string> = {
-    'Authorization': `token ${token}`,
-    'Accept': 'application/vnd.github.v3+json',
-    'Content-Type': 'application/json',
-    'User-Agent': 'ScriptManager/1.0'
-  }
-
-  let resp: Response
-
-  if (script.gistId) {
-    // PATCH existing gist
-    const files: Record<string, { content: string } | null> = {
-      [newFilename]: { content }
-    }
-    if (oldFilename && oldFilename !== newFilename) {
-      files[oldFilename] = null // Delete old filename in gist
-    }
-
-    resp = await fetch(`https://api.github.com/gists/${script.gistId}`, {
-      method: 'PATCH',
-      headers,
-      body: JSON.stringify({
-        description: `Script: ${script.name}`,
-        files
-      })
-    })
-  } else {
-    // POST new gist
-    console.log('[Gist] Creating new gist with files:', { [newFilename]: { content } })
-    resp = await fetch('https://api.github.com/gists', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        description: `Script: ${script.name}`,
-        public: false,
-        files: { [newFilename]: { content } }
-      })
+  async function getGithubToken(script: ScriptForGist) {
+    return credentials.resolveToken({
+      workspaceId: script.workspaceId ?? options.workspaceId ?? 'default',
+      actorId: options.actorId,
     })
   }
 
-  if (!resp.ok) {
-    const errText = await resp.text()
-    throw new Error(`GitHub Gist API error (${resp.status}): ${errText}`)
+  async function syncScriptToGist(script: ScriptForGist, content: string): Promise<{ gist_id: string; gist_url: string; gist_filename: string }> {
+    const token = await getGithubToken(script)
+    const newFilename = calculateGistFilename(script.name, script.collection?.name ?? undefined)
+    const oldFilename = script.gistFilename
+
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/vnd.github.v3+json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'ScriptManager/1.0',
+    }
+
+    let resp: Response
+
+    if (script.gistId) {
+      const files: Record<string, { content: string } | null> = {
+        [newFilename]: { content },
+      }
+      if (oldFilename && oldFilename !== newFilename) {
+        files[oldFilename] = null
+      }
+
+      resp = await fetch(`https://api.github.com/gists/${encodeURIComponent(script.gistId)}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ description: `Script: ${script.name}`, files }),
+      })
+    } else {
+      resp = await fetch('https://api.github.com/gists', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          description: `Script: ${script.name}`,
+          public: false,
+          files: { [newFilename]: { content } },
+        }),
+      })
+    }
+
+    if (!resp.ok) {
+      const errText = (await resp.text()).slice(0, 500)
+      throw new Error(`GitHub Gist API error (${resp.status}): ${errText}`)
+    }
+
+    const data = await resp.json() as { id: string; html_url: string }
+    await database.script.update({
+      where: { id: script.id },
+      data: { gistId: data.id, gistUrl: data.html_url, gistFilename: newFilename, syncToGist: true },
+    })
+
+    return { gist_id: data.id, gist_url: data.html_url, gist_filename: newFilename }
   }
 
-  const data = await resp.json() as { id: string; html_url: string }
+  async function deleteGistFromGitHub(gistId: string, workspaceId = options.workspaceId ?? 'default'): Promise<void> {
+    const token = await credentials.resolveToken({ workspaceId, actorId: options.actorId })
+    const resp = await fetch(`https://api.github.com/gists/${encodeURIComponent(gistId)}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'ScriptManager/1.0',
+      },
+    })
 
-  await prisma.script.update({
-    where: { id: script.id },
-    data: {
-      gistId: data.id,
-      gistUrl: data.html_url,
-      gistFilename: newFilename,
-      syncToGist: true
+    if (!resp.ok && resp.status !== 404) {
+      throw new Error(`Failed to delete Gist: ${resp.status} ${resp.statusText}`)
     }
-  })
+  }
 
-  return { gist_id: data.id, gist_url: data.html_url, gist_filename: newFilename }
+  return { syncScriptToGist, deleteGistFromGitHub }
 }
 
-export async function deleteGistFromGitHub(gistId: string): Promise<void> {
-  const token = await getGithubToken()
+export async function syncScriptToGist(script: ScriptForGist, content: string) {
+  return createGistService().syncScriptToGist(script, content)
+}
 
-  const resp = await fetch(`https://api.github.com/gists/${gistId}`, {
-    method: 'DELETE',
-    headers: {
-      'Authorization': `token ${token}`,
-      'Accept': 'application/vnd.github.v3+json',
-      'User-Agent': 'ScriptManager/1.0'
-    }
-  })
-
-  if (!resp.ok && resp.status !== 404) {
-    throw new Error(`Failed to delete Gist: ${resp.status} ${resp.statusText}`)
-  }
+export async function deleteGistFromGitHub(gistId: string) {
+  return createGistService().deleteGistFromGitHub(gistId)
 }

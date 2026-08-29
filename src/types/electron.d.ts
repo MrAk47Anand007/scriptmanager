@@ -51,6 +51,9 @@ declare global {
         getBootstrapState: () => Promise<{ scripts: unknown[]; collections: unknown[]; settings: Record<string, string> }>
         readSettings: () => Promise<Record<string, string>>
         saveSettings: (payload: Record<string, string>) => Promise<Record<string, string>>
+        readGithubGistSettings: () => Promise<{ configured: boolean; syncEnabled: boolean }>
+        saveGithubGistSettings: (payload: { token?: string; syncEnabled: boolean }) => Promise<{ configured: boolean; syncEnabled: boolean }>
+        clearGithubGistSettings: () => Promise<{ configured: boolean; syncEnabled: boolean }>
         listSecrets: () => Promise<unknown[]>
         createSecret: (payload: { name: string; plaintext: string; description?: string; scope?: string }) => Promise<unknown>
         rotateSecret: (payload: { id: string; plaintext?: string; resource?: string; reason?: string }) => Promise<unknown>
@@ -86,6 +89,8 @@ declare global {
         readScript: (scriptId: string) => Promise<unknown>
         createScript: (payload: unknown) => Promise<unknown>
         saveScript: (payload: unknown) => Promise<unknown>
+        syncGist: (scriptId: string) => Promise<{ gist_id: string; gist_url: string; gist_filename: string }>
+        deleteGist: (scriptId: string) => Promise<{ ok: boolean }>
         moveScript?: (payload: { scriptId: string; collectionId: string | null }) => Promise<unknown>
         deleteScript: (payload: { id: string }) => Promise<string>
         duplicateScript: (scriptId: string) => Promise<unknown>

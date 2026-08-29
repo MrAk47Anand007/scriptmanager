@@ -46,6 +46,12 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     readSettings: () => ipcRenderer.invoke('scriptmanager:runtime:read-settings') as Promise<Record<string, string>>,
     saveSettings: (payload: Record<string, string>) =>
       ipcRenderer.invoke('scriptmanager:runtime:save-settings', payload) as Promise<Record<string, string>>,
+    readGithubGistSettings: () =>
+      ipcRenderer.invoke('scriptmanager:runtime:read-github-gist-settings') as Promise<{ configured: boolean; syncEnabled: boolean }>,
+    saveGithubGistSettings: (payload: { token?: string; syncEnabled: boolean }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:save-github-gist-settings', payload) as Promise<{ configured: boolean; syncEnabled: boolean }>,
+    clearGithubGistSettings: () =>
+      ipcRenderer.invoke('scriptmanager:runtime:clear-github-gist-settings') as Promise<{ configured: boolean; syncEnabled: boolean }>,
     listSecrets: () => ipcRenderer.invoke('scriptmanager:runtime:list-secrets') as Promise<unknown[]>,
     createSecret: (payload: { name: string; plaintext: string; description?: string; scope?: string }) =>
       ipcRenderer.invoke('scriptmanager:runtime:create-secret', payload) as Promise<unknown>,
@@ -96,6 +102,8 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     readScript: (scriptId: string) => ipcRenderer.invoke('scriptmanager:runtime:read-script', scriptId) as Promise<unknown>,
     createScript: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:create-script', payload) as Promise<unknown>,
     saveScript: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-script', payload) as Promise<unknown>,
+    syncGist: (scriptId: string) => ipcRenderer.invoke('scriptmanager:runtime:sync-gist', scriptId) as Promise<{ gist_id: string; gist_url: string; gist_filename: string }>,
+    deleteGist: (scriptId: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-gist', scriptId) as Promise<{ ok: boolean }>,
     moveScript: (payload: { scriptId: string; collectionId: string | null }) =>
       ipcRenderer.invoke('scriptmanager:runtime:move-script', payload) as Promise<unknown>,
     deleteScript: (payload: { id: string }) => ipcRenderer.invoke('scriptmanager:runtime:delete-script', payload) as Promise<string>,

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertPublicSettingKey, filterPublicSettings } from '@/lib/settingsVisibility'
 
 import { cache } from '@/lib/cache'
 
@@ -18,13 +19,15 @@ export async function GET() {
     }
   }
 
-  await cache.set('settings', result, 60 * 60) // Cache settings for 1 hour
+  const publicSettings = filterPublicSettings(result)
+  await cache.set('settings', publicSettings, 60 * 60) // Cache settings for 1 hour
 
-  return NextResponse.json(result)
+  return NextResponse.json(publicSettings)
 }
 
 export async function POST(req: Request) {
   const data = await req.json() as Record<string, string>
+  for (const key of Object.keys(data)) assertPublicSettingKey(key)
   await cache.del('settings') // Invalidate settings cache
 
 
