@@ -64,11 +64,14 @@ import {
     DEFAULT_TERMINAL_SESSION_ID,
     hasDesktopScriptsRuntime,
     runScriptInDesktopTerminal,
+    saveCanonicalRecoveryDraft,
     setDesktopTerminalContext,
     startBrowserRun,
     startDesktopLocalRun,
+    subscribeToCanonicalFolderChanges,
     subscribeToDesktopBuildEvents,
 } from '@/lib/scriptsRuntimeClient';
+import { getCanonicalFolderReloadAction } from '@/lib/canonicalFolderReload';
 
 const LANGUAGE_OPTIONS = [
     { value: 'python', label: 'Python' },
@@ -429,6 +432,7 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
     const [activeTerminalSessionId, setActiveTerminalSessionId] = useState(DEFAULT_TERMINAL_SESSION_ID);
     const [scriptContent, setScriptContent] = useState('');
     const [buildOutput, setBuildOutput] = useState('');
+    const [canonicalFolderNotice, setCanonicalFolderNotice] = useState<string | null>(null);
 
     // Parameters state
     const [scriptParameters, setScriptParameters] = useState<ScriptParameter[]>([]);
@@ -498,6 +502,38 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
     useEffect(() => {
         setScriptContent(activeScriptContent || '');
     }, [activeScriptId, activeScriptContent]);
+
+    useEffect(() => {
+        if (!isDesktopRuntime) return;
+
+        return subscribeToCanonicalFolderChanges((change) => {
+            const action = getCanonicalFolderReloadAction({
+                change,
+                activeScriptId,
+                activeSourcePath: activeScript?.source_path,
+                editorContent: scriptContent,
+                persistedContent: activeScript?.content || '',
+            });
+            if (action === 'ignore' || !activeScriptId) return;
+
+            if (action === 'recover' && activeScript?.source_path) {
+                void saveCanonicalRecoveryDraft({
+                    scriptId: activeScriptId,
+                    sourcePath: activeScript.source_path,
+                    sourceRevision: activeScript.updated_at,
+                    content: scriptContent,
+                }).then(() => {
+                    setCanonicalFolderNotice('External change detected. Your unsaved editor buffer was saved as a recovery draft.')
+                }).catch(() => {
+                    setCanonicalFolderNotice('External change detected, but the recovery draft could not be saved.')
+                })
+            } else {
+                setCanonicalFolderNotice('External change detected. Reloading the canonical script file.')
+            }
+
+            dispatch(fetchScriptContent(activeScriptId));
+        });
+    }, [activeScript, activeScriptId, dispatch, isDesktopRuntime, scriptContent]);
 
     // Also update language + params when active script updates (after fetch)
     useEffect(() => {
@@ -1303,6 +1339,12 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
                             )}>
                                 <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
                                 <span>{activeActionFeedback.text}</span>
+                            </div>
+                        )}
+                        {canonicalFolderNotice && (
+                            <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-[11px] text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
+                                <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+                                <span>{canonicalFolderNotice}</span>
                             </div>
                         )}
                         </>
