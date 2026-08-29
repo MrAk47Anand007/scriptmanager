@@ -45,6 +45,13 @@ type CanonicalRecoveryDraftPayload = {
   content: string
 }
 
+export type CanonicalFolderChange = {
+  type: 'changed' | 'deleted'
+  collectionId: string
+  sourcePath: string
+  scriptId?: string
+}
+
 type DesktopScriptRecord = {
   id: string
   name: string
@@ -279,6 +286,10 @@ export async function saveCanonicalRecoveryDraft(payload: CanonicalRecoveryDraft
 export async function discardCanonicalRecoveryDraft(draftId: string) {
   if (!window.scriptManagerDesktop?.runtime?.discardCanonicalRecoveryDraft) throw new Error('Desktop runtime unavailable')
   return window.scriptManagerDesktop.runtime.discardCanonicalRecoveryDraft(draftId)
+}
+
+export function subscribeToCanonicalFolderChanges(listener: (event: CanonicalFolderChange) => void): () => void {
+  return window.scriptManagerDesktop?.runtime?.onCanonicalFolderChange?.(listener) ?? (() => undefined)
 }
 
 export async function warmScriptsTerminal(sessionId = DEFAULT_TERMINAL_SESSION_ID): Promise<void> {

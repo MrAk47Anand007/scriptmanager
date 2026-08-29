@@ -47,7 +47,7 @@ import {
   sendApiRequest as sendDesktopApiRequest,
 } from './apiRuntime'
 import { createOsBackedSecretStore } from './secretStore'
-import { createCanonicalFolderWatcher, getCanonicalFolderAvailability, writeCanonicalFile } from './canonicalFolderRuntime'
+import { createCanonicalFolderWatcher, getCanonicalFolderAvailability, type CanonicalFolderChange, writeCanonicalFile } from './canonicalFolderRuntime'
 import { createRecoveryDraftStore } from './recoveryDraftStore'
 import { approveRemoteExecution, rejectRemoteExecution } from '../src/lib/ops/remoteExecutionApprovalService'
 import {
@@ -247,9 +247,24 @@ type CollectionRecord = {
 
 let canonicalFolderWatcher: ReturnType<typeof createCanonicalFolderWatcher> | null = null
 
+async function forwardCanonicalFolderChange(change: CanonicalFolderChange) {
+  const script = await prisma.script.findFirst({
+    where: { collectionId: change.collectionId, sourcePath: change.sourcePath },
+    select: { id: true },
+  })
+  const payload = { ...change, scriptId: script?.id }
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send('scriptmanager:runtime:canonical-folder-change', payload)
+    }
+  }
+}
+
 function getCanonicalFolderWatcher() {
   canonicalFolderWatcher ??= createCanonicalFolderWatcher({
-    onChange: () => undefined,
+    onChange: (change) => {
+      void forwardCanonicalFolderChange(change)
+    },
   })
   return canonicalFolderWatcher
 }

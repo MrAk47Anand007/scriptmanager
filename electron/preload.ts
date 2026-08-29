@@ -104,6 +104,21 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     saveCanonicalRecoveryDraft: (payload: { scriptId: string; sourcePath: string; sourceRevision: string; content: string }) =>
       ipcRenderer.invoke('scriptmanager:runtime:save-canonical-recovery-draft', payload) as Promise<unknown>,
     discardCanonicalRecoveryDraft: (draftId: string) => ipcRenderer.invoke('scriptmanager:runtime:discard-canonical-recovery-draft', draftId) as Promise<void>,
+    onCanonicalFolderChange: (listener: (event: {
+      type: 'changed' | 'deleted'
+      collectionId: string
+      sourcePath: string
+      scriptId?: string
+    }) => void) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+        type: 'changed' | 'deleted'
+        collectionId: string
+        sourcePath: string
+        scriptId?: string
+      }) => listener(payload)
+      ipcRenderer.on('scriptmanager:runtime:canonical-folder-change', wrapped)
+      return () => ipcRenderer.removeListener('scriptmanager:runtime:canonical-folder-change', wrapped)
+    },
     scanPcScripts: (payload: { roots: string[]; extensions: string[] }) =>
       ipcRenderer.invoke('scriptmanager:runtime:scan-pc-scripts', payload) as Promise<unknown>,
     importScannedScripts: (payload: { files: { path: string }[]; mode: 'misc' | 'by-folder'; rootForGrouping?: string }) =>

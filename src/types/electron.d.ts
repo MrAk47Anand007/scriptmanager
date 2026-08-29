@@ -93,6 +93,12 @@ declare global {
         listCanonicalRecoveryDrafts?: (scriptId: string) => Promise<unknown[]>
         saveCanonicalRecoveryDraft?: (payload: { scriptId: string; sourcePath: string; sourceRevision: string; content: string }) => Promise<unknown>
         discardCanonicalRecoveryDraft?: (draftId: string) => Promise<void>
+        onCanonicalFolderChange?: (listener: (event: {
+          type: 'changed' | 'deleted'
+          collectionId: string
+          sourcePath: string
+          scriptId?: string
+        }) => void) => () => void
         scanPcScripts?: (payload: { roots: string[]; extensions: string[] }) => Promise<{
           files: Array<{ path: string; name: string; ext: string; sizeBytes: number; modifiedAt: string }>
           truncated: boolean

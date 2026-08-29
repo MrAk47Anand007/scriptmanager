@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { discardCanonicalRecoveryDraft, listCanonicalRecoveryDrafts, rescanCanonicalFolder, saveCanonicalRecoveryDraft } from '@/lib/scriptsRuntimeClient'
+import {
+  discardCanonicalRecoveryDraft,
+  listCanonicalRecoveryDrafts,
+  rescanCanonicalFolder,
+  saveCanonicalRecoveryDraft,
+  subscribeToCanonicalFolderChanges,
+} from '@/lib/scriptsRuntimeClient'
 
 afterEach(() => {
   delete window.scriptManagerDesktop
@@ -28,5 +34,31 @@ describe('desktop canonical folder bridge', () => {
     await expect(listCanonicalRecoveryDrafts('script-1')).resolves.toEqual([])
     await expect(saveCanonicalRecoveryDraft({ scriptId: 'script-1', sourcePath: '/scripts/one.py', sourceRevision: '1:1', content: 'draft' })).resolves.toMatchObject({ id: 'draft-1' })
     await expect(discardCanonicalRecoveryDraft('draft-1')).resolves.toBeUndefined()
+  })
+
+  it('subscribes to canonical folder changes through preload and cleans up the listener', () => {
+    const unsubscribe = vi.fn()
+    const subscribe = vi.fn((listener: (event: unknown) => void) => {
+      listener({ type: 'changed', collectionId: 'collection-1', sourcePath: '/scripts/one.py', scriptId: 'script-1' })
+      return unsubscribe
+    })
+    const listener = vi.fn()
+    window.scriptManagerDesktop = {
+      runtime: {
+        onCanonicalFolderChange: subscribe,
+      },
+    } as never
+
+    const stop = subscribeToCanonicalFolderChanges(listener)
+
+    expect(subscribe).toHaveBeenCalledOnce()
+    expect(listener).toHaveBeenCalledWith({
+      type: 'changed',
+      collectionId: 'collection-1',
+      sourcePath: '/scripts/one.py',
+      scriptId: 'script-1',
+    })
+    stop()
+    expect(unsubscribe).toHaveBeenCalledOnce()
   })
 })
