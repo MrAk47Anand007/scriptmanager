@@ -64,6 +64,7 @@ import {
 import { createOsBackedSecretStore } from './secretStore'
 import { createCanonicalFolderWatcher, getCanonicalFolderAvailability, type CanonicalFolderChange, writeCanonicalFile } from './canonicalFolderRuntime'
 import { createRecoveryDraftStore } from './recoveryDraftStore'
+import { normalizeTerminalSessionId, parseScriptExecutionPayload, parseTerminalInputPayload, parseTerminalResizePayload } from '../src/lib/runtime/desktopIpcPayloads'
 import { approveRemoteExecution, rejectRemoteExecution } from '../src/lib/ops/remoteExecutionApprovalService'
 import {
   assignCollectionToProject as assignDesktopCollectionToProject,
@@ -953,11 +954,6 @@ function resolveWindow(event: IpcMainInvokeEvent): BrowserWindow {
   return window
 }
 
-function normalizeTerminalSessionId(sessionId?: string | null): string {
-  const trimmed = sessionId?.trim()
-  return trimmed || DEFAULT_TERMINAL_SESSION_ID
-}
-
 function getSessionTerminalShellCandidates() {
   const isWindows = process.platform === 'win32'
   if (isWindows) {
@@ -1059,8 +1055,10 @@ function ensureTerminal(window: BrowserWindow, sessionId = DEFAULT_TERMINAL_SESS
 }
 
 async function getScriptRecord(scriptId: string) {
-  return prisma.script.findUnique({
-    where: { id: scriptId },
+  if (typeof scriptId !== 'string' || !scriptId.trim()) throw new Error('Script ID is required')
+  const actor = await createDesktopActorContext(prisma)
+  return prisma.script.findFirst({
+    where: { id: scriptId, workspaceId: actor.workspaceId },
     select: {
       id: true,
       name: true,
@@ -1632,8 +1630,10 @@ export async function persistDesktopAgentEvent(sessionId: string, event: unknown
 }
 
 async function readScript(scriptId: string): Promise<ScriptContentDto> {
-  const script = await prisma.script.findUnique({
-    where: { id: scriptId },
+  if (typeof scriptId !== 'string' || !scriptId.trim()) throw new Error('Script ID is required')
+  const actor = await createDesktopActorContext(prisma)
+  const script = await prisma.script.findFirst({
+    where: { id: scriptId, workspaceId: actor.workspaceId },
     select: {
       id: true,
       name: true,
@@ -2852,14 +2852,15 @@ function terminateProcessTree(child: ReturnType<typeof spawn>) {
 }
 
 async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
-  const script = await getScriptRecord(payload.scriptId)
+  const parsedPayload = parseScriptExecutionPayload(payload)
+  const script = await getScriptRecord(parsedPayload.scriptId)
   if (!script) {
     throw new Error('Script not found')
   }
 
   recordLastRunScript(script.id)
   const runStartedAt = Date.now()
-  const buildId = payload.buildId?.trim() || crypto.randomUUID()
+  const buildId = parsedPayload.buildId || crypto.randomUUID()
   const logFile = getBuildLogPath(script.filename, buildId)
 
   // Pull-on-run: refresh cloud-bound scripts before executing; remote failures
@@ -2916,8 +2917,8 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
   const scriptEnv = await resolveScriptEnvironment(prisma, script.id, envVars, getDesktopSecretVaultService())
 
   const paramEnv: Record<string, string> = {}
-  if (payload.paramValues) {
-    for (const [key, value] of Object.entries(payload.paramValues)) {
+  if (parsedPayload.paramValues) {
+    for (const [key, value] of Object.entries(parsedPayload.paramValues)) {
       paramEnv[key.replace(/[^a-zA-Z0-9_]/g, '_')] = String(value)
     }
   }
@@ -3758,17 +3759,17 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:terminal-input', async (event, payload: { sessionId?: string; data: string }) => {
     const window = resolveWindow(event)
-    const terminal = ensureTerminal(window, normalizeTerminalSessionId(payload.sessionId))
-    terminal.terminal.write(payload.data)
+    const parsedPayload = parseTerminalInputPayload(payload)
+    const terminal = ensureTerminal(window, parsedPayload.sessionId)
+    terminal.terminal.write(parsedPayload.data)
     return { ok: true }
   })
 
   ipcMain.handle('scriptmanager:runtime:terminal-resize', async (event, payload: { sessionId?: string; cols: number; rows: number }) => {
     const window = resolveWindow(event)
-    const terminal = ensureTerminal(window, normalizeTerminalSessionId(payload.sessionId))
-    if (payload.cols > 0 && payload.rows > 0) {
-      terminal.terminal.resize(payload.cols, payload.rows)
-    }
+    const parsedPayload = parseTerminalResizePayload(payload)
+    const terminal = ensureTerminal(window, parsedPayload.sessionId)
+    terminal.terminal.resize(parsedPayload.cols, parsedPayload.rows)
     return { ok: true }
   })
 
@@ -3787,6 +3788,9 @@ export function initDesktopRuntimeIpc() {
   ipcMain.handle('scriptmanager:runtime:set-terminal-context', async (event, payload: { sessionId?: string; scriptId: string | null }) => {
     const window = resolveWindow(event)
     const runtime = getRuntime(window.id)
+    if (!payload || typeof payload !== 'object' || (payload.scriptId !== null && typeof payload.scriptId !== 'string')) {
+      throw new Error('Terminal context payload is invalid')
+    }
     const sessionId = normalizeTerminalSessionId(payload.sessionId)
     const session = runtime.terminalSessions.get(sessionId)
 
@@ -3814,7 +3818,8 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:run-in-terminal', async (event, payload: RunScriptInTerminalPayload) => {
     const window = resolveWindow(event)
-    const script = await getScriptRecord(payload.scriptId)
+    const parsedPayload = parseScriptExecutionPayload(payload)
+    const script = await getScriptRecord(parsedPayload.scriptId)
     if (!script) {
       throw new Error('Script not found')
     }
@@ -3828,7 +3833,7 @@ export function initDesktopRuntimeIpc() {
       language: script.language,
       interpreter: (script.collection?.pythonToolchainEnabled ? (script.collection.pythonInterpreterPath ?? context.interpreterPath) : null)
         ?? script.interpreter,
-      paramValues: payload.paramValues,
+      paramValues: parsedPayload.paramValues,
     })
     terminal.terminal.write(`${command}\r`)
     return { ok: true }
@@ -3836,7 +3841,7 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:run-script', async (event, payload: RunScriptPayload) => {
     const window = resolveWindow(event)
-    return startLocalRun(window, payload)
+    return startLocalRun(window, parseScriptExecutionPayload(payload))
   })
 
   ipcMain.handle('scriptmanager:runtime:cancel-run', async (event, buildId: string) => {
