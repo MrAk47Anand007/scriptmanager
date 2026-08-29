@@ -75,7 +75,7 @@ type TerminalEvent =
 type BuildEvent =
   | { type: 'started'; buildId: string }
   | { type: 'line'; buildId: string; line: string }
-  | { type: 'done'; buildId: string; status: 'success' | 'failure' | 'timeout'; exitCode: number }
+  | { type: 'done'; buildId: string; status: 'success' | 'failure' | 'timeout' | 'cancelled'; exitCode: number }
   | { type: 'error'; buildId: string; message: string }
 
 type RunScriptPayload = {
@@ -312,6 +312,7 @@ type WindowRuntime = {
   terminalSessions: Map<string, TerminalSessionRuntime>
   pendingTerminalContexts: Map<string, ScriptExecutionContext>
   activeBuilds: Map<string, ReturnType<typeof spawn>>
+  cancelledBuilds: Set<string>
 }
 
 const prisma = new PrismaClient({
@@ -836,6 +837,7 @@ function getRuntime(windowId: number): WindowRuntime {
       terminalSessions: new Map(),
       pendingTerminalContexts: new Map(),
       activeBuilds: new Map(),
+      cancelledBuilds: new Set(),
     }
     windowRuntimes.set(windowId, runtime)
   }
@@ -2281,7 +2283,7 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
     runtime.activeBuilds.delete(buildId)
     logStream.end()
     const exitCode = code ?? -1
-    const status = timedOut ? 'timeout' : (exitCode === 0 ? 'success' : 'failure')
+    const status = timedOut ? 'timeout' : (runtime.cancelledBuilds.delete(buildId) ? 'cancelled' : (exitCode === 0 ? 'success' : 'failure'))
     await prisma.build.update({
       where: { id: buildId },
       data: {
@@ -2341,7 +2343,8 @@ function destroyWindowRuntime(windowId: number) {
     } catch {}
   }
 
-  runtime.activeBuilds.clear()
+    runtime.activeBuilds.clear()
+    runtime.cancelledBuilds.clear()
   runtime.terminalSessions.clear()
   windowRuntimes.delete(windowId)
 }
@@ -2920,5 +2923,15 @@ export function initDesktopRuntimeIpc() {
   ipcMain.handle('scriptmanager:runtime:run-script', async (event, payload: RunScriptPayload) => {
     const window = resolveWindow(event)
     return startLocalRun(window, payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:cancel-run', async (event, buildId: string) => {
+    const window = resolveWindow(event)
+    const runtime = getRuntime(window.id)
+    const child = runtime.activeBuilds.get(buildId)
+    if (!child) return { ok: false }
+    runtime.cancelledBuilds.add(buildId)
+    child.kill('SIGTERM')
+    return { ok: true }
   })
 }

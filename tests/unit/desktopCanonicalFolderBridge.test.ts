@@ -5,6 +5,7 @@ import {
   discardCanonicalRecoveryDraft,
   listCanonicalRecoveryDrafts,
   rescanCanonicalFolder,
+  cancelDesktopRun,
   saveCanonicalRecoveryDraft,
   subscribeToCanonicalFolderChanges,
 } from '@/lib/scriptsRuntimeClient'
@@ -60,5 +61,13 @@ describe('desktop canonical folder bridge', () => {
     })
     stop()
     expect(unsubscribe).toHaveBeenCalledOnce()
+  })
+
+  it('cancels a desktop run through preload', async () => {
+    const cancel = vi.fn().mockResolvedValue({ ok: true })
+    window.scriptManagerDesktop = { runtime: { cancelRun: cancel } } as never
+
+    await expect(cancelDesktopRun('build-1')).resolves.toEqual({ ok: true })
+    expect(cancel).toHaveBeenCalledWith('build-1')
   })
 })

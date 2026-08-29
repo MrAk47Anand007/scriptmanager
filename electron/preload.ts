@@ -132,6 +132,7 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
       ipcRenderer.invoke('scriptmanager:runtime:run-in-terminal', payload) as Promise<{ ok: boolean }>,
     runScript: (payload: { scriptId: string; paramValues?: Record<string, string>; buildId?: string }) =>
       ipcRenderer.invoke('scriptmanager:runtime:run-script', payload) as Promise<{ buildId: string; status: 'started' | 'failed' }>,
+    cancelRun: (buildId: string) => ipcRenderer.invoke('scriptmanager:runtime:cancel-run', buildId) as Promise<{ ok: boolean }>,
     listApiCollections: () => ipcRenderer.invoke('scriptmanager:runtime:list-api-collections') as Promise<unknown[]>,
     saveApiCollection: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-api-collection', payload) as Promise<unknown>,
     deleteApiCollection: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-api-collection', id) as Promise<string>,

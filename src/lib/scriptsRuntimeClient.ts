@@ -294,6 +294,11 @@ export async function discardCanonicalRecoveryDraft(draftId: string) {
   return window.scriptManagerDesktop.runtime.discardCanonicalRecoveryDraft(draftId)
 }
 
+export async function cancelDesktopRun(buildId: string): Promise<{ ok: boolean }> {
+  if (!window.scriptManagerDesktop?.runtime?.cancelRun) throw new Error('Desktop runtime unavailable')
+  return window.scriptManagerDesktop.runtime.cancelRun(buildId)
+}
+
 export function subscribeToCanonicalFolderChanges(listener: (event: CanonicalFolderChange) => void): () => void {
   return window.scriptManagerDesktop?.runtime?.onCanonicalFolderChange?.(listener) ?? (() => undefined)
 }

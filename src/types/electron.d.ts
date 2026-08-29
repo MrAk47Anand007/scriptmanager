@@ -116,6 +116,7 @@ declare global {
         closeTerminal: (payload?: { sessionId?: string }) => Promise<{ ok: boolean }>
         runScriptInTerminal: (payload: { sessionId?: string; scriptId: string; paramValues?: Record<string, string> }) => Promise<{ ok: boolean }>
         runScript: (payload: { scriptId: string; paramValues?: Record<string, string>; buildId?: string }) => Promise<{ buildId: string; status: 'started' | 'failed' }>
+        cancelRun?: (buildId: string) => Promise<{ ok: boolean }>
         listApiCollections: () => Promise<unknown[]>
         saveApiCollection: (payload: unknown) => Promise<unknown>
         deleteApiCollection: (id: string) => Promise<string>

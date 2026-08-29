@@ -61,6 +61,7 @@ import {
 } from "@/components/ui/select";
 import {
     buildBrowserTerminalCommand,
+    cancelDesktopRun,
     DEFAULT_TERMINAL_SESSION_ID,
     hasDesktopScriptsRuntime,
     listCanonicalRecoveryDrafts,
@@ -964,6 +965,14 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
         }
     };
 
+    const handleCancelRun = useCallback(async () => {
+        const buildId = activeBuildSubscriptionRef.current;
+        if (!buildId) return;
+        await cancelDesktopRun(buildId).catch((error) => {
+            setCanonicalFolderNotice(error instanceof Error ? error.message : 'Failed to cancel run');
+        });
+    }, []);
+
     const handleRun = async () => {
         if (!activeScriptId) return;
         if (isDesktopRuntime) {
@@ -1343,6 +1352,11 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
                                             ? 'Running...'
                                             : 'Run'}
                                 </Button>
+                                {isDesktopRuntime && runStatus === 'running' && (
+                                    <Button size="sm" variant="outline" className="h-7 shrink-0 text-xs" onClick={() => void handleCancelRun()}>
+                                        Cancel
+                                    </Button>
+                                )}
                                 {!isDesktopRuntime && (
                                     <Button size="sm" variant="outline" className="h-7 shrink-0 text-xs gap-1" onClick={handleRunInTerminal} disabled={terminalLaunchStage !== null}>
                                         {terminalLaunchStage ? <Loader2 className="h-3 w-3 animate-spin" /> : <Terminal className="h-3 w-3" />}
