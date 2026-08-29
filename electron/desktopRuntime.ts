@@ -20,6 +20,7 @@ import { createSecretVaultService } from '../src/lib/secrets/service'
 import { createServerSecretStore } from '../src/lib/secrets/serverStore'
 import { parseSecretReference, serializeSecretReference } from '../src/lib/secrets/references'
 import { getNextRunTime } from '../src/lib/schedulerService'
+import { resolveLocalBuildStatus } from '../src/lib/localRunLifecycle'
 import { parseWorkspacePolicy } from '../src/lib/git/policy'
 import { runGit } from '../src/lib/git/process'
 import { createGitService } from '../src/lib/git/service'
@@ -2939,6 +2940,7 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
 
   runtime.activeBuilds.set(buildId, child)
   let timedOut = false
+  let finalized = false
   const timeoutHandle = setTimeout(() => {
     timedOut = true
     const line = `\n[ScriptManager] Execution timed out after ${Math.round(timeoutMs / 1000)}s. Killing process...\n`
@@ -2956,34 +2958,12 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
   child.stdout.on('data', onData)
   child.stderr.on('data', onData)
 
-  child.on('error', async (error) => {
+  const finalize = async (status: 'success' | 'failure' | 'timeout' | 'cancelled', exitCode: number, errorMessage?: string) => {
+    if (finalized) return
+    finalized = true
     clearTimeout(timeoutHandle)
     runtime.activeBuilds.delete(buildId)
     logStream.end()
-    await prisma.build.update({
-      where: { id: buildId },
-      data: {
-        status: 'failure',
-        exitCode: -1,
-        finishedAt: new Date(),
-      },
-    }).catch(() => undefined)
-    sendBuildEvent(window.webContents, { type: 'error', buildId, message: error.message })
-    sendBuildEvent(window.webContents, { type: 'done', buildId, status: 'failure', exitCode: -1 })
-    notifyBuildResult(window, {
-      success: false,
-      scriptName: script.name,
-      durationMs: Date.now() - runStartedAt,
-      detail: error.message,
-    })
-  })
-
-  child.on('close', async (code) => {
-    clearTimeout(timeoutHandle)
-    runtime.activeBuilds.delete(buildId)
-    logStream.end()
-    const exitCode = code ?? -1
-    const status = timedOut ? 'timeout' : (runtime.cancelledBuilds.delete(buildId) ? 'cancelled' : (exitCode === 0 ? 'success' : 'failure'))
     await prisma.build.update({
       where: { id: buildId },
       data: {
@@ -2996,13 +2976,24 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
       where: { id: script.id },
       data: { lastRun: new Date() },
     }).catch(() => undefined)
+    if (errorMessage) sendBuildEvent(window.webContents, { type: 'error', buildId, message: errorMessage })
     sendBuildEvent(window.webContents, { type: 'done', buildId, status, exitCode })
     notifyBuildResult(window, {
       success: status === 'success',
       scriptName: script.name,
       durationMs: Date.now() - runStartedAt,
-      detail: status === 'timeout' ? 'timed out' : undefined,
+      detail: errorMessage ?? (status === 'timeout' ? 'timed out' : status === 'cancelled' ? 'cancelled' : undefined),
     })
+  }
+
+  child.on('error', (error) => {
+    void finalize('failure', -1, error.message)
+  })
+
+  child.on('close', (code) => {
+    const exitCode = code ?? -1
+    const status = resolveLocalBuildStatus(exitCode, timedOut, runtime.cancelledBuilds.delete(buildId))
+    void finalize(status, exitCode)
   })
 
   return { buildId, status: 'started' as const }
@@ -3037,12 +3028,11 @@ function destroyWindowRuntime(windowId: number) {
     } catch {}
   }
 
-  for (const child of runtime.activeBuilds.values()) {
+  for (const [buildId, child] of runtime.activeBuilds) {
+    runtime.cancelledBuilds.add(buildId)
     terminateProcessTree(child)
   }
 
-    runtime.activeBuilds.clear()
-    runtime.cancelledBuilds.clear()
   runtime.terminalSessions.clear()
   windowRuntimes.delete(windowId)
 }
