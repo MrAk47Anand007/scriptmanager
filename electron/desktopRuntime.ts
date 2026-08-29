@@ -1701,7 +1701,7 @@ async function saveLocalScript(payload: SaveScriptPayload): Promise<ScriptDto> {
   })
 
   // Push-on-save: fire-and-forget upload for cloud-bound collections.
-  void pushScript(prisma, script.id, getScriptsDir()).then((result) => {
+  void pushScript(prisma, script.id, getScriptsDir(), getDesktopSecretVaultService()).then((result) => {
     if (result.pushed) {
       console.log(`[CloudSync] pushed ${script.filename} after save`)
     } else if (result.error) {
@@ -2532,7 +2532,7 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
 
   // Pull-on-run: refresh cloud-bound scripts before executing; remote failures
   // degrade to the cached local copy (warning surfaced in the build output).
-  const freshness = await ensureFreshScript(prisma, script.id, getScriptsDir())
+  const freshness = await ensureFreshScript(prisma, script.id, getScriptsDir(), getDesktopSecretVaultService())
 
   const scriptPath = resolveScriptPath(script)
   const executionContext = await getScriptExecutionContext(script)
@@ -3284,7 +3284,7 @@ export function initDesktopRuntimeIpc() {
   })
 
   ipcMain.handle('scriptmanager:runtime:save-storage-provider', async (_event, payload: SaveStorageProviderPayload) => {
-    return saveDesktopStorageProvider(prisma, payload)
+    return saveDesktopStorageProvider(prisma, payload, getDesktopSecretVaultService())
   })
 
   ipcMain.handle('scriptmanager:runtime:delete-storage-provider', async (_event, id: string) => {
@@ -3292,11 +3292,11 @@ export function initDesktopRuntimeIpc() {
   })
 
   ipcMain.handle('scriptmanager:runtime:test-storage-provider', async (_event, id: string) => {
-    return testDesktopStorageProvider(prisma, id)
+    return testDesktopStorageProvider(prisma, id, getDesktopSecretVaultService())
   })
 
   ipcMain.handle('scriptmanager:runtime:sync-collection', async (_event, collectionId: string) => {
-    return syncCollection(prisma, collectionId, getScriptsDir())
+    return syncCollection(prisma, collectionId, getScriptsDir(), getDesktopSecretVaultService())
   })
 
   ipcMain.handle('scriptmanager:runtime:warm-terminal', async (event, payload?: { sessionId?: string }) => {

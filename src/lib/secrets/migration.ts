@@ -1,13 +1,19 @@
 import type { PrismaClient } from '@prisma/client'
 import { createServerSecretStore } from './serverStore'
-import { createSecretVaultService } from './service'
+import { createSecretVaultService, type SecretVaultService } from './service'
 import { parseSecretReference, serializeSecretReference } from './references'
 
 export type ResourceSecret = { resourceType: string; resourceId: string; field: string; name: string; workspaceId?: string }
 
-export async function storeResourceSecret(database: PrismaClient, target: ResourceSecret, plaintext: string, actorId = 'current-user') {
+export async function storeResourceSecret(
+  database: PrismaClient,
+  target: ResourceSecret,
+  plaintext: string,
+  actorId = 'current-user',
+  vault: SecretVaultService = createSecretVaultService(database, createServerSecretStore())
+) {
   const workspaceId = target.workspaceId ?? 'default'
-  const service = createSecretVaultService(database, createServerSecretStore())
+  const service = vault
   const existing = await database.secretBinding.findUnique({ where: { resourceType_resourceId_field: { resourceType: target.resourceType, resourceId: target.resourceId, field: target.field } } })
   let secretId: string
   if (existing) {
@@ -21,7 +27,13 @@ export async function storeResourceSecret(database: PrismaClient, target: Resour
   return serializeSecretReference(secretId)
 }
 
-export async function resolveResourceSecret(database: PrismaClient, stored: string, target: Omit<ResourceSecret, 'name'>, actorId: string) {
+export async function resolveResourceSecret(
+  database: PrismaClient,
+  stored: string,
+  target: Omit<ResourceSecret, 'name'>,
+  actorId: string,
+  vault: SecretVaultService = createSecretVaultService(database, createServerSecretStore())
+) {
   if (!stored.startsWith('secretref:')) return null
-  return createSecretVaultService(database, createServerSecretStore()).resolveSecret(parseSecretReference(stored), { actorType: 'system', actorId, workspaceId: target.workspaceId ?? 'default', capability: 'secret:read', resource: `${target.resourceType}:${target.resourceId}`, reason: `Resolve ${target.field}` })
+  return vault.resolveSecret(parseSecretReference(stored), { actorType: 'system', actorId, workspaceId: target.workspaceId ?? 'default', capability: 'secret:read', resource: `${target.resourceType}:${target.resourceId}`, reason: `Resolve ${target.field}` })
 }

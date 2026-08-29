@@ -4,6 +4,7 @@ import { POST } from '@/app/api/scripts/[id]/env/route'
 import { POST as createServerProfile } from '@/app/api/ops/server-profiles/route'
 import { getDecryptedStorageProvider, saveStorageProvider } from '@/lib/storage/providerStore'
 import { deserializeProviderConfig } from '@/lib/storage'
+import { createSecretVaultService } from '@/lib/secrets/service'
 import { POST as createApiRequest } from '@/app/api/api-requests/route'
 import { POST as rotateScriptWebhook } from '@/app/api/scripts/[id]/webhook/secret/route'
 import { POST as createWorkflowTrigger } from '@/app/api/workflows/[id]/triggers/route'
@@ -49,6 +50,32 @@ describe('secret integration migration', () => {
     expect(JSON.stringify(persistedConfig)).not.toContain('storage-migration-plaintext')
     const runtime = await getDecryptedStorageProvider(prisma, saved.id)
     expect(runtime?.config.secretAccessKey).toBe('storage-migration-plaintext')
+  })
+
+  it('uses an injected vault for desktop provider credentials', async () => {
+    const calls = { seal: 0, open: 0 }
+    const vault = createSecretVaultService(prisma, {
+      kind: 'server',
+      async seal(plaintext) {
+        calls.seal += 1
+        return `test:${plaintext}`
+      },
+      async open(ciphertext) {
+        calls.open += 1
+        return ciphertext.replace(/^test:/, '')
+      },
+    })
+
+    const saved = await saveStorageProvider(prisma, {
+      name: 'Injected S3',
+      type: 's3',
+      config: { bucket: 'scripts', accessKeyId: 'access-id', secretAccessKey: 'desktop-vault-secret' },
+    }, vault)
+    expect(calls.seal).toBe(1)
+
+    const runtime = await getDecryptedStorageProvider(prisma, saved.id, vault)
+    expect(runtime?.config.secretAccessKey).toBe('desktop-vault-secret')
+    expect(calls.open).toBe(1)
   })
 
   it('stores API authentication fields as vault references', async () => {

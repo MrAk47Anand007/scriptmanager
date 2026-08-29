@@ -74,3 +74,5 @@ export function createSecretVaultService(database: PrismaClient, store: SecretSt
     },
   }
 }
+
+export type SecretVaultService = ReturnType<typeof createSecretVaultService>

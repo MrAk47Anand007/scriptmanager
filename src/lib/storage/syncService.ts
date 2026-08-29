@@ -7,6 +7,7 @@ import type { RemoteFile, StorageProviderClient } from './types'
 import { resolveScriptFilePath } from '../scriptPathResolver'
 import { atomicWriteLocalFile, getConflictCopyPath } from './localFile'
 import { withStorageRetry } from './retry'
+import type { SecretVaultService } from '../secrets/service'
 
 // Cloud sync engine: pull-on-run, push-on-save, and manual per-collection sync.
 // All functions take the PrismaClient as the first argument (web passes the
@@ -58,10 +59,11 @@ type BoundCollection = {
 
 async function createClientForCollection(
   prisma: PrismaClient,
-  collection: BoundCollection
+  collection: BoundCollection,
+  vault?: SecretVaultService
 ): Promise<StorageProviderClient | null> {
   if (!collection.storageProviderId) return null
-  const provider = await getDecryptedStorageProvider(prisma, collection.storageProviderId)
+  const provider = await getDecryptedStorageProvider(prisma, collection.storageProviderId, vault)
   if (!provider) return null
   return createProviderClient(provider.type, provider.config)
 }
@@ -94,7 +96,8 @@ async function markSynced(prisma: PrismaClient, scriptId: string, etag: string):
 export async function ensureFreshScript(
   prisma: PrismaClient,
   scriptId: string,
-  scriptsRoot: string
+  scriptsRoot: string,
+  vault?: SecretVaultService
 ): Promise<EnsureFreshResult> {
   try {
     const script = await prisma.script.findUnique({
@@ -106,7 +109,7 @@ export async function ensureFreshScript(
     }
 
     const collection = script.collection
-    const client = await createClientForCollection(prisma, collection)
+    const client = await createClientForCollection(prisma, collection, vault)
     if (!client) {
       return { ok: true, stale: true, warning: 'remote unreachable — running cached copy (storage provider missing)' }
     }
@@ -159,7 +162,8 @@ export async function ensureFreshScript(
 export async function pushScript(
   prisma: PrismaClient,
   scriptId: string,
-  scriptsRoot: string
+  scriptsRoot: string,
+  vault?: SecretVaultService
 ): Promise<PushScriptResult> {
   try {
     const script = await prisma.script.findUnique({
@@ -173,7 +177,7 @@ export async function pushScript(
       return { ok: true, skipped: true }
     }
 
-    const client = await createClientForCollection(prisma, script.collection)
+    const client = await createClientForCollection(prisma, script.collection, vault)
     if (!client) {
       return { ok: false, error: 'Storage provider not found' }
     }
@@ -218,7 +222,8 @@ function randomWebhookToken(): string {
 export async function syncCollection(
   prisma: PrismaClient,
   collectionId: string,
-  scriptsRoot: string
+  scriptsRoot: string,
+  vault?: SecretVaultService
 ): Promise<CollectionSyncSummary> {
   const summary: CollectionSyncSummary = { ok: true, pulled: 0, pushed: 0, conflicts: 0, skipped: [] }
   try {
@@ -233,7 +238,7 @@ export async function syncCollection(
       return { ...summary, ok: false, error: 'Collection is not bound to a storage provider' }
     }
 
-    const client = await createClientForCollection(prisma, collection)
+    const client = await createClientForCollection(prisma, collection, vault)
     if (!client) {
       return { ...summary, ok: false, error: 'Storage provider not found' }
     }
