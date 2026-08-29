@@ -2151,6 +2151,20 @@ function getBuildLogPath(scriptFilename: string, buildId: string): string {
   return path.join(targetDir, `${buildId}.log`)
 }
 
+function terminateProcessTree(child: ReturnType<typeof spawn>) {
+  if (!child.pid) return
+  if (process.platform === 'win32') {
+    const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true })
+    killer.unref()
+    return
+  }
+  try {
+    process.kill(-child.pid, 'SIGTERM')
+  } catch {
+    child.kill('SIGTERM')
+  }
+}
+
 async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
   const script = await getScriptRecord(payload.scriptId)
   if (!script) {
@@ -2235,6 +2249,7 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
     cwd: executionContext.cwd,
     env: { ...process.env, PYTHONUNBUFFERED: '1', ...scriptEnv, ...paramEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32',
   })
 
   runtime.activeBuilds.set(buildId, child)
@@ -2244,7 +2259,7 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
     const line = `\n[ScriptManager] Execution timed out after ${Math.round(timeoutMs / 1000)}s. Killing process...\n`
     logStream.write(line)
     sendBuildEvent(window.webContents, { type: 'line', buildId, line })
-    child.kill('SIGTERM')
+    terminateProcessTree(child)
   }, timeoutMs)
 
   const onData = (chunk: Buffer) => {
@@ -2338,9 +2353,7 @@ function destroyWindowRuntime(windowId: number) {
   }
 
   for (const child of runtime.activeBuilds.values()) {
-    try {
-      child.kill('SIGTERM')
-    } catch {}
+    terminateProcessTree(child)
   }
 
     runtime.activeBuilds.clear()
@@ -2931,7 +2944,7 @@ export function initDesktopRuntimeIpc() {
     const child = runtime.activeBuilds.get(buildId)
     if (!child) return { ok: false }
     runtime.cancelledBuilds.add(buildId)
-    child.kill('SIGTERM')
+    terminateProcessTree(child)
     return { ok: true }
   })
 }
