@@ -89,4 +89,20 @@ describe('canonical folder runtime', () => {
     await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'changed', collectionId: 'collection-1', sourcePath })))
     watcher.close()
   })
+
+  it('reports both sides of a canonical file rename', async () => {
+    const { root, sourcePath } = createFixture()
+    const renamedPath = path.join(root, 'renamed.py')
+    const events: Array<{ type: string; collectionId: string; sourcePath?: string }> = []
+    const watcher = createCanonicalFolderWatcher({ onChange: (event) => events.push(event), debounceMs: 10 })
+    watcher.watch('collection-1', root)
+
+    await fs.promises.rename(sourcePath, renamedPath)
+
+    await vi.waitFor(() => {
+      expect(events).toContainEqual(expect.objectContaining({ type: 'deleted', collectionId: 'collection-1', sourcePath }))
+      expect(events).toContainEqual(expect.objectContaining({ type: 'changed', collectionId: 'collection-1', sourcePath: renamedPath }))
+    })
+    watcher.close()
+  })
 })
