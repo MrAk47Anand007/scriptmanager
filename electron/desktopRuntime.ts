@@ -129,6 +129,24 @@ type ScriptContentDto = Pick<
   content: string
 }
 
+type ScriptExportItem = {
+  name: string
+  description?: string | null
+  language?: string
+  interpreter?: string | null
+  content?: string
+  parameters?: unknown[]
+  tags?: Array<{ name: string; color?: string }>
+}
+
+type ScriptExportBundle = {
+  _export_version?: number
+  scripts?: ScriptExportItem[]
+  name?: string
+  content?: string
+  language?: string
+}
+
 type CollectionDto = {
   id: string
   name: string
@@ -1064,18 +1082,18 @@ type ScriptExecutionContext = {
   key: string
 }
 
-function resolveScriptPath(script: {
+async function resolveScriptPath(script: {
   filename: string
   sourcePath: string | null
   collection?: { folderPath: string | null } | null
-}): string {
+}): Promise<string> {
   if (script.sourcePath) {
     return path.resolve(script.sourcePath)
   }
   if (script.collection?.folderPath) {
     return path.resolve(script.collection.folderPath, path.basename(script.filename))
   }
-  return path.resolve(getScriptsDir(), path.basename(script.filename))
+  return path.resolve(await getWorkspaceRoot(), path.basename(script.filename))
 }
 
 async function getCanonicalSourceFingerprint(sourcePath: string): Promise<string> {
@@ -1308,6 +1326,111 @@ async function listScripts(): Promise<ScriptDto[]> {
   return scripts.map(serializeScriptRecord)
 }
 
+async function exportLocalScripts(): Promise<ScriptExportBundle & { _export_version: 1; exported_at: string; scripts: ScriptExportItem[] }> {
+  const scripts = await prisma.script.findMany({
+    orderBy: { name: 'asc' },
+    include: { tags: { include: { tag: true } }, collection: true },
+  })
+  const exported = await Promise.all(scripts.map(async (script) => {
+    let content = ''
+    try {
+      const filePath = await resolveScriptPath(script)
+      content = fs.readFileSync(filePath, 'utf8')
+    } catch {
+      // Preserve metadata when the source file is unavailable.
+    }
+
+    return {
+      name: script.name,
+      description: script.description,
+      language: script.language,
+      interpreter: script.interpreter,
+      content,
+      parameters: serializeParameters(script.parameters),
+      tags: script.tags.map((entry) => ({ name: entry.tag.name, color: entry.tag.color })),
+    }
+  }))
+
+  return {
+    _export_version: 1,
+    exported_at: new Date().toISOString(),
+    scripts: exported,
+  }
+}
+
+async function importLocalScripts(payload: ScriptExportBundle): Promise<{ message: string; results: Array<{ name: string; id: string; status: 'created' | 'skipped' }> }> {
+  const toImport = Array.isArray(payload?.scripts)
+    ? payload.scripts
+    : payload?.name
+      ? [payload as ScriptExportItem]
+      : []
+  if (toImport.length === 0) {
+    throw new Error('No scripts to import')
+  }
+
+  const actor = await createDesktopActorContext(prisma)
+  await ensureScriptsDirExists()
+  const scriptsRoot = await getWorkspaceRoot()
+  const results: Array<{ name: string; id: string; status: 'created' | 'skipped' }> = []
+
+  for (const item of toImport) {
+    if (!item || typeof item.name !== 'string' || !item.name.trim()) continue
+    const name = item.name.trim()
+    const existing = await prisma.script.findFirst({ where: { name } })
+    if (existing) {
+      results.push({ name, id: existing.id, status: 'skipped' })
+      continue
+    }
+
+    const filename = sanitizeScriptFilename(name)
+    const filePath = path.join(scriptsRoot, filename)
+    if (fs.existsSync(filePath)) {
+      results.push({ name, id: '', status: 'skipped' })
+      continue
+    }
+
+    const language = typeof item.language === 'string' && item.language.trim() ? item.language : 'python'
+    const parameters = Array.isArray(item.parameters) ? JSON.stringify(item.parameters) : '[]'
+    const content = typeof item.content === 'string' ? item.content : '# Imported script\n'
+    fs.writeFileSync(filePath, content, 'utf8')
+
+    const script = await prisma.script.create({
+      data: {
+        name,
+        filename,
+        description: typeof item.description === 'string' ? item.description : '',
+        language,
+        interpreter: language === 'custom' ? (item.interpreter ?? null) : null,
+        parameters,
+        webhookToken: crypto.randomUUID().replace(/-/g, ''),
+        workspaceId: actor.workspaceId,
+      },
+    })
+
+    if (Array.isArray(item.tags)) {
+      for (const tagInfo of item.tags) {
+        if (!tagInfo || typeof tagInfo.name !== 'string' || !tagInfo.name.trim()) continue
+        const tagName = tagInfo.name.trim().toLowerCase()
+        const tag = await prisma.tag.upsert({
+          where: { name: tagName },
+          update: {},
+          create: { name: tagName, color: tagInfo.color ?? '#6366f1' },
+        })
+        await prisma.scriptTag.upsert({
+          where: { scriptId_tagId: { scriptId: script.id, tagId: tag.id } },
+          update: {},
+          create: { scriptId: script.id, tagId: tag.id },
+        })
+      }
+    }
+    results.push({ name, id: script.id, status: 'created' })
+  }
+
+  const created = results.filter((result) => result.status === 'created').length
+  const skipped = results.filter((result) => result.status === 'skipped').length
+  return { message: `Imported ${created} script(s), skipped ${skipped} duplicate(s)`, results }
+}
+
 async function readScript(scriptId: string): Promise<ScriptContentDto> {
   const script = await prisma.script.findUnique({
     where: { id: scriptId },
@@ -1338,7 +1461,7 @@ async function readScript(scriptId: string): Promise<ScriptContentDto> {
     throw new Error('Canonical script source is unavailable')
   }
 
-  const filePath = resolveScriptPath(script)
+  const filePath = await resolveScriptPath(script)
   const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : ''
   return serializeScriptContentRecord(script, content)
 }
@@ -1674,7 +1797,7 @@ async function saveLocalScript(payload: SaveScriptPayload): Promise<ScriptDto> {
     throw new Error('Canonical script source is unavailable')
   }
 
-  const filePath = resolveScriptPath(script)
+  const filePath = await resolveScriptPath(script)
   if (script.sourcePath && script.collection?.folderPath) {
     await writeCanonicalFile(script.collection.folderPath, filePath, payload.content)
   } else {
@@ -1701,7 +1824,7 @@ async function saveLocalScript(payload: SaveScriptPayload): Promise<ScriptDto> {
   })
 
   // Push-on-save: fire-and-forget upload for cloud-bound collections.
-  void pushScript(prisma, script.id, getScriptsDir(), getDesktopSecretVaultService()).then((result) => {
+  void getWorkspaceRoot().then((scriptsRoot) => pushScript(prisma, script.id, scriptsRoot, getDesktopSecretVaultService())).then((result) => {
     if (result.pushed) {
       console.log(`[CloudSync] pushed ${script.filename} after save`)
     } else if (result.error) {
@@ -1718,7 +1841,7 @@ async function syncLocalScriptToGist(scriptId: string) {
   if (!script || script.workspaceId !== actor.workspaceId) throw new Error('Script not found')
   if (script.sourcePath && !script.sourceAvailable) throw new Error('Canonical script source is unavailable')
 
-  const filePath = resolveScriptPath(script)
+  const filePath = await resolveScriptPath(script)
   if (!fs.existsSync(filePath)) throw new Error('Script file not found on disk')
   const content = fs.readFileSync(filePath, 'utf8')
   return createGistService(prisma, {
@@ -2019,7 +2142,7 @@ async function deleteLocalScript(payload: DeleteScriptPayload): Promise<string> 
     throw new Error('Script not found')
   }
 
-  const filePath = resolveScriptPath(script)
+  const filePath = await resolveScriptPath(script)
   const shouldDeleteFile = !script.sourcePath || await isManagedCollectionWorkspace(script.collection?.folderPath)
   if (shouldDeleteFile && fs.existsSync(filePath)) {
     fs.unlinkSync(filePath)
@@ -2041,7 +2164,7 @@ async function duplicateLocalScript(scriptId: string): Promise<ScriptDto> {
 
   await ensureScriptsDirExists()
 
-  const originalPath = resolveScriptPath(original)
+  const originalPath = await resolveScriptPath(original)
   let content = '# Duplicated script\n'
   if (fs.existsSync(originalPath)) {
     content = fs.readFileSync(originalPath, 'utf8')
@@ -2532,9 +2655,9 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
 
   // Pull-on-run: refresh cloud-bound scripts before executing; remote failures
   // degrade to the cached local copy (warning surfaced in the build output).
-  const freshness = await ensureFreshScript(prisma, script.id, getScriptsDir(), getDesktopSecretVaultService())
+  const freshness = await ensureFreshScript(prisma, script.id, await getWorkspaceRoot(), getDesktopSecretVaultService())
 
-  const scriptPath = resolveScriptPath(script)
+  const scriptPath = await resolveScriptPath(script)
   const executionContext = await getScriptExecutionContext(script)
   const timeoutMs = await getTimeoutMs(script.timeoutMs)
   const envVars = await prisma.scriptEnvVar.findMany({ where: { scriptId: script.id } })
@@ -3023,6 +3146,14 @@ export function initDesktopRuntimeIpc() {
     return readScript(scriptId)
   })
 
+  ipcMain.handle('scriptmanager:runtime:export-scripts', async () => {
+    return exportLocalScripts()
+  })
+
+  ipcMain.handle('scriptmanager:runtime:import-scripts', async (_event, payload: ScriptExportBundle) => {
+    return importLocalScripts(payload)
+  })
+
   ipcMain.handle('scriptmanager:runtime:create-script', async (_event, payload: CreateScriptPayload) => {
     return createLocalScript(payload)
   })
@@ -3296,7 +3427,7 @@ export function initDesktopRuntimeIpc() {
   })
 
   ipcMain.handle('scriptmanager:runtime:sync-collection', async (_event, collectionId: string) => {
-    return syncCollection(prisma, collectionId, getScriptsDir(), getDesktopSecretVaultService())
+    return syncCollection(prisma, collectionId, await getWorkspaceRoot(), getDesktopSecretVaultService())
   })
 
   ipcMain.handle('scriptmanager:runtime:warm-terminal', async (event, payload?: { sessionId?: string }) => {
@@ -3373,7 +3504,7 @@ export function initDesktopRuntimeIpc() {
     const terminal = ensureTerminal(window, sessionId)
     applyTerminalContext(window, sessionId, context)
     const command = buildLocalTerminalCommand({
-      filePath: resolveScriptPath(script),
+      filePath: await resolveScriptPath(script),
       language: script.language,
       interpreter: (script.collection?.pythonToolchainEnabled ? (script.collection.pythonInterpreterPath ?? context.interpreterPath) : null)
         ?? script.interpreter,

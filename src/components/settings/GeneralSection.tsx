@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { saveSettings } from '@/features/settings/settingsSlice'
+import { fetchCollections, fetchScripts } from '@/features/scripts/scriptsSlice'
 import { selectSettings, selectSettingsStatus } from '@/features/settings/selectors'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
@@ -10,7 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Loader2, Save, FolderIcon, Download, Upload, Package } from 'lucide-react'
-import axios from 'axios'
+import { exportScriptsRuntime, importScriptsRuntime } from '@/lib/scriptsRuntimeClient'
 
 export const GeneralSection = () => {
     const dispatch = useAppDispatch()
@@ -61,13 +62,29 @@ export const GeneralSection = () => {
         try {
             const text = await file.text()
             const json = JSON.parse(text)
-            const res = await axios.post('/api/scripts/import', json)
-            setImportStatus(res.data.message ?? 'Import successful')
+            const result = await importScriptsRuntime(json)
+            await Promise.all([dispatch(fetchScripts()), dispatch(fetchCollections())])
+            setImportStatus(result.message ?? 'Import successful')
         } catch (err: unknown) {
             const axiosErr = err as { response?: { data?: { error?: string } } }
-            setImportError(axiosErr.response?.data?.error ?? 'Import failed — check file format')
+            setImportError(axiosErr.response?.data?.error ?? (err instanceof Error ? err.message : 'Import failed — check file format'))
         } finally {
             if (importFileRef.current) importFileRef.current.value = ''
+        }
+    }
+
+    const handleExport = async () => {
+        try {
+            const bundle = await exportScriptsRuntime()
+            const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
+            const url = URL.createObjectURL(blob)
+            const anchor = document.createElement('a')
+            anchor.href = url
+            anchor.download = 'scriptmanager-export.json'
+            anchor.click()
+            URL.revokeObjectURL(url)
+        } catch (err) {
+            setImportError(err instanceof Error ? err.message : 'Export failed')
         }
     }
 
@@ -138,7 +155,7 @@ export const GeneralSection = () => {
                         <Button
                             variant="outline"
                             className="gap-2"
-                            onClick={() => window.open('/api/export', '_blank')}
+                            onClick={() => void handleExport()}
                         >
                             <Download className="h-4 w-4" />
                             Export All Scripts

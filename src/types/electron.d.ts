@@ -87,6 +87,8 @@ declare global {
         inspectCollectionWorkspace: (collectionId: string) => Promise<unknown>
         manageCollectionPythonEnv: (payload: { collectionId: string; recreate?: boolean }) => Promise<unknown>
         readScript: (scriptId: string) => Promise<unknown>
+        exportScripts: () => Promise<unknown>
+        importScripts: (payload: unknown) => Promise<unknown>
         createScript: (payload: unknown) => Promise<unknown>
         saveScript: (payload: unknown) => Promise<unknown>
         syncGist: (scriptId: string) => Promise<{ gist_id: string; gist_url: string; gist_filename: string }>
