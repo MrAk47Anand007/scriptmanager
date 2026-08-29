@@ -113,6 +113,7 @@ type ScriptDto = {
   require_webhook_signature: boolean
   webhook_secret_set: boolean
   source_path: string | null
+  source_available: boolean
 }
 
 type ScriptContentDto = Pick<
@@ -483,6 +484,7 @@ function serializeScriptRecord(script: {
   requireWebhookSignature: boolean
   webhookSecret: string | null
   sourcePath: string | null
+  sourceAvailable: boolean
 }): ScriptDto {
   return {
     id: script.id,
@@ -511,6 +513,7 @@ function serializeScriptRecord(script: {
     require_webhook_signature: script.requireWebhookSignature,
     webhook_secret_set: Boolean(script.webhookSecret),
     source_path: script.sourcePath,
+    source_available: script.sourceAvailable,
   }
 }
 
@@ -522,6 +525,7 @@ function serializeScriptContentRecord(script: {
   interpreter: string | null
   parameters: string | null
   sourcePath: string | null
+  sourceAvailable: boolean
   createdAt: Date
   updatedAt: Date
 }, content: string): ScriptContentDto {
@@ -534,6 +538,7 @@ function serializeScriptContentRecord(script: {
     interpreter: script.interpreter,
     parameters: serializeParameters(script.parameters),
     source_path: script.sourcePath,
+    source_available: script.sourceAvailable,
     created_at: script.createdAt.toISOString(),
     updated_at: script.updatedAt.toISOString(),
   }
@@ -1249,6 +1254,7 @@ async function readScript(scriptId: string): Promise<ScriptContentDto> {
       interpreter: true,
       parameters: true,
       sourcePath: true,
+      sourceAvailable: true,
       collection: {
         select: {
           folderPath: true,
@@ -1261,6 +1267,10 @@ async function readScript(scriptId: string): Promise<ScriptContentDto> {
 
   if (!script) {
     throw new Error('Script not found')
+  }
+
+  if (script.sourcePath && !script.sourceAvailable) {
+    throw new Error('Canonical script source is unavailable')
   }
 
   const filePath = resolveScriptPath(script)
@@ -1594,6 +1604,10 @@ async function saveLocalScript(payload: SaveScriptPayload): Promise<ScriptDto> {
     throw new Error('Script not found')
   }
 
+  if (script.sourcePath && !script.sourceAvailable) {
+    throw new Error('Canonical script source is unavailable')
+  }
+
   const filePath = resolveScriptPath(script)
   if (script.sourcePath && script.collection?.folderPath) {
     await writeCanonicalFile(script.collection.folderPath, filePath, payload.content)
@@ -1843,6 +1857,7 @@ async function openLocalFolder(payload: OpenFolderPayload) {
           name: uniqueName,
           filename,
           sourcePath: filePath,
+          sourceAvailable: true,
           language,
           collectionId: collection.id,
         },
@@ -1869,7 +1884,7 @@ async function openLocalFolder(payload: OpenFolderPayload) {
     .map((script) => script.id)
 
   if (staleScriptIds.length > 0) {
-    await prisma.script.deleteMany({ where: { id: { in: staleScriptIds } } })
+    await prisma.script.updateMany({ where: { id: { in: staleScriptIds } }, data: { sourceAvailable: false } })
   }
 
   return {

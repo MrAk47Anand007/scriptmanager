@@ -13,6 +13,7 @@ model Script {
   name                    String
   filename                String
   sourcePath              String?   @map("source_path")
+  sourceAvailable         Boolean   @default(true) @map("source_available")
   description             String    @default("")
   language                String    @default("python")
   interpreter             String?

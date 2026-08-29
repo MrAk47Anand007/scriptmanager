@@ -27,6 +27,7 @@ export interface Script {
     name: string
     filename: string
     source_path?: string | null
+    source_available?: boolean
     description?: string
     content?: string
     language?: string

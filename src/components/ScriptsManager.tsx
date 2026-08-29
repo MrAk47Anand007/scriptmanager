@@ -1375,6 +1375,12 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
                                 <span>{canonicalFolderNotice}</span>
                             </div>
                         )}
+                        {activeScript?.source_path && activeScript.source_available === false && (
+                            <div className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-800 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200">
+                                <Folder className="h-4 w-4 shrink-0" />
+                                <span>The canonical source file is unavailable. Restore or re-import the file before saving or running this script.</span>
+                            </div>
+                        )}
                         </>
                     ) : null}
                     <div className="flex-1 flex flex-col relative overflow-hidden">

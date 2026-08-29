@@ -81,6 +81,7 @@ type DesktopScriptRecord = {
   require_webhook_signature?: boolean
   webhook_secret_set?: boolean
   source_path?: string | null
+  source_available?: boolean
 }
 
 type DesktopCollectionRecord = {
