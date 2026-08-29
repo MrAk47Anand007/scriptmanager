@@ -22,4 +22,11 @@ describe('git service', () => {
     expect(result).toEqual({ kind: 'approval', approval: { id: 'approval-1' } })
     expect(run).not.toHaveBeenCalled()
   })
+
+  it('rejects malformed actions before evaluating policy or spawning git', async () => {
+    const run = vi.fn()
+    const service = createGitService({ run, audit: vi.fn() })
+    await expect(service.execute(workspace, { action: 'push', branch: '--delete' } as never, { type: 'user', id: 'admin' })).rejects.toThrow('branch')
+    expect(run).not.toHaveBeenCalled()
+  })
 })

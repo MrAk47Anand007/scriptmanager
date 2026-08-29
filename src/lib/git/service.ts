@@ -1,4 +1,4 @@
-import { classifyGitAction, resolveRepositoryPath } from './policy'
+import { classifyGitAction, parseGitAction, resolveRepositoryPath } from './policy'
 import { parseBranches, parseStatus, parseUnifiedDiff } from './parser'
 import type { GitProcessRunner } from './process'
 import type { GitAction, RepositoryWorkspace } from './types'
@@ -27,28 +27,29 @@ function actionArgs(action: GitAction): string[] {
 
 export function createGitService(deps: GitServiceDeps) {
   return { async execute(workspace: RepositoryWorkspace, action: GitAction, actor: GitActor) {
+    const parsedAction = parseGitAction(action)
     resolveRepositoryPath(workspace.root)
-    if (action.path) resolveRepositoryPath(workspace.root, action.path)
-    const decision = classifyGitAction(action, workspace.policy)
+    if (parsedAction.path) resolveRepositoryPath(workspace.root, parsedAction.path)
+    const decision = classifyGitAction(parsedAction, workspace.policy)
     if (!decision.allowed) throw new Error(decision.reason)
     if (decision.protected) {
       if (!deps.requestApproval) throw new Error('Approval service is unavailable')
-      const approval = await deps.requestApproval({ workspace, action, actor })
-      await deps.audit({ action: action.action, projectId: workspace.projectId, actor, outcome: 'approval_required' })
+      const approval = await deps.requestApproval({ workspace, action: parsedAction, actor })
+      await deps.audit({ action: parsedAction.action, projectId: workspace.projectId, actor, outcome: 'approval_required' })
       return { kind: 'approval' as const, approval }
     }
-    const args = actionArgs(action)
-    if (args.some(value => value === '')) throw new Error(`Missing input for Git ${action.action}`)
+    const args = actionArgs(parsedAction)
+    if (args.some(value => value === '')) throw new Error(`Missing input for Git ${parsedAction.action}`)
     const processResult = await deps.run(workspace.root, args)
     if (processResult.exitCode !== 0) {
-      await deps.audit({ action: action.action, projectId: workspace.projectId, actor, outcome: 'failed', detail: processResult.stderr })
-      throw new Error(processResult.stderr.trim() || `Git ${action.action} failed`)
+      await deps.audit({ action: parsedAction.action, projectId: workspace.projectId, actor, outcome: 'failed', detail: processResult.stderr })
+      throw new Error(processResult.stderr.trim() || `Git ${parsedAction.action} failed`)
     }
     let data: unknown = { output: processResult.stdout }
-    if (action.action === 'status') data = parseStatus(processResult.stdout)
-    if (action.action === 'branches') data = parseBranches(processResult.stdout)
-    if (action.action === 'diff') data = parseUnifiedDiff(processResult.stdout)
-    await deps.audit({ action: action.action, projectId: workspace.projectId, actor, outcome: 'succeeded' })
+    if (parsedAction.action === 'status') data = parseStatus(processResult.stdout)
+    if (parsedAction.action === 'branches') data = parseBranches(processResult.stdout)
+    if (parsedAction.action === 'diff') data = parseUnifiedDiff(processResult.stdout)
+    await deps.audit({ action: parsedAction.action, projectId: workspace.projectId, actor, outcome: 'succeeded' })
     return { kind: 'result' as const, data }
   } }
 }
