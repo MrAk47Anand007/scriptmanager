@@ -15,8 +15,8 @@ const remoteExecEmitters = new Map<string, EventEmitter>()
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function buildConnectConfig(profileId: string): Promise<ConnectConfig> {
-    const profile = await prisma.serverProfile.findUnique({ where: { id: profileId } })
+async function buildConnectConfig(profileId: string, workspaceId = 'default'): Promise<ConnectConfig> {
+    const profile = await prisma.serverProfile.findFirst({ where: { id: profileId, workspaceId } })
     if (!profile) throw new Error(`Server profile not found: ${profileId}`)
 
     const config: ConnectConfig = {
@@ -33,7 +33,7 @@ async function buildConnectConfig(profileId: string): Promise<ConnectConfig> {
         // Password auth — decrypt stored secret
         if (profile.encryptedSecret) {
             config.password = profile.encryptedSecret.startsWith('secretref:')
-                ? await resolveResourceSecret(prisma, profile.encryptedSecret, { resourceType: 'server-profile', resourceId: profile.id, field: 'password' }, 'ssh-runtime') ?? undefined
+                ? await resolveResourceSecret(prisma, profile.encryptedSecret, { resourceType: 'server-profile', resourceId: profile.id, field: 'password', workspaceId }, 'ssh-runtime') ?? undefined
                 : await revealOpsSecret(profile.encryptedSecret) ?? undefined
         }
     }
@@ -56,7 +56,7 @@ function createSshClient(config: ConnectConfig): Promise<SshClient> {
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function testSshConnection(profileId: string): Promise<{
+export async function testSshConnection(profileId: string, workspaceId = 'default'): Promise<{
     success: boolean
     latency_ms?: number
     error?: string
@@ -64,7 +64,7 @@ export async function testSshConnection(profileId: string): Promise<{
     const start = Date.now()
     let client: SshClient | null = null
     try {
-        const config = await buildConnectConfig(profileId)
+        const config = await buildConnectConfig(profileId, workspaceId)
         client = await createSshClient(config)
         const latency_ms = Date.now() - start
         return { success: true, latency_ms }
@@ -80,10 +80,11 @@ export async function scpScript(opts: {
     scriptId: string
     remotePath: string
     permissions?: string
+    workspaceId?: string
 }): Promise<{ success: boolean; remote_path: string; error?: string }> {
-    const { profileId, scriptId, remotePath, permissions = '755' } = opts
+    const { profileId, scriptId, remotePath, permissions = '755', workspaceId = 'default' } = opts
 
-    const script = await prisma.script.findUnique({ where: { id: scriptId } })
+    const script = await prisma.script.findFirst({ where: { id: scriptId, workspaceId } })
     if (!script) return { success: false, remote_path: '', error: 'Script not found' }
 
     const localPath = await getScriptResolvedFilePath(script)
@@ -97,7 +98,7 @@ export async function scpScript(opts: {
 
     let client: SshClient | null = null
     try {
-        const config = await buildConnectConfig(profileId)
+        const config = await buildConnectConfig(profileId, workspaceId)
         client = await createSshClient(config)
 
         // SFTP transfer
@@ -137,6 +138,7 @@ export async function execRemote(opts: {
     remoteExecId: string
     context?: ExecutionContext
     signal?: AbortSignal
+    workspaceId?: string
 }): Promise<void> {
     const { profileId, command, remoteExecId } = opts
     const context = opts.context ?? {
@@ -168,7 +170,7 @@ export async function execRemote(opts: {
     opts.signal?.addEventListener('abort', onAbort, { once: true })
 
     try {
-        const config = await buildConnectConfig(profileId)
+        const config = await buildConnectConfig(profileId, opts.workspaceId ?? 'default')
         client = await createSshClient(config)
 
         await new Promise<void>((resolve, reject) => {

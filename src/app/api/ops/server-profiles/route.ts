@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { hasStoredOpsSecret } from '@/lib/opsSecretStore'
 import { randomUUID } from 'node:crypto'
 import { storeResourceSecret } from '@/lib/secrets/migration'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 function serializeProfile(p: {
     id: string
@@ -35,7 +36,9 @@ function serializeProfile(p: {
 }
 
 export async function GET(req: Request) {
-    const workspaceId = (req as Request | undefined)?.headers.get('x-scriptmanager-workspace-id') ?? 'default'
+    const authorization = await authorizeRequest(req, 'ops', 'read')
+    if (authorization.response) return authorization.response
+    const workspaceId = authorization.context.workspaceId
     const profiles = await prisma.serverProfile.findMany({
         where: { workspaceId },
         orderBy: { name: 'asc' },
@@ -45,7 +48,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-    const workspaceId = req.headers.get('x-scriptmanager-workspace-id') ?? 'default'
+    const authorization = await authorizeRequest(req, 'ops', 'create')
+    if (authorization.response) return authorization.response
+    const workspaceId = authorization.context.workspaceId
     const body = await req.json()
     const { name, host, port, username, auth_method, secret, key_path, project_id, notes } = body
 
@@ -58,11 +63,15 @@ export async function POST(req: Request) {
     if (!username?.trim()) {
         return NextResponse.json({ error: 'Username is required' }, { status: 400 })
     }
+    if (project_id) {
+        const project = await prisma.project.findFirst({ where: { id: project_id, workspaceId } })
+        if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
 
     const profileId = randomUUID()
     let encryptedSecretJson: string | null = null
     if (secret) {
-        encryptedSecretJson = await storeResourceSecret(prisma, { resourceType: 'server-profile', resourceId: profileId, field: 'password', name: `ops:${profileId}:password`, workspaceId }, secret, req.headers.get('x-scriptmanager-user-id') ?? 'current-user')
+        encryptedSecretJson = await storeResourceSecret(prisma, { resourceType: 'server-profile', resourceId: profileId, field: 'password', name: `ops:${profileId}:password`, workspaceId }, secret, authorization.context.userId)
     }
 
     const profile = await prisma.serverProfile.create({

@@ -1,5 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import crypto from 'node:crypto'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { prisma } from '@/lib/db'
+import { createSessionToken, SESSION_COOKIE } from '@/lib/auth'
+import { hashSessionToken } from '@/lib/rbac/requestContext'
 import { POST } from '@/app/api/scripts/[id]/env/route'
 import { POST as createServerProfile } from '@/app/api/ops/server-profiles/route'
 import { getDecryptedStorageProvider, saveStorageProvider } from '@/lib/storage/providerStore'
@@ -12,6 +15,9 @@ import { POST as createNotificationChannel } from '@/app/api/notifications/chann
 
 const context = { params: Promise.resolve({ id: 'script_phase5_migration' }) }
 
+let sessionId = ''
+let sessionCookie = ''
+
 describe('secret integration migration', () => {
   beforeEach(async () => {
     await prisma.secretAccessEvent.deleteMany(); await prisma.secretBinding.deleteMany(); await prisma.secretVersion.deleteMany(); await prisma.secret.deleteMany()
@@ -22,6 +28,17 @@ describe('secret integration migration', () => {
     await prisma.notificationDelivery.deleteMany(); await prisma.notificationRule.deleteMany(); await prisma.notificationChannel.deleteMany()
     await prisma.scriptEnvVar.deleteMany(); await prisma.script.deleteMany({ where: { id: 'script_phase5_migration' } })
     await prisma.script.create({ data: { id: 'script_phase5_migration', name: 'Vault script', filename: 'vault.py', language: 'python' } })
+
+    sessionId = crypto.randomUUID()
+    const token = createSessionToken({ userId: 'local-admin', workspaceId: 'default', sessionId })
+    await prisma.userSession.create({
+      data: { id: sessionId, userId: 'local-admin', workspaceId: 'default', tokenHash: hashSessionToken(token), expiresAt: new Date(Date.now() + 60_000) },
+    })
+    sessionCookie = `${SESSION_COOKIE}=${encodeURIComponent(token)}`
+  })
+
+  afterEach(async () => {
+    await prisma.userSession.delete({ where: { id: sessionId } }).catch(() => undefined)
   })
 
   it('stores secret script environment values as opaque vault references', async () => {
@@ -34,7 +51,7 @@ describe('secret integration migration', () => {
   })
 
   it('stores Ops passwords as bound vault references', async () => {
-    const response = await createServerProfile(new Request('http://localhost/api/ops/server-profiles', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Vault server', host: '127.0.0.1', username: 'ops', auth_method: 'password', secret: 'ops-migration-plaintext' }) }))
+    const response = await createServerProfile(new Request('http://localhost/api/ops/server-profiles', { method: 'POST', headers: { cookie: sessionCookie, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Vault server', host: '127.0.0.1', username: 'ops', auth_method: 'password', secret: 'ops-migration-plaintext' }) }))
     expect(response.status).toBe(201)
     const profile = await prisma.serverProfile.findFirstOrThrow({ where: { name: 'Vault server' } })
     expect(profile.encryptedSecret).toMatch(/^secretref:/)

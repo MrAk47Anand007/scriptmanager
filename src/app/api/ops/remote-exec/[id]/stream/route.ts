@@ -1,4 +1,6 @@
 import { getRemoteExecEmitter } from '@/lib/sshService'
+import { prisma } from '@/lib/db'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 // GET /api/ops/remote-exec/[id]/stream — SSE stream for remote execution output
 // Mirrors the pattern from /api/builds/[id]/stream/route.ts exactly
@@ -6,7 +8,11 @@ export async function GET(
     req: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    const authorization = await authorizeRequest(req, 'ops', 'read')
+    if (authorization.response) return authorization.response
     const { id: remoteExecId } = await params
+    const execution = await prisma.remoteExecution.findFirst({ where: { id: remoteExecId, profile: { workspaceId: authorization.context.workspaceId } } })
+    if (!execution) return new Response(JSON.stringify({ error: 'Remote execution not found' }), { status: 404, headers: { 'content-type': 'application/json' } })
 
     const encoder = new TextEncoder()
 

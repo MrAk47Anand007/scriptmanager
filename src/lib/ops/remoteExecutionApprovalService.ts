@@ -44,6 +44,7 @@ export async function approveRemoteExecution(id: string, actor: TrustedActorCont
     profileId: execution.profileId,
     command,
     remoteExecId: id,
+    workspaceId: execution.profile.workspaceId,
     context: { correlationId, actor: { type: 'user', id: actor.actorId }, trigger: 'remote' },
   }).catch(console.error)
 

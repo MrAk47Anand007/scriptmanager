@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { hasStoredOpsSecret } from '@/lib/opsSecretStore'
 import { storeResourceSecret } from '@/lib/secrets/migration'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 function serializeProfile(p: {
     id: string
@@ -37,9 +38,11 @@ export async function GET(
     req: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    const authorization = await authorizeRequest(req, 'ops', 'read')
+    if (authorization.response) return authorization.response
     const { id } = await params
 
-    const profile = await prisma.serverProfile.findUnique({ where: { id } })
+    const profile = await prisma.serverProfile.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
     if (!profile) {
         return NextResponse.json({ error: 'Server profile not found' }, { status: 404 })
     }
@@ -51,11 +54,13 @@ export async function PUT(
     req: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    const authorization = await authorizeRequest(req, 'ops', 'update')
+    if (authorization.response) return authorization.response
     const { id } = await params
     const body = await req.json()
     const { name, host, port, username, auth_method, secret, key_path, project_id, notes } = body
 
-    const existing = await prisma.serverProfile.findUnique({ where: { id } })
+    const existing = await prisma.serverProfile.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
     if (!existing) {
         return NextResponse.json({ error: 'Server profile not found' }, { status: 404 })
     }
@@ -65,7 +70,7 @@ export async function PUT(
         if (secret === null || secret === '') {
             encryptedSecretJson = null
         } else {
-            encryptedSecretJson = await storeResourceSecret(prisma, { resourceType: 'server-profile', resourceId: id, field: 'password', name: `ops:${id}:password` }, secret)
+            encryptedSecretJson = await storeResourceSecret(prisma, { resourceType: 'server-profile', resourceId: id, field: 'password', name: `ops:${id}:password`, workspaceId: authorization.context.workspaceId }, secret, authorization.context.userId)
         }
     }
 
@@ -91,9 +96,11 @@ export async function DELETE(
     req: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    const authorization = await authorizeRequest(req, 'ops', 'delete')
+    if (authorization.response) return authorization.response
     const { id } = await params
 
-    const profile = await prisma.serverProfile.findUnique({ where: { id } })
+    const profile = await prisma.serverProfile.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
     if (!profile) {
         return NextResponse.json({ error: 'Server profile not found' }, { status: 404 })
     }

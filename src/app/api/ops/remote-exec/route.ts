@@ -95,6 +95,7 @@ export async function POST(req: Request) {
         const remoteCommand = buildRemoteCommand(script.filename, remotePath, paramValues)
         execRemote({
             profileId, command: remoteCommand, remoteExecId,
+            workspaceId: authorization.context.workspaceId,
             context: { correlationId, actor: { type: 'user', id: authorization.context.userId }, trigger: 'remote' },
         }).catch(console.error)
     }

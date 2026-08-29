@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function GET(req: Request) {
+    const authorization = await authorizeRequest(req, 'ops', 'read')
+    if (authorization.response) return authorization.response
     const { searchParams } = new URL(req.url)
     const profileId = searchParams.get('profileId') ?? undefined
     const scriptId = searchParams.get('scriptId') ?? undefined
@@ -9,6 +12,7 @@ export async function GET(req: Request) {
     const offset = parseInt(searchParams.get('offset') ?? '0', 10)
 
     const where = {
+        profile: { workspaceId: authorization.context.workspaceId },
         ...(profileId ? { profileId } : {}),
         ...(scriptId ? { scriptId } : {}),
     }
