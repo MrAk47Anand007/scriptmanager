@@ -11,6 +11,13 @@ import { clearGithubGistSettingsRuntime, readGithubGistSettingsRuntime, saveGith
 import { deleteDesktopGist, exportScriptRuntime, exportScriptsRuntime, importScriptsRuntime, readScriptContentRuntime, syncDesktopScriptToGist } from '@/lib/scriptsRuntimeClient'
 import { runScript as runScriptThunk } from '@/features/scripts/scriptsSlice'
 import { runGitActionRuntime } from '@/lib/gitRuntimeClient'
+import {
+  cancelObservabilityRunRuntime,
+  getObservabilityDashboardRuntime,
+  getObservabilityRunDetailRuntime,
+  readObservabilityLogRuntime,
+  retryObservabilityRunRuntime,
+} from '@/lib/observabilityRuntimeClient'
 import { listDesktopBuilds, readDesktopBuildOutput } from '@/lib/scriptsRuntimeClient'
 import {
   listDesktopScriptEnv,
@@ -119,6 +126,34 @@ describe('desktop runtime bridge', () => {
       data: { output: '' },
     })
     expect(runGitAction).toHaveBeenCalledWith({ projectId: 'project-1', action: { action: 'status' } })
+  })
+
+  it('uses desktop IPC for observability reads and workflow actions', async () => {
+    const getObservabilityDashboard = vi.fn().mockResolvedValue({ metrics: { active: 1 } })
+    const getObservabilityRunDetail = vi.fn().mockResolvedValue({ id: 'run-1' })
+    const cancelObservabilityRun = vi.fn().mockResolvedValue({ id: 'run-1', cancelRequestedAt: 'now' })
+    const retryObservabilityRun = vi.fn().mockResolvedValue({ id: 'run-1' })
+    const readObservabilityLog = vi.fn().mockResolvedValue('{"id":"run-1"}')
+    window.scriptManagerDesktop = {
+      runtime: {
+        getObservabilityDashboard,
+        getObservabilityRunDetail,
+        cancelObservabilityRun,
+        retryObservabilityRun,
+        readObservabilityLog,
+      },
+    } as never
+
+    await expect(getObservabilityDashboardRuntime({ kind: 'workflow', status: 'failed' })).resolves.toMatchObject({ metrics: { active: 1 } })
+    await expect(getObservabilityRunDetailRuntime('workflow', 'run-1')).resolves.toEqual({ id: 'run-1' })
+    await expect(cancelObservabilityRunRuntime('workflow', 'run-1')).resolves.toMatchObject({ id: 'run-1' })
+    await expect(retryObservabilityRunRuntime('workflow', 'run-1')).resolves.toEqual({ id: 'run-1' })
+    await expect(readObservabilityLogRuntime('workflow', 'run-1')).resolves.toBe('{"id":"run-1"}')
+    expect(getObservabilityDashboard).toHaveBeenCalledWith({ kind: 'workflow', status: 'failed' })
+    expect(getObservabilityRunDetail).toHaveBeenCalledWith({ kind: 'workflow', id: 'run-1' })
+    expect(cancelObservabilityRun).toHaveBeenCalledWith('run-1')
+    expect(retryObservabilityRun).toHaveBeenCalledWith({ id: 'run-1' })
+    expect(readObservabilityLog).toHaveBeenCalledWith({ kind: 'workflow', id: 'run-1' })
   })
 
   it('uses desktop IPC for script backup and restore', async () => {

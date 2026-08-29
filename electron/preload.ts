@@ -195,6 +195,15 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
       ipcRenderer.invoke('scriptmanager:runtime:assign-collection-project', payload) as Promise<unknown>,
     runGitAction: (payload: { projectId: string; action: import('../src/lib/git/types').GitAction }) =>
       ipcRenderer.invoke('scriptmanager:runtime:run-git-action', payload) as Promise<unknown>,
+    getObservabilityDashboard: (payload?: { kind?: import('../src/lib/observability/types').ExecutionKind; status?: import('../src/lib/observability/types').ExecutionStatus }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:get-observability-dashboard', payload ?? {}) as Promise<unknown>,
+    getObservabilityRunDetail: (payload: { kind: import('../src/lib/observability/types').ExecutionKind; id: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:get-observability-run-detail', payload) as Promise<unknown>,
+    cancelObservabilityRun: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:cancel-observability-run', id) as Promise<unknown>,
+    retryObservabilityRun: (payload: { id: string; nodeId?: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:retry-observability-run', payload) as Promise<unknown>,
+    readObservabilityLog: (payload: { kind: import('../src/lib/observability/types').ExecutionKind; id: string }) =>
+      ipcRenderer.invoke('scriptmanager:runtime:read-observability-log', payload) as Promise<string>,
     listServerProfiles: () => ipcRenderer.invoke('scriptmanager:runtime:list-server-profiles') as Promise<unknown[]>,
     saveServerProfile: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-server-profile', payload) as Promise<unknown>,
     deleteServerProfile: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:delete-server-profile', id) as Promise<string>,

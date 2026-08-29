@@ -24,6 +24,9 @@ import { parseWorkspacePolicy } from '../src/lib/git/policy'
 import { runGit } from '../src/lib/git/process'
 import { createGitService } from '../src/lib/git/service'
 import type { GitAction } from '../src/lib/git/types'
+import { parseExecutionFilters } from '../src/lib/observability/filters'
+import { createObservabilityRepository } from '../src/lib/observability/repository'
+import type { ExecutionKind, ExecutionStatus } from '../src/lib/observability/types'
 import { notifyWorkflowWorker } from '../src/lib/workflows/workerLoop'
 import { createWorkflowRepository } from '../src/lib/workflows/repository'
 import { parseWorkflowDefinition } from '../src/lib/workflows/schema'
@@ -3078,6 +3081,55 @@ async function runDesktopGitAction(payload: { projectId: string; action: GitActi
   }, payload.action, { type: 'user', id: actor.actorId, name: actor.actorName })
 }
 
+function parseDesktopObservabilityFilters(payload?: { kind?: ExecutionKind; status?: ExecutionStatus }) {
+  const query = new URLSearchParams()
+  if (payload?.kind) query.set('kind', payload.kind)
+  if (payload?.status) query.set('status', payload.status)
+  return parseExecutionFilters(query)
+}
+
+async function getDesktopObservabilityDashboard(payload?: { kind?: ExecutionKind; status?: ExecutionStatus }) {
+  const actor = await createDesktopActorContext(prisma)
+  return createObservabilityRepository(prisma).getDashboard({
+    ...parseDesktopObservabilityFilters(payload),
+    workspaceId: actor.workspaceId,
+  })
+}
+
+async function getDesktopObservabilityRunDetail(payload: { kind: ExecutionKind; id: string }) {
+  const actor = await createDesktopActorContext(prisma)
+  return createObservabilityRepository(prisma).getRunDetail(payload.kind, payload.id, actor.workspaceId)
+}
+
+async function requireDesktopWorkflowRun(id: string) {
+  const actor = await createDesktopActorContext(prisma)
+  const run = await prisma.workflowRun.findFirst({ where: { id, workflow: { workspaceId: actor.workspaceId } } })
+  if (!run) throw new Error('Workflow run not found')
+  return run
+}
+
+async function cancelDesktopObservabilityRun(id: string) {
+  const run = await requireDesktopWorkflowRun(id)
+  return createWorkflowRepository(prisma).requestCancellation(run.id)
+}
+
+async function retryDesktopObservabilityRun(payload: { id: string; nodeId?: string }) {
+  const run = await prisma.workflowRun.findFirst({
+    where: { id: payload.id, workflow: { workspaceId: (await createDesktopActorContext(prisma)).workspaceId } },
+    include: { nodeRuns: true },
+  })
+  if (!run) throw new Error('Workflow run not found')
+  const nodeId = payload.nodeId ?? run.nodeRuns.find(node => ['failed', 'interrupted'].includes(node.status))?.nodeId
+  if (!nodeId) throw new Error('No failed node is eligible for retry')
+  return createWorkflowRepository(prisma).retryNode(run.id, nodeId)
+}
+
+async function readDesktopObservabilityLog(payload: { kind: ExecutionKind; id: string }) {
+  const detail = await getDesktopObservabilityRunDetail(payload)
+  if (!detail) throw new Error('Run not found')
+  return JSON.stringify(detail, null, 2)
+}
+
 async function listWorkspaceAccessState() {
   const actor = await createDesktopActorContext(prisma)
   const service = createTeamAdminService(prisma)
@@ -3607,6 +3659,26 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:run-git-action', async (_event, payload: { projectId: string; action: GitAction }) => {
     return runDesktopGitAction(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:get-observability-dashboard', async (_event, payload: { kind?: ExecutionKind; status?: ExecutionStatus }) => {
+    return getDesktopObservabilityDashboard(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:get-observability-run-detail', async (_event, payload: { kind: ExecutionKind; id: string }) => {
+    return getDesktopObservabilityRunDetail(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:cancel-observability-run', async (_event, id: string) => {
+    return cancelDesktopObservabilityRun(id)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:retry-observability-run', async (_event, payload: { id: string; nodeId?: string }) => {
+    return retryDesktopObservabilityRun(payload)
+  })
+
+  ipcMain.handle('scriptmanager:runtime:read-observability-log', async (_event, payload: { kind: ExecutionKind; id: string }) => {
+    return readDesktopObservabilityLog(payload)
   })
 
   ipcMain.handle('scriptmanager:runtime:list-server-profiles', async () => {

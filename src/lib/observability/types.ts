@@ -2,6 +2,7 @@ export type ExecutionKind = 'workflow' | 'script' | 'api' | 'remote'
 export type ExecutionStatus = 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out' | 'interrupted'
 
 export interface ExecutionFilters {
+  workspaceId?: string
   kind?: ExecutionKind
   status?: ExecutionStatus
   workflowId?: string
@@ -36,4 +37,3 @@ export interface ExecutionDashboard {
   failureTrend: Array<{ date: string; count: number }>
   scheduleHealth: { healthy: number; disabled: number; failing: number }
 }
-

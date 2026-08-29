@@ -172,6 +172,11 @@ declare global {
         deleteProject: (id: string) => Promise<string>
         assignCollectionToProject: (payload: { collectionId: string; projectId: string | null }) => Promise<unknown>
         runGitAction: (payload: { projectId: string; action: import('@/lib/git/types').GitAction }) => Promise<unknown>
+        getObservabilityDashboard: (payload?: { kind?: import('@/lib/observability/types').ExecutionKind; status?: import('@/lib/observability/types').ExecutionStatus }) => Promise<unknown>
+        getObservabilityRunDetail: (payload: { kind: import('@/lib/observability/types').ExecutionKind; id: string }) => Promise<unknown>
+        cancelObservabilityRun: (id: string) => Promise<unknown>
+        retryObservabilityRun: (payload: { id: string; nodeId?: string }) => Promise<unknown>
+        readObservabilityLog: (payload: { kind: import('@/lib/observability/types').ExecutionKind; id: string }) => Promise<string>
         listServerProfiles: () => Promise<unknown[]>
         saveServerProfile: (payload: unknown) => Promise<unknown>
         deleteServerProfile: (id: string) => Promise<string>
