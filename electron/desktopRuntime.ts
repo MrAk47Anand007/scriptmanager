@@ -87,6 +87,7 @@ import {
 } from './opsRuntime'
 import { scanForScripts, type ScanForScriptsResult } from './scriptScanner'
 import { BUILT_IN_TEMPLATES } from '../src/lib/templateCatalog'
+import { isSupportedDesktopScriptPath, normalizeDesktopScriptImportPayload } from './desktopScriptImportValidation'
 
 type TerminalEvent =
   | { sessionId: string; type: 'connected' }
@@ -2609,9 +2610,8 @@ async function importScannedScripts(payload: ImportScannedScriptsPayload): Promi
   skipped: number
   collections: string[]
 }> {
-  const requested = (payload.files ?? [])
-    .map((file) => String(file?.path ?? '').trim())
-    .filter(Boolean)
+  const normalizedPayload = normalizeDesktopScriptImportPayload(payload)
+  const requested = normalizedPayload.files.map((file) => file.path)
 
   if (requested.length === 0) {
     return { imported: 0, skipped: 0, collections: [] }
@@ -2643,14 +2643,26 @@ async function importScannedScripts(payload: ImportScannedScriptsPayload): Promi
       skipped += 1
       continue
     }
-    if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) {
+    if (!isSupportedDesktopScriptPath(absolutePath)) {
+      skipped += 1
+      continue
+    }
+
+    let stats: fs.Stats
+    try {
+      stats = fs.lstatSync(absolutePath)
+    } catch {
+      skipped += 1
+      continue
+    }
+    if (stats.isSymbolicLink() || !stats.isFile()) {
       skipped += 1
       continue
     }
     seenInBatch.add(key)
 
-    const collectionName = payload.mode === 'by-folder'
-      ? scannedScriptGroupName(absolutePath, payload.rootForGrouping)
+    const collectionName = normalizedPayload.mode === 'by-folder'
+      ? scannedScriptGroupName(absolutePath, normalizedPayload.rootForGrouping)
       : 'Miscellaneous'
     const collectionId = await findOrCreatePlainCollection(collectionName, collectionCache, actor.workspaceId)
     usedCollectionNames.add(collectionName)
