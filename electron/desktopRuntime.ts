@@ -3197,8 +3197,8 @@ export function initDesktopRuntimeIpc() {
   })
 
   ipcMain.handle('scriptmanager:runtime:list-approvals', async (_event, status?: string) => {
-    await createDesktopActorContext(prisma)
-    return createApprovalService(prisma).list(status)
+    const actor = await createDesktopActorContext(prisma)
+    return createApprovalService(prisma).list(status, actor.workspaceId)
   })
 
   ipcMain.handle('scriptmanager:runtime:decide-approval', async (_event, payload: { id: string; decision: 'allow_once' | 'allow_run' | 'allow_workspace' | 'reject'; note?: string }) => {
