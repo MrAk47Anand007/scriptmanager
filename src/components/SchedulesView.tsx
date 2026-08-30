@@ -11,6 +11,7 @@ import { selectScriptItems } from '@/features/scripts/selectors'
 import { setActiveActivity } from '@/features/workbench/workbenchSlice'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { toast } from '@/components/ui/toast'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -76,6 +77,12 @@ function formatRelative(target: Date, now: Date): string {
   return `in ${minutes}m`
 }
 
+function getScheduleError(value: unknown, fallback: string): string {
+  if (value instanceof Error && value.message) return value.message
+  if (typeof value === 'string' && value) return value
+  return fallback
+}
+
 export function SchedulesView() {
   const dispatch = useAppDispatch()
   const scripts = useAppSelector(selectScriptItems)
@@ -100,7 +107,9 @@ export function SchedulesView() {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
     try {
-      await dispatch(fetchScripts())
+      await dispatch(fetchScripts()).unwrap()
+    } catch (value) {
+      toast.error(getScheduleError(value, 'Schedules could not be refreshed'))
     } finally {
       setRefreshing(false)
       setNow(new Date())
@@ -115,7 +124,9 @@ export function SchedulesView() {
   const handleToggle = useCallback(async (scriptId: string, cron: string, enabled: boolean) => {
     setPendingToggleId(scriptId)
     try {
-      await dispatch(saveSchedule({ scriptId, cron, enabled }))
+      await dispatch(saveSchedule({ scriptId, cron, enabled })).unwrap()
+    } catch (value) {
+      toast.error(getScheduleError(value, 'Schedule could not be saved'))
     } finally {
       setPendingToggleId(null)
     }
@@ -124,7 +135,9 @@ export function SchedulesView() {
   const handleRunNow = useCallback(async (scriptId: string) => {
     setRunningId(scriptId)
     try {
-      await dispatch(runScript({ id: scriptId }))
+      await dispatch(runScript({ id: scriptId })).unwrap()
+    } catch (value) {
+      toast.error(getScheduleError(value, 'Script could not be started'))
     } finally {
       setRunningId(null)
     }
