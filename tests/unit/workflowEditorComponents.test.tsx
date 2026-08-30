@@ -164,6 +164,20 @@ describe('workflow editor components', () => {
     expect(retryWorkflowNode).toHaveBeenCalledWith({ runId: 'run-1', nodeId: 'build' })
   })
 
+  it('reports workflow creation failures', async () => {
+    const createWorkflow = vi.fn().mockRejectedValue(new Error('Workflow could not be created'))
+    const listWorkflows = vi.fn().mockResolvedValue([])
+    const errorToast = vi.spyOn(toast, 'error')
+    window.scriptManagerDesktop = { runtime: { createWorkflow, listWorkflows } } as never
+    const store = makeStore()
+    render(<Provider store={store}><WorkflowSidebar /></Provider>)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New workflow' }))
+
+    await waitFor(() => expect(errorToast).toHaveBeenCalledWith('Workflow could not be created'))
+    expect(createWorkflow).toHaveBeenCalledOnce()
+  })
+
   it('composes named responsive regions and an actionable empty workflow state', () => {
     const store = makeStore()
     store.dispatch(selectWorkflow({ id: 'w', name: 'Empty flow', publishedVersion: null, definition: { schemaVersion: 1, name: 'Empty flow', nodes: [], edges: [] } }))
