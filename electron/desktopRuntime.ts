@@ -14,6 +14,7 @@ import { createTeamAdminService } from '../src/lib/rbac/adminService'
 import { createGithubGistCredentialService } from '../src/lib/gistCredentials'
 import { createGistService } from '../src/lib/gistService'
 import { createDesktopActorContext } from '../src/lib/runtime/trustedContext'
+import { normalizeCanonicalRecoveryDraftInput } from '../src/lib/canonicalRecoveryDraft'
 import { createDesktopCollectionRepository } from '../src/lib/runtime/desktopCollectionRepository'
 import { vaultNotificationConfig } from '../src/lib/secrets/notificationConfig'
 import { resolveScriptEnvironment } from '../src/lib/secrets/runtime'
@@ -3534,15 +3535,22 @@ export function initDesktopRuntimeIpc() {
   })
 
   ipcMain.handle('scriptmanager:runtime:list-canonical-recovery-drafts', async (_event, scriptId: string) => {
-    return getDesktopRecoveryDraftStore().list(scriptId)
+    const { script } = await getAuthorizedDesktopScript(scriptId)
+    if (!script.sourcePath) throw new Error('Script is not backed by a canonical source file')
+    return getDesktopRecoveryDraftStore().list(script.id)
   })
 
   ipcMain.handle('scriptmanager:runtime:save-canonical-recovery-draft', async (_event, payload) => {
-    return getDesktopRecoveryDraftStore().save(payload)
+    const { script } = await getAuthorizedDesktopScript(String(payload?.scriptId ?? ''))
+    if (!script.sourcePath) throw new Error('Script is not backed by a canonical source file')
+    return getDesktopRecoveryDraftStore().save(normalizeCanonicalRecoveryDraftInput({ ...payload, scriptId: script.id }, script.sourcePath))
   })
 
   ipcMain.handle('scriptmanager:runtime:discard-canonical-recovery-draft', async (_event, draftId: string) => {
-    await getDesktopRecoveryDraftStore().discard(draftId)
+    const store = getDesktopRecoveryDraftStore()
+    const draft = await store.read(draftId)
+    await getAuthorizedDesktopScript(draft.scriptId)
+    await store.discard(draftId)
   })
 
   ipcMain.handle('scriptmanager:runtime:scan-pc-scripts', async (_event, payload: ScanPcScriptsPayload) => {

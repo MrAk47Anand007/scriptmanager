@@ -41,4 +41,20 @@ describe('recovery draft store', () => {
     await expect(drafts.read(first.id)).rejects.toThrow('Recovery draft not found')
     expect(await drafts.list('script-2')).toHaveLength(1)
   })
+
+  it('rejects path-like script and draft identifiers', async () => {
+    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scriptmanager-drafts-'))
+    temporaryDirectories.push(rootDir)
+    const drafts = createRecoveryDraftStore({ rootDir })
+
+    await expect(drafts.save({
+      scriptId: '../outside',
+      sourcePath: '/scripts/one.py',
+      sourceRevision: '1:1',
+      content: 'draft',
+    })).rejects.toThrow('Invalid recovery draft script id')
+    await expect(drafts.list('../outside')).rejects.toThrow('Invalid recovery draft script id')
+    await expect(drafts.read('../outside')).rejects.toThrow('Invalid recovery draft id')
+    await expect(drafts.discard('../outside')).rejects.toThrow('Invalid recovery draft id')
+  })
 })

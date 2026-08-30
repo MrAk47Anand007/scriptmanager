@@ -2,6 +2,14 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
+const SAFE_IDENTIFIER = /^[A-Za-z0-9_-]+$/
+
+function assertSafeIdentifier(value: string, label: 'script' | 'draft'): void {
+  if (!SAFE_IDENTIFIER.test(value)) {
+    throw new Error(label === 'script' ? 'Invalid recovery draft script id' : 'Invalid recovery draft id')
+  }
+}
+
 export type RecoveryDraftInput = {
   scriptId: string
   sourcePath: string
@@ -15,14 +23,22 @@ export type RecoveryDraft = RecoveryDraftInput & {
 }
 
 export function createRecoveryDraftStore({ rootDir }: { rootDir: string }) {
-  const draftDirectory = (scriptId: string) => path.join(rootDir, 'recovery-drafts', scriptId)
-  const draftPath = (scriptId: string, draftId: string) => path.join(draftDirectory(scriptId), `${draftId}.json`)
+  const draftDirectory = (scriptId: string) => {
+    assertSafeIdentifier(scriptId, 'script')
+    return path.join(rootDir, 'recovery-drafts', scriptId)
+  }
+  const draftPath = (scriptId: string, draftId: string) => {
+    assertSafeIdentifier(draftId, 'draft')
+    return path.join(draftDirectory(scriptId), `${draftId}.json`)
+  }
 
   const findDraftPath = async (draftId: string) => {
+    assertSafeIdentifier(draftId, 'draft')
     const root = path.join(rootDir, 'recovery-drafts')
     const scriptDirectories = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => [])
     for (const directory of scriptDirectories) {
       if (!directory.isDirectory()) continue
+      if (!SAFE_IDENTIFIER.test(directory.name)) continue
       const candidate = draftPath(directory.name, draftId)
       if (await fs.promises.stat(candidate).then(() => true).catch(() => false)) return candidate
     }
