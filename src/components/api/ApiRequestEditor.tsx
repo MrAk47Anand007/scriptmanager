@@ -7,7 +7,6 @@ import type { ApiRequestDraft, KeyValueRow } from '@/features/api/apiSlice'
 import {
   selectApiActiveRequest,
   selectApiIsSending,
-  selectApiError,
   selectApiEnvironments,
   selectApiActiveEnvironmentId,
   selectApiGlobalVariables,
@@ -31,6 +30,7 @@ import { buildCurl } from '@/lib/curlExport'
 import { copyDesktopClipboardText } from '@/lib/scriptsRuntimeClient'
 import { toast } from '@/components/ui/toast'
 import { EditorSkeleton } from '@/components/ui/EditorSkeleton'
+import { getOperationError } from '@/lib/operationError'
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react').then(m => m.Editor), {
     ssr: false,
@@ -200,7 +200,6 @@ export function ApiRequestEditor() {
   const dispatch = useAppDispatch()
   const activeRequest = useAppSelector(selectApiActiveRequest)
   const isSending = useAppSelector(selectApiIsSending)
-  const error = useAppSelector(selectApiError)
   const environments = useAppSelector(selectApiEnvironments)
   const activeEnvironmentId = useAppSelector(selectApiActiveEnvironmentId)
   const globalVariables = useAppSelector(selectApiGlobalVariables)
@@ -291,7 +290,13 @@ export function ApiRequestEditor() {
     update({ queryParams: rows, url: newUrl })
   }
 
-  const handleSend = async () => { await dispatch(sendApiRequest(draft)) }
+  const handleSend = async () => {
+    try {
+      await dispatch(sendApiRequest(draft)).unwrap()
+    } catch (error) {
+      toast.error(getOperationError(error, 'Request failed'))
+    }
+  }
 
   // Ctrl+Enter "Send Active Request" from WorkbenchShell — ref keeps the
   // listener stable while handleSend captures a fresh draft every render.
@@ -302,9 +307,29 @@ export function ApiRequestEditor() {
     window.addEventListener('scriptmanager:send-active-request', onSendActiveRequest)
     return () => window.removeEventListener('scriptmanager:send-active-request', onSendActiveRequest)
   }, [])
-  const handleSave = async () => { await dispatch(saveApiRequest(draft)) }
+  const handleSave = async () => {
+    setIsSavingRequest(true)
+    try {
+      await dispatch(saveApiRequest(draft)).unwrap()
+      toast.success('Request saved')
+    } catch (error) {
+      toast.error(getOperationError(error, 'Failed to save request'))
+    } finally {
+      setIsSavingRequest(false)
+    }
+  }
+
+  const copyText = async (value: string, onSuccess?: () => void) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      onSuccess?.()
+    } catch {
+      toast.error('Failed to copy to clipboard')
+    }
+  }
+
   const handleCopyUrl = () => {
-    navigator.clipboard.writeText(draft.url).then(() => {
+    void copyText(draft.url, () => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     })
@@ -340,15 +365,25 @@ export function ApiRequestEditor() {
       enabled: row.enabled,
     })))
 
-    await dispatch(saveApiEnvironment({
-      id: activeEnvironment.id,
-      name: activeEnvironment.name,
-      variables: withMissingVariable(rows, name),
-    }))
+    try {
+      await dispatch(saveApiEnvironment({
+        id: activeEnvironment.id,
+        name: activeEnvironment.name,
+        variables: withMissingVariable(rows, name),
+      })).unwrap()
+      toast.success(`Added ${name} to ${activeEnvironment.name}`)
+    } catch (error) {
+      toast.error(getOperationError(error, 'Failed to save environment variable'))
+    }
   }
 
   const addMissingVariableToGlobals = async (name: string) => {
-    await dispatch(saveApiGlobals(withMissingVariable(globalVariables, name)))
+    try {
+      await dispatch(saveApiGlobals(withMissingVariable(globalVariables, name))).unwrap()
+      toast.success(`Added ${name} to global variables`)
+    } catch (error) {
+      toast.error(getOperationError(error, 'Failed to save global variable'))
+    }
   }
 
   const handleCurlImport = () => {
@@ -438,10 +473,11 @@ export function ApiRequestEditor() {
           <Button
             variant="outline"
             onClick={handleSave}
+            disabled={isSavingRequest}
             className="h-7 px-2.5 text-xs gap-1 border-slate-200 dark:border-slate-700"
           >
-            <Save className="h-3 w-3" />
-            Save
+            {isSavingRequest ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+            {isSavingRequest ? 'Saving' : 'Save'}
           </Button>
         </div>
       </div>
@@ -836,7 +872,7 @@ export function ApiRequestEditor() {
                           <Button
                             variant="ghost" size="icon"
                             className="h-9 w-9 shrink-0 text-slate-400 hover:text-slate-600"
-                            onClick={() => navigator.clipboard.writeText(draft.authConfig.token ?? '')}
+                            onClick={() => { void copyText(draft.authConfig.token ?? '') }}
                             title="Copy token"
                           >
                             <Copy className="h-3.5 w-3.5" />
