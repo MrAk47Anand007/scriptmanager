@@ -29,6 +29,14 @@ export async function getCanonicalFolderAvailability(folderPath: string, collect
   }
 }
 
+export async function assertCanonicalFolderAvailable(folderPath: string, collectionId: string): Promise<CanonicalFolderAvailability> {
+  const availability = await getCanonicalFolderAvailability(folderPath, collectionId)
+  if (!availability.available) {
+    throw new Error(`Canonical folder is unavailable${availability.reason ? `: ${availability.reason}` : ''}`)
+  }
+  return availability
+}
+
 export type CanonicalFile = {
   content: string
   revision: string

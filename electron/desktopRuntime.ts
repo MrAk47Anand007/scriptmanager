@@ -66,7 +66,7 @@ import {
   sendApiRequest as sendDesktopApiRequest,
 } from './apiRuntime'
 import { createOsBackedSecretStore } from './secretStore'
-import { createCanonicalFolderWatcher, getCanonicalFolderAvailability, type CanonicalFolderChange, writeCanonicalFile } from './canonicalFolderRuntime'
+import { assertCanonicalFolderAvailable, createCanonicalFolderWatcher, getCanonicalFolderAvailability, type CanonicalFolderChange, writeCanonicalFile } from './canonicalFolderRuntime'
 import { createRecoveryDraftStore } from './recoveryDraftStore'
 import { moveManagedScriptFile } from './managedScriptFiles'
 import { normalizeTerminalSessionId, parseScriptExecutionPayload, parseTerminalInputPayload, parseTerminalResizePayload } from '../src/lib/runtime/desktopIpcPayloads'
@@ -1038,6 +1038,7 @@ async function getScriptRecord(scriptId: string) {
         select: {
           id: true,
           folderPath: true,
+          folderAvailable: true,
           runtimePreset: true,
           pythonToolchainEnabled: true,
           pythonVenvPath: true,
@@ -1111,7 +1112,9 @@ async function getScriptExecutionContext(script: {
   sourcePath?: string | null
   sourceAvailable?: boolean
   collection?: {
+    id: string
     folderPath: string | null
+    folderAvailable?: boolean
     pythonToolchainEnabled: boolean
     pythonVenvPath: string | null
     pythonInterpreterPath: string | null
@@ -1121,6 +1124,9 @@ async function getScriptExecutionContext(script: {
     throw new Error('Canonical script source is unavailable')
   }
   const collectionPath = script.collection?.folderPath ? path.resolve(script.collection.folderPath) : null
+  if (script.sourcePath && collectionPath) {
+    await assertCanonicalFolderAvailable(collectionPath, script.collection!.id)
+  }
   const cwd = script.sourcePath
     ? resolveScriptWorkingDirectory(script.sourcePath)
     : collectionPath ?? await getWorkspaceRoot()
@@ -1533,7 +1539,9 @@ async function readScript(scriptId: string): Promise<ScriptContentDto> {
       sourceAvailable: true,
       collection: {
         select: {
+          id: true,
           folderPath: true,
+          folderAvailable: true,
         },
       },
       createdAt: true,
@@ -1547,6 +1555,9 @@ async function readScript(scriptId: string): Promise<ScriptContentDto> {
 
   if (script.sourcePath && !script.sourceAvailable) {
     throw new Error('Canonical script source is unavailable')
+  }
+  if (script.sourcePath && script.collection?.folderPath) {
+    await assertCanonicalFolderAvailable(script.collection.folderPath, script.collection.id)
   }
 
   const filePath = await resolveScriptPath(script)

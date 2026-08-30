@@ -341,6 +341,8 @@ export async function deleteProject(id: string) {
 
 export async function assignCollectionToProject(collectionId: string, projectId: string | null) {
   const actor = await createDesktopActorContext(prisma)
+  const collection = await prisma.collection.findFirst({ where: { id: collectionId, workspaceId: actor.workspaceId }, select: { id: true } })
+  if (!collection) throw new Error('Collection not found')
   if (projectId) {
     const project = await prisma.project.findFirst({ where: { id: projectId, workspaceId: actor.workspaceId } })
     if (!project) throw new Error('Project not found')
