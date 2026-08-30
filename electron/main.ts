@@ -22,6 +22,7 @@ import { createProductionWorkflowAdapters } from '../src/lib/workflows/runtimeAd
 import { startWorkflowWorker } from '../src/lib/workflows/workerLoop'
 import { getPackagedServerLaunch } from './serverLaunch'
 import { createDesktopActorContext } from '../src/lib/runtime/trustedContext'
+import { isTrustedAppUrl } from './windowSecurity'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
 // In production (packaged), Electron spawns the standalone server itself.
@@ -641,6 +642,17 @@ async function createWindow() {
   mainWindow.webContents.once('did-finish-load', () => {
     setTimeout(revealMainWindow, 120)
   })
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (!isTrustedAppUrl(url, PORT)) {
+      void shell.openExternal(url).catch((error) => console.warn('[Electron] Failed to open external URL:', error))
+    }
+    return { action: 'deny' }
+  })
+  const blockUntrustedNavigation = (event: Electron.Event, url: string) => {
+    if (!isTrustedAppUrl(url, PORT)) event.preventDefault()
+  }
+  mainWindow.webContents.on('will-navigate', blockUntrustedNavigation)
+  mainWindow.webContents.on('will-redirect', blockUntrustedNavigation)
   mainWindow.on('resize', () => saveWindowState(mainWindow!))
   mainWindow.on('move', () => saveWindowState(mainWindow!))
   mainWindow.on('maximize', () => saveWindowState(mainWindow!))
