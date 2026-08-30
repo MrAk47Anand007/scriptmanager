@@ -15,6 +15,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { AlertTriangle, ShieldAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getOperationError } from '@/lib/operationError'
+import { toast } from '@/components/ui/toast'
 
 interface Props {
     open: boolean
@@ -42,9 +44,11 @@ export function ApprovalGateDialog({
         if (!approvalNote.trim()) return
         setIsApproving(true)
         try {
-            await dispatch(approveExecution({ id: remoteExecId, note: approvalNote.trim() }))
+            await dispatch(approveExecution({ id: remoteExecId, note: approvalNote.trim() })).unwrap()
             onApproved()
             onClose()
+        } catch (error) {
+            toast.error(getOperationError(error, 'Failed to record approval'))
         } finally {
             setIsApproving(false)
         }
@@ -53,8 +57,10 @@ export function ApprovalGateDialog({
     const handleReject = async () => {
         setIsRejecting(true)
         try {
-            await dispatch(rejectExecution(remoteExecId))
+            await dispatch(rejectExecution(remoteExecId)).unwrap()
             onClose()
+        } catch (error) {
+            toast.error(getOperationError(error, 'Failed to record rejection'))
         } finally {
             setIsRejecting(false)
         }
