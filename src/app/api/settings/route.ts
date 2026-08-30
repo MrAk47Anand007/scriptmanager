@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { filterPublicSettings, parsePublicSettings } from '@/lib/settingsVisibility'
-import { resolveTrustedRequestContext } from '@/lib/rbac/requestContext'
 
 import { cache } from '@/lib/cache'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function GET(request: Request) {
-  if (!await resolveTrustedRequestContext(request, prisma)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const authorization = await authorizeRequest(request, 'session', 'read')
+  if (authorization.response) return authorization.response
   const cachedSettings = await cache.get('settings')
   if (cachedSettings) {
     return NextResponse.json(cachedSettings)
@@ -28,7 +29,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(req: Request) {
-  if (!await resolveTrustedRequestContext(req, prisma)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const authorization = await authorizeRequest(req, 'session', 'manage')
+  if (authorization.response) return authorization.response
   let data: Record<string, string>
   try {
     data = parsePublicSettings(await req.json())
