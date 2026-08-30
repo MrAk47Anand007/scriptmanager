@@ -1,3 +1,5 @@
+import { assertSafeBuildId } from '@/lib/executionSafety'
+
 const DEFAULT_TERMINAL_SESSION_ID = 'terminal-1'
 const MAX_TERMINAL_SESSION_ID_LENGTH = 128
 const MAX_TERMINAL_INPUT_LENGTH = 1_000_000
@@ -71,5 +73,5 @@ export function parseScriptExecutionPayload(value: unknown): { scriptId: string;
     }
   }
 
-  return { scriptId, ...(buildId ? { buildId } : {}), ...(paramValues ? { paramValues } : {}) }
+  return { scriptId, ...(buildId ? { buildId: assertSafeBuildId(buildId) } : {}), ...(paramValues ? { paramValues } : {}) }
 }

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { ensureBuildEmitter, executeScriptAsync } from '@/lib/scriptRunner'
 import { executionTelemetry } from '@/lib/execution'
 import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
+import { assertSafeBuildId } from '@/lib/executionSafety'
 
 export async function POST(
   req: Request,
@@ -38,7 +39,11 @@ export async function POST(
       paramValues = body.paramValues
     }
     if (typeof body?.buildId === 'string' && body.buildId.trim()) {
-      requestedBuildId = body.buildId.trim()
+      try {
+        requestedBuildId = assertSafeBuildId(body.buildId.trim())
+      } catch {
+        return NextResponse.json({ error: 'Invalid build ID' }, { status: 400 })
+      }
     }
   } catch {
     // No body or invalid JSON — run without params

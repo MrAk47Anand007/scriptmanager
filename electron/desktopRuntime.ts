@@ -67,6 +67,7 @@ import {
 } from './apiRuntime'
 import { createOsBackedSecretStore } from './secretStore'
 import { assertCanonicalFilePath, assertCanonicalFolderAvailable, createCanonicalFolderWatcher, getCanonicalFolderAvailability, readCanonicalFile, type CanonicalFolderChange, writeCanonicalFile } from './canonicalFolderRuntime'
+import { buildLogPath, isManagedBuildLogPath } from '../src/lib/buildLogPath'
 import { createRecoveryDraftStore } from './recoveryDraftStore'
 import { moveManagedScriptFile } from './managedScriptFiles'
 import { normalizeTerminalSessionId, parseScriptExecutionPayload, parseTerminalInputPayload, parseTerminalResizePayload } from '../src/lib/runtime/desktopIpcPayloads'
@@ -2025,6 +2026,12 @@ async function readLocalBuildOutput(payload: { scriptId: string; buildId: string
   const build = await prisma.build.findFirst({ where: { id: payload.buildId, scriptId: payload.scriptId } })
   if (!build) throw new Error('Build not found')
   if (!build.logFile || !fs.existsSync(build.logFile)) return ''
+  if (!isManagedBuildLogPath(getBuildsDir(), build.logFile, build.id)) return ''
+  try {
+    if (!fs.lstatSync(build.logFile).isFile()) return ''
+  } catch {
+    return ''
+  }
   try {
     return fs.readFileSync(build.logFile, 'utf8')
   } catch {
@@ -2793,10 +2800,10 @@ function resolveInterpreter(language: string, interpreter: string | null | undef
 
 function getBuildLogPath(scriptFilename: string, buildId: string): string {
   const buildsDir = getBuildsDir()
-  const safeScriptDir = path.basename(scriptFilename).replace(/[^a-zA-Z0-9_.-]/g, '_')
-  const targetDir = path.join(buildsDir, safeScriptDir)
+  const targetPath = buildLogPath(buildsDir, scriptFilename, buildId)
+  const targetDir = path.dirname(targetPath)
   fs.mkdirSync(targetDir, { recursive: true })
-  return path.join(targetDir, `${buildId}.log`)
+  return targetPath
 }
 
 function terminateProcessTree(child: ReturnType<typeof spawn>) {

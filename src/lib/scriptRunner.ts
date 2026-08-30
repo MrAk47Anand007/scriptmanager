@@ -5,7 +5,7 @@ import path from 'path'
 import fs from 'fs'
 import { resolveScriptEnvironment } from './secrets/runtime'
 import os from 'os'
-import { assertSafeStoredFilename } from '@/lib/executionSafety'
+import { assertSafeBuildId, assertSafeStoredFilename } from '@/lib/executionSafety'
 import { ensureDesktopWorkspaceLayout, getDesktopWorkspaceLayout } from '@/lib/workspaceLayout'
 import { ensureFreshScript } from '@/lib/storage/syncService'
 import { resolveScriptWorkingDirectory } from './scriptPathResolver'
@@ -106,6 +106,7 @@ export async function executeScriptAsync(
     trigger: 'manual',
   },
 ): Promise<void> {
+  assertSafeBuildId(buildId)
   const emitter = ensureBuildEmitter(buildId)
 
   const buildsDir = getBuildsDir()
@@ -325,6 +326,10 @@ export async function getScriptResolvedFilePath(script: { filename: string; sour
 /** Resolved managed scripts root — used by the cloud sync service callers. */
 export async function getScriptsRootDir(): Promise<string> {
   return getScriptsDir()
+}
+
+export function getBuildsRootDir(): string {
+  return getBuildsDir()
 }
 
 export async function ensureScriptsDirExists(): Promise<void> {

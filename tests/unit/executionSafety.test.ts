@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertSafeStoredFilename,
+  assertSafeBuildId,
   buildRemoteChmodCommand,
   buildRemoteCommand,
   normalizeFilePermissions,
@@ -15,6 +16,12 @@ describe('execution safety', () => {
 
   it('rejects stored filenames containing traversal', () => {
     expect(() => assertSafeStoredFilename('../deploy.py')).toThrow('Unsafe script filename')
+  })
+
+  it('rejects build identifiers that could escape the build log directory', () => {
+    expect(assertSafeBuildId('build-1_2')).toBe('build-1_2')
+    expect(() => assertSafeBuildId('../outside')).toThrow('Unsafe build ID')
+    expect(() => assertSafeBuildId('build.log')).toThrow('Unsafe build ID')
   })
 
   it('quotes remote paths and parameter values', () => {

@@ -22,6 +22,13 @@ export function assertSafeStoredFilename(filename: string): string {
   return basename
 }
 
+export function assertSafeBuildId(buildId: string): string {
+  if (typeof buildId !== 'string' || buildId.length === 0 || buildId.length > 128 || !/^[a-zA-Z0-9_-]+$/.test(buildId)) {
+    throw new Error('Unsafe build ID')
+  }
+  return buildId
+}
+
 export function shellEscape(value: string): string {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`
 }

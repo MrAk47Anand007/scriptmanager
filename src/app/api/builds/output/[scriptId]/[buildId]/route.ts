@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import fs from 'fs'
 import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
+import { getBuildsRootDir } from '@/lib/scriptRunner'
+import { isManagedBuildLogPath } from '@/lib/buildLogPath'
 
 // GET /api/builds/output/[scriptId]/[buildId] — get full log output of a build
 export async function GET(
@@ -18,9 +20,9 @@ export async function GET(
   }
 
   let output = ''
-  if (build.logFile && fs.existsSync(build.logFile)) {
+  if (build.logFile && isManagedBuildLogPath(getBuildsRootDir(), build.logFile, build.id) && fs.existsSync(build.logFile)) {
     try {
-      output = fs.readFileSync(build.logFile, 'utf8')
+      output = fs.lstatSync(build.logFile).isFile() ? fs.readFileSync(build.logFile, 'utf8') : ''
     } catch {
       output = '(could not read log file)'
     }

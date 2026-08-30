@@ -27,5 +27,6 @@ describe('desktop IPC payload validation', () => {
     expect(() => parseScriptExecutionPayload({ scriptId: '' })).toThrow('scriptId')
     expect(() => parseScriptExecutionPayload({ scriptId: 'script-1', paramValues: { ENV: 42 } })).toThrow('Parameter')
     expect(() => parseScriptExecutionPayload({ scriptId: 'script-1', buildId: 'x'.repeat(129) })).toThrow('buildId')
+    expect(() => parseScriptExecutionPayload({ scriptId: 'script-1', buildId: '../outside' })).toThrow('Unsafe build ID')
   })
 })
