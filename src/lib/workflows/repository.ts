@@ -118,9 +118,14 @@ export function createWorkflowRepository(database: Database) {
       }
     },
 
-    async claimNextRun(workerId: string) {
+    async claimNextRun(workerId: string, options: { supportsAgentNodes?: boolean } = {}) {
       return database.$transaction(async (tx) => {
-        const candidate = await tx.workflowRun.findFirst({ where: { status: 'queued' }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
+        const candidates = await tx.workflowRun.findMany({ where: { status: 'queued' }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 50, include: { version: true } })
+        const candidate = options.supportsAgentNodes === false
+          ? candidates.find((item) => {
+            try { return !parseWorkflowDefinition(JSON.parse(item.version.definitionJson)).nodes.some((node) => node.type === 'agent') } catch { return true }
+          })
+          : candidates[0]
         if (!candidate) return null
         const claimedAt = new Date()
         const claimed = await tx.workflowRun.updateMany({

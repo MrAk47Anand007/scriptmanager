@@ -9,6 +9,7 @@ const { prismaMock, emitters, ensureBuildEmitterMock, executeScriptAsyncMock, ki
       build: { create: vi.fn(), findUniqueOrThrow: vi.fn() },
       apiRequest: { findFirst: vi.fn() },
       serverProfile: { findFirst: vi.fn() },
+      agentProfile: { findFirst: vi.fn() },
       remoteExecution: { create: vi.fn(), update: vi.fn(async () => ({})), findUniqueOrThrow: vi.fn() },
     },
     emitters,
@@ -35,7 +36,7 @@ vi.mock('@/lib/scriptRunner', () => ({
 vi.mock('@/lib/executeApiRequest', () => ({ executeApiRequest: executeApiRequestMock }))
 vi.mock('@/lib/sshService', () => ({ execRemote: execRemoteMock }))
 
-import { productionWorkflowAdapters } from '@/lib/workflows/runtimeAdapters'
+import { createProductionWorkflowAdapters, productionWorkflowAdapters } from '@/lib/workflows/runtimeAdapters'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -107,5 +108,32 @@ describe('production workflow adapters', () => {
     prismaMock.remoteExecution.findUniqueOrThrow.mockResolvedValue({ id: 're1', status: 'success', exitCode: 0 })
     await productionWorkflowAdapters.runRemoteCommand({ scriptId: 's4', profileId: 'p1' }, {}, signal)
     expect(execRemoteMock).toHaveBeenCalledWith(expect.objectContaining({ signal }))
+  })
+
+  it('delegates agent nodes to the injected desktop service', async () => {
+    prismaMock.agentProfile.findFirst.mockResolvedValue({ id: 'profile-1', provider: 'codex', project: { repositoryRoot: '/workspace' } })
+    const agentService = {
+      launch: vi.fn().mockResolvedValue({ id: 'run-1' }),
+      waitForCompletion: vi.fn().mockResolvedValue({ id: 'run-1', provider: 'codex', status: 'terminated', messages: [{ role: 'assistant', content: 'done' }], artifacts: [], usageJson: null }),
+    }
+    const adapters = createProductionWorkflowAdapters('workspace-1', agentService)
+
+    await expect(adapters.runAgent!({ profileId: 'profile-1', prompt: 'Inspect' }, { topic: 'scripts' })).resolves.toMatchObject({
+      status: 'succeeded',
+      output: { agentRunId: 'run-1', provider: 'codex', status: 'terminated' },
+    })
+    expect(agentService.launch).toHaveBeenCalledWith(expect.objectContaining({ profileId: 'profile-1', prompt: 'Inspect', cwd: '/workspace', workspaceId: 'workspace-1', desktopHost: true }))
+    expect(agentService.waitForCompletion).toHaveBeenCalledWith('run-1', undefined)
+  })
+
+  it('fails the workflow when the desktop provider exits with an error', async () => {
+    prismaMock.agentProfile.findFirst.mockResolvedValue({ id: 'profile-1', provider: 'codex', project: null })
+    const agentService = {
+      launch: vi.fn().mockResolvedValue({ id: 'run-2' }),
+      waitForCompletion: vi.fn().mockResolvedValue({ id: 'run-2', provider: 'codex', status: 'error', errorJson: JSON.stringify({ message: 'provider crashed' }), messages: [], artifacts: [], usageJson: null }),
+    }
+    const adapters = createProductionWorkflowAdapters('workspace-1', agentService)
+
+    await expect(adapters.runAgent!({ profileId: 'profile-1', prompt: 'Inspect' }, {})).rejects.toThrow('provider crashed')
   })
 })

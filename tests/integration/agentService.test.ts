@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { prisma } from '@/lib/db'
 import { createAgentService } from '@/lib/agents/service'
 import { FakeAcpProviderAdapter } from '@/lib/agents/provider'
+import { createApprovalService } from '@/lib/approvals/service'
 
 beforeEach(async () => { await prisma.agentArtifact.deleteMany(); await prisma.agentMessage.deleteMany(); await prisma.permissionGrant.deleteMany(); await prisma.agentRun.deleteMany(); await prisma.agentProfile.deleteMany(); await prisma.agentProviderConfig.deleteMany() })
 
@@ -25,5 +26,38 @@ describe('agent service', () => {
     const config = await service.createProviderConfig({ provider: 'claude', name: 'Claude', executable: 'claude' })
     const profile = await service.createProfile({ name: 'Observe', provider: 'claude', providerConfigId: config.id, accessLevel: 'observe', workspaceId: 'default' })
     await expect(service.launch({ profileId: profile.id, prompt: 'inspect', cwd: '.', desktopHost: false })).rejects.toThrow('desktop host')
+  })
+
+  it('waits for a local ACP session to reach a terminal state', async () => {
+    const codex = new FakeAcpProviderAdapter('codex')
+    const service = createAgentService(prisma, { codex, claude: new FakeAcpProviderAdapter('claude') })
+    const config = await service.createProviderConfig({ provider: 'codex', name: 'Codex', executable: 'codex' })
+    const profile = await service.createProfile({ name: 'Dev', provider: 'codex', providerConfigId: config.id, accessLevel: 'develop', workspaceId: 'default' })
+    const run = await service.launch({ profileId: profile.id, prompt: 'inspect', cwd: '.', desktopHost: true })
+    const completion = service.waitForCompletion(run.id)
+
+    await codex.emit(run.providerSessionId!, { type: 'message', message: { role: 'assistant', content: 'done' } })
+    await codex.emit(run.providerSessionId!, { type: 'state', state: 'terminated' })
+
+    await expect(completion).resolves.toMatchObject({ id: run.id, status: 'terminated' })
+  })
+
+  it('routes permission approvals back to the active ACP session', async () => {
+    const codex = new FakeAcpProviderAdapter('codex')
+    const service = createAgentService(prisma, { codex, claude: new FakeAcpProviderAdapter('claude') })
+    const config = await service.createProviderConfig({ provider: 'codex', name: 'Codex', executable: 'codex' })
+    const profile = await service.createProfile({ name: 'Dev', provider: 'codex', providerConfigId: config.id, accessLevel: 'develop', workspaceId: 'default' })
+    const run = await service.launch({ profileId: profile.id, prompt: 'write a file', cwd: '.', desktopHost: true })
+    await codex.emit(run.providerSessionId!, { type: 'permission_request', request: { id: 'provider-request-1', capability: 'file.write', operation: 'write file', resource: 'README.md', protectedAction: false } })
+    const request = await prisma.approvalRequest.findFirstOrThrow({ where: { runId: run.id, status: 'pending' } })
+    const completion = service.waitForCompletion(run.id)
+
+    await createApprovalService(prisma).decide(request.id, 'allow_once', 'approver-1')
+    await vi.waitFor(async () => expect((await service.getRun(run.id))?.status).toBe('running'))
+    expect(codex.inputs(run.providerSessionId!).some((message) => message.content.includes('provider-request-1') && message.content.includes('true'))).toBe(true)
+    await codex.emit(run.providerSessionId!, { type: 'state', state: 'terminated' })
+
+    await expect(completion).resolves.toMatchObject({ id: run.id, status: 'terminated' })
+    expect((await prisma.permissionGrant.findFirstOrThrow({ where: { runId: run.id } })).decision).toBe('approved')
   })
 })

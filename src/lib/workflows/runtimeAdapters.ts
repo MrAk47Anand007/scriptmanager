@@ -5,6 +5,7 @@ import { buildRemoteCommand } from '@/lib/executionSafety'
 import { execRemote } from '@/lib/sshService'
 import { dispatchNotificationToChannel } from '@/lib/notifications/dispatcher'
 import type { WorkflowAdapters } from './adapters'
+import type { AgentWorkflowService } from '@/lib/agents/service'
 
 function rows(value: string) { try { return JSON.parse(value) } catch { return [] } }
 
@@ -27,7 +28,7 @@ async function waitForBuildDone(buildId: string, signal?: AbortSignal): Promise<
   })
 }
 
-export function createProductionWorkflowAdapters(workspaceId = 'default'): WorkflowAdapters {
+export function createProductionWorkflowAdapters(workspaceId = 'default', agentService?: AgentWorkflowService): WorkflowAdapters {
   return {
   async runScript(config, input, signal) {
     throwIfAborted(signal)
@@ -83,8 +84,26 @@ export function createProductionWorkflowAdapters(workspaceId = 'default'): Workf
       message: { title, body, deepLink: typeof config.deepLink === 'string' ? config.deepLink : undefined },
     })
   },
-  async runAgent() {
-    return { status: 'waiting_approval', output: { desktopHostRequired: true, message: 'Open ScriptManager Desktop to run this agent workflow node.' } }
+  async runAgent(config, input, signal) {
+    if (!agentService) return { status: 'waiting_approval', output: { desktopHostRequired: true, message: 'Open ScriptManager Desktop to run this agent workflow node.' } }
+    throwIfAborted(signal)
+    const profileId = String(config.profileId ?? '')
+    const profile = await prisma.agentProfile.findFirst({ where: { id: profileId, workspaceId }, include: { project: { select: { repositoryRoot: true } } } })
+    if (!profile) throw new Error('Agent profile not found')
+    if (config.provider !== undefined && config.provider !== profile.provider) throw new Error('Agent provider does not match the selected profile')
+    const configuredCwd = typeof config.cwd === 'string' && config.cwd.trim() ? config.cwd.trim() : undefined
+    const cwd = configuredCwd ?? profile.project?.repositoryRoot ?? process.cwd()
+    const run = await agentService.launch({ profileId, prompt: String(config.prompt ?? ''), cwd, workspaceId, desktopHost: true, input: { workflowInput: input } })
+    const completed = await agentService.waitForCompletion(run.id, signal)
+    throwIfAborted(signal)
+    if (['error', 'failed', 'interrupted'].includes(completed.status)) {
+      let message = `Agent run ${completed.status}`
+      try { message = JSON.parse(completed.errorJson ?? '{}').message ?? message } catch { /* keep the stable fallback */ }
+      throw new Error(message)
+    }
+    let usage: unknown
+    try { usage = completed.usageJson ? JSON.parse(completed.usageJson) : undefined } catch { usage = undefined }
+    return { status: 'succeeded', output: { agentRunId: completed.id, provider: completed.provider, status: completed.status, messages: completed.messages, artifacts: completed.artifacts, ...(usage === undefined ? {} : { usage }) } }
   },
   }
 }

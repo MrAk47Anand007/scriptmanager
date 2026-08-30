@@ -16,6 +16,11 @@ import {
 import { OAUTH_ENDPOINTS, runOAuthFlow } from './oauthFlow'
 import { getDefaultClientId } from './oauthDefaults'
 import { registerAgentRuntimeIpc } from './agentRuntime'
+import { createDesktopAcpProviderAdapters, type DesktopAgentRuntime } from './agentRuntime'
+import { createAgentService } from '../src/lib/agents/service'
+import { prisma as workflowPrisma } from '../src/lib/db'
+import { createProductionWorkflowAdapters } from '../src/lib/workflows/runtimeAdapters'
+import { startWorkflowWorker } from '../src/lib/workflows/workerLoop'
 import { getPackagedServerLaunch } from './serverLaunch'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
@@ -34,13 +39,15 @@ let splashWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let nativeNotificationsEnabled = true
 
-registerAgentRuntimeIpc(ipcMain, (sessionId, event) => {
-  void persistDesktopAgentEvent(sessionId, event).catch((error) => {
-    console.warn('[Electron] Failed to persist agent event:', error)
-  }).finally(() => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scriptmanager:agents:event', { sessionId, event })
-  })
+const desktopAgentRuntime: DesktopAgentRuntime = registerAgentRuntimeIpc(ipcMain, (sessionId, event) => {
+  if (!desktopAgentRuntime.isManaged(sessionId)) {
+    void persistDesktopAgentEvent(sessionId, event).catch((error) => {
+      console.warn('[Electron] Failed to persist agent event:', error)
+    })
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scriptmanager:agents:event', { sessionId, event })
 })
+const desktopAgentService = createAgentService(workflowPrisma, createDesktopAcpProviderAdapters(desktopAgentRuntime))
 
 // 16x16 terracotta rounded square, embedded so the tray works without bundled assets.
 const TRAY_ICON_DATA_URL =
@@ -715,6 +722,12 @@ function createTray() {
 
 app.whenReady().then(() => {
   ensureDesktopProcessEnv()
+  startWorkflowWorker({
+    workerId: `desktop-${process.pid}`,
+    supportsAgentNodes: true,
+    reconcileOnStart: false,
+    adaptersFactory: (workspaceId) => createProductionWorkflowAdapters(workspaceId, desktopAgentService),
+  })
   initDesktopRuntimeIpc()
   createApplicationMenu()
   return createWindow().then(() => createTray())

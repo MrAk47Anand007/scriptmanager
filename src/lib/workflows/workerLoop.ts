@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db'
 import { createWorkflowRepository, type WorkflowRepository } from './repository'
 import { createProductionWorkflowAdapters } from './runtimeAdapters'
 import { runClaimedWorkflow } from './worker'
+import type { WorkflowAdapters } from './adapters'
 
 const DEFAULT_POLL_INTERVAL_MS = 1_500
 
@@ -9,6 +10,9 @@ export type WorkflowWorkerLoopOptions = {
   repository?: WorkflowRepository
   pollIntervalMs?: number
   workerId?: string
+  supportsAgentNodes?: boolean
+  adaptersFactory?: (workspaceId: string) => WorkflowAdapters
+  reconcileOnStart?: boolean
   logger?: Pick<Console, 'log' | 'error'>
 }
 
@@ -38,14 +42,14 @@ export function createWorkflowWorkerLoop(options: WorkflowWorkerLoopOptions = {}
   const claimOnce = async (): Promise<string | null> => {
     let claimed: Awaited<ReturnType<WorkflowRepository['claimNextRun']>>
     try {
-      claimed = await repository.claimNextRun(workerId)
+      claimed = await repository.claimNextRun(workerId, { supportsAgentNodes: options.supportsAgentNodes ?? false })
     } catch (error) {
       logger.error('[WorkflowWorker] Claim failed:', error)
       return null
     }
     if (!claimed) return null
     try {
-      await runClaimedWorkflow(claimed, repository, createProductionWorkflowAdapters(claimed.workflow.workspaceId))
+      await runClaimedWorkflow(claimed, repository, options.adaptersFactory?.(claimed.workflow.workspaceId) ?? createProductionWorkflowAdapters(claimed.workflow.workspaceId))
     } catch (error) {
       logger.error(`[WorkflowWorker] Run ${claimed.id} crashed:`, error)
       try { await repository.setRunStatus(claimed.id, 'failed', undefined, { message: error instanceof Error ? error.message : String(error) }) } catch {}
@@ -74,7 +78,7 @@ export function createWorkflowWorkerLoop(options: WorkflowWorkerLoopOptions = {}
     drain,
     start() {
       if (timer) return
-      void reconcile().catch((error) => logger.error('[WorkflowWorker] Reconciliation failed:', error))
+      if (options.reconcileOnStart !== false) void reconcile().catch((error) => logger.error('[WorkflowWorker] Reconciliation failed:', error))
       timer = setInterval(() => void drain(), pollIntervalMs)
       timer.unref?.()
       logger.log(`[WorkflowWorker] Started (poll every ${pollIntervalMs}ms)`)
@@ -96,7 +100,8 @@ export function getWorkflowWorkerLoop(): WorkflowWorkerLoop {
   return singleton
 }
 
-export function startWorkflowWorker(): void {
+export function startWorkflowWorker(options?: WorkflowWorkerLoopOptions): void {
+  if (!singleton && options) singleton = createWorkflowWorkerLoop(options)
   getWorkflowWorkerLoop().start()
 }
 

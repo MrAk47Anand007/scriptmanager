@@ -198,6 +198,28 @@ describe('workflow worker', () => {
     })
   })
 
+  it('lets a hosted worker skip queued agent runs', async () => {
+    const agentDefinition: WorkflowDefinition = {
+      schemaVersion: 1, name: 'Agent',
+      nodes: [{ id: 'agent', type: 'agent', name: 'Agent', config: { profileId: 'p1', prompt: 'Inspect' } }],
+      edges: [],
+    }
+    const scriptDefinition: WorkflowDefinition = {
+      schemaVersion: 1, name: 'Script',
+      nodes: [{ id: 'script', type: 'script', name: 'Script', config: { scriptId: 's1' } }],
+      edges: [],
+    }
+    const agentWorkflow = await repository.createDraft({ name: agentDefinition.name, definition: agentDefinition })
+    const agentVersion = await repository.publish(agentWorkflow.id)
+    await repository.enqueueRun({ workflowId: agentWorkflow.id, versionId: agentVersion.id, triggerType: 'manual', actorId: 'admin', payload: {} })
+    const scriptWorkflow = await repository.createDraft({ name: scriptDefinition.name, definition: scriptDefinition })
+    const scriptVersion = await repository.publish(scriptWorkflow.id)
+    await repository.enqueueRun({ workflowId: scriptWorkflow.id, versionId: scriptVersion.id, triggerType: 'manual', actorId: 'admin', payload: {} })
+
+    const claimed = await repository.claimNextRun('server-worker', { supportsAgentNodes: false })
+    expect(claimed?.workflowId).toBe(scriptWorkflow.id)
+  })
+
   it('executes same-layer nodes concurrently instead of sequentially', async () => {
     const started: string[] = []
     const parallelAdapters = {

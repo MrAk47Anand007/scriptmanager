@@ -26,7 +26,7 @@ app.prepare().then(async () => {
   // Start the durable workflow worker (reconciles interrupted runs, drains queue)
   try {
     const { startWorkflowWorker } = await import('./src/lib/workflows/workerLoop')
-    startWorkflowWorker()
+    startWorkflowWorker({ supportsAgentNodes: false })
   } catch (err) {
     console.error('[Server] Failed to start workflow worker:', err)
   }
