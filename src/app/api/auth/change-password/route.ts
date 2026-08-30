@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { verifyPassword, hashPassword } from '@/lib/auth'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 // POST /api/auth/change-password — change the master password
 export async function POST(req: Request) {
+  const authorization = await authorizeRequest(req, 'session', 'manage')
+  if (authorization.response) return authorization.response
   const { currentPassword, newPassword } = await req.json()
   if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 1) {
     return NextResponse.json({ error: 'New password required' }, { status: 400 })
