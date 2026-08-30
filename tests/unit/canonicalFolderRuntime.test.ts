@@ -115,6 +115,21 @@ describe('canonical folder runtime', () => {
     watcher.close()
   })
 
+  it('keeps watching when a nested folder cannot be enumerated', () => {
+    const { root } = createFixture()
+    const nestedFolder = path.join(root, 'restricted')
+    fs.mkdirSync(nestedFolder)
+    const readdirSync = vi.spyOn(fs, 'readdirSync')
+      .mockImplementationOnce(() => [{ name: 'restricted', isDirectory: () => true } as never])
+      .mockImplementationOnce(() => { throw Object.assign(new Error('permission denied'), { code: 'EACCES' }) })
+    const watcher = createCanonicalFolderWatcher({ onChange: vi.fn(), debounceMs: 10 })
+
+    expect(() => watcher.watch('collection-1', root)).not.toThrow()
+
+    watcher.close()
+    readdirSync.mockRestore()
+  })
+
   it('reports both sides of a canonical file rename', async () => {
     const { root, sourcePath } = createFixture()
     const renamedPath = path.join(root, 'renamed.py')

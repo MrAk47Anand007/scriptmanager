@@ -68,6 +68,11 @@ function isPathWithinRoot(rootPath: string, candidatePath: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
 }
 
+function isIgnorableWatcherError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code
+  return code === 'ENOENT' || code === 'EACCES' || code === 'EPERM'
+}
+
 async function validateCanonicalFilePath(rootPath: string, sourcePath: string, allowMissing: boolean): Promise<string> {
   const resolvedPath = assertPathWithinRoot(rootPath, sourcePath)
   const realRootPath = await fs.promises.realpath(path.resolve(rootPath))
@@ -184,13 +189,20 @@ export function createCanonicalFolderWatcher({
       })
       collectionWatchers.set(directoryPath, watcher)
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      if (!isIgnorableWatcherError(error)) throw error
     }
   }
 
   const watchDirectoryTree = (collectionId: string, rootPath: string, directoryPath: string) => {
     watchDirectory(collectionId, rootPath, directoryPath)
-    for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(directoryPath, { withFileTypes: true })
+    } catch (error) {
+      if (isIgnorableWatcherError(error)) return
+      throw error
+    }
+    for (const entry of entries) {
       if (entry.isDirectory()) watchDirectoryTree(collectionId, rootPath, path.join(directoryPath, entry.name))
     }
   }
