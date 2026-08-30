@@ -15,7 +15,7 @@ export async function POST(
   const collection = await prisma.collection.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
   if (!collection) return NextResponse.json({ error: 'Collection not found' }, { status: 404 })
   const root = await getScriptsRootDir()
-  const summary = await syncCollection(prisma, id, root)
+  const summary = await syncCollection(prisma, id, root, authorization.context.workspaceId)
   if (summary.pulled > 0) {
     await cache.del(`all_scripts:${authorization.context.workspaceId}`)
   }

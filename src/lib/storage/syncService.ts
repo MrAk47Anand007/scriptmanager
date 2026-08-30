@@ -98,11 +98,12 @@ export async function ensureFreshScript(
   prisma: PrismaClient,
   scriptId: string,
   scriptsRoot: string,
+  workspaceId: string,
   vault?: SecretVaultService
 ): Promise<EnsureFreshResult> {
   try {
-    const script = await prisma.script.findUnique({
-      where: { id: scriptId },
+    const script = await prisma.script.findFirst({
+      where: { id: scriptId, workspaceId },
       include: { collection: true },
     })
     if (!script?.collection?.storageProviderId) {
@@ -164,11 +165,12 @@ export async function pushScript(
   prisma: PrismaClient,
   scriptId: string,
   scriptsRoot: string,
+  workspaceId: string,
   vault?: SecretVaultService
 ): Promise<PushScriptResult> {
   try {
-    const script = await prisma.script.findUnique({
-      where: { id: scriptId },
+    const script = await prisma.script.findFirst({
+      where: { id: scriptId, workspaceId },
       include: { collection: true },
     })
     if (!script) {
@@ -224,12 +226,13 @@ export async function syncCollection(
   prisma: PrismaClient,
   collectionId: string,
   scriptsRoot: string,
+  workspaceId: string,
   vault?: SecretVaultService
 ): Promise<CollectionSyncSummary> {
   const summary: CollectionSyncSummary = { ok: true, pulled: 0, pushed: 0, conflicts: 0, skipped: [] }
   try {
-    const collection = await prisma.collection.findUnique({
-      where: { id: collectionId },
+    const collection = await prisma.collection.findFirst({
+      where: { id: collectionId, workspaceId },
       include: { scripts: true },
     })
     if (!collection) {
@@ -334,7 +337,7 @@ export async function syncCollection(
       }
       // Filename collision with a script in another collection sharing the same
       // managed root would overwrite it — skip those.
-      const filenameTaken = await prisma.script.findFirst({ where: { filename: relative } })
+      const filenameTaken = await prisma.script.findFirst({ where: { filename: relative, workspaceId } })
       if (filenameTaken) {
         summary.skipped.push(`${normalizedPath} (filename already in use)`)
         continue
@@ -348,7 +351,7 @@ export async function syncCollection(
         const baseName = relative.slice(0, relative.length - ext.length)
         let name = baseName
         let counter = 2
-        while (await prisma.script.findFirst({ where: { name } })) {
+        while (await prisma.script.findFirst({ where: { name, workspaceId } })) {
           name = `${baseName} ${counter++}`
         }
 

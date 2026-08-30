@@ -22,7 +22,7 @@ let cachedDefaultTimeoutMs: { value: number; expiresAt: number } | null = null
 
 interface ScriptInfo {
   id: string
-  workspaceId?: string | null
+  workspaceId: string
   filename: string
   sourcePath?: string | null
   language: string
@@ -111,7 +111,7 @@ export async function executeScriptAsync(
   try {
     // Pull-on-run: refresh cloud-bound scripts before executing. Never blocks —
     // remote failures degrade to the cached local copy with a warning line.
-    const freshness = await ensureFreshScript(prisma, script.id, await getScriptsDir())
+    const freshness = await ensureFreshScript(prisma, script.id, await getScriptsDir(), script.workspaceId)
     if (freshness.pulled) {
       emitter.emit('line', '[cloud] pulled latest version from storage provider')
     } else if (freshness.warning) {

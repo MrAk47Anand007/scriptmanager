@@ -35,7 +35,7 @@ describe('cloud sync workspace ownership', () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'scriptmanager-sync-'))
     const database = {
       collection: {
-        findUnique: vi.fn(async () => ({
+        findFirst: vi.fn(async () => ({
           id: 'foreign-collection',
           workspaceId: 'workspace-b',
           folderPath: null,
@@ -53,8 +53,25 @@ describe('cloud sync workspace ownership', () => {
       },
     } as never
 
-    await expect(syncCollection(database, 'foreign-collection', tempRoot)).resolves.toMatchObject({ ok: true, pulled: 1 })
+    await expect(syncCollection(database, 'foreign-collection', tempRoot, 'workspace-b')).resolves.toMatchObject({ ok: true, pulled: 1 })
     expect(createdScripts).toHaveLength(1)
     expect(createdScripts[0]).toMatchObject({ workspaceId: 'workspace-b', collectionId: 'foreign-collection' })
+  })
+
+  it('does not sync a collection outside the requested workspace', async () => {
+    const findFirst = vi.fn(async () => null)
+    const database = {
+      collection: { findFirst },
+      script: { findFirst: vi.fn() },
+    } as never
+
+    await expect(syncCollection(database, 'foreign-collection', tempRoot, 'workspace-a')).resolves.toMatchObject({
+      ok: false,
+      error: 'Collection not found',
+    })
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { id: 'foreign-collection', workspaceId: 'workspace-a' },
+      include: { scripts: true },
+    })
   })
 })

@@ -139,7 +139,7 @@ export async function POST(req: Request) {
 
     if (content !== undefined) {
       // Push-on-save: fire-and-forget upload for cloud-bound collections.
-      void getScriptsRootDir().then((root) => pushScript(prisma, script!.id, root)).then((result) => {
+      void getScriptsRootDir().then((root) => pushScript(prisma, script!.id, root, workspaceId)).then((result) => {
         if (result?.error) console.warn(`[CloudSync] push after save failed: ${result.error}`)
       })
     }

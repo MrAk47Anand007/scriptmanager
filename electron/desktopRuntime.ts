@@ -1935,7 +1935,7 @@ async function saveLocalScript(payload: SaveScriptPayload): Promise<ScriptDto> {
   })
 
   // Push-on-save: fire-and-forget upload for cloud-bound collections.
-  void getWorkspaceRoot().then((scriptsRoot) => pushScript(prisma, script.id, scriptsRoot, getDesktopSecretVaultService())).then((result) => {
+  void getWorkspaceRoot().then((scriptsRoot) => pushScript(prisma, script.id, scriptsRoot, actor.workspaceId, getDesktopSecretVaultService())).then((result) => {
     if (result.pushed) {
       console.log(`[CloudSync] pushed ${script.filename} after save`)
     } else if (result.error) {
@@ -2789,7 +2789,7 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
 
   // Pull-on-run: refresh cloud-bound scripts before executing; remote failures
   // degrade to the cached local copy (warning surfaced in the build output).
-  const freshness = await ensureFreshScript(prisma, script.id, await getWorkspaceRoot(), getDesktopSecretVaultService())
+  const freshness = await ensureFreshScript(prisma, script.id, await getWorkspaceRoot(), script.workspaceId, getDesktopSecretVaultService())
 
   const scriptPath = await resolveScriptPath(script)
   const executionContext = await getScriptExecutionContext(script)
@@ -3725,7 +3725,8 @@ export function initDesktopRuntimeIpc() {
   })
 
   ipcMain.handle('scriptmanager:runtime:sync-collection', async (_event, collectionId: string) => {
-    return syncCollection(prisma, collectionId, await getWorkspaceRoot(), getDesktopSecretVaultService())
+    const actor = await createDesktopActorContext(prisma)
+    return syncCollection(prisma, collectionId, await getWorkspaceRoot(), actor.workspaceId, getDesktopSecretVaultService())
   })
 
   ipcMain.handle('scriptmanager:runtime:warm-terminal', async (event, payload?: { sessionId?: string }) => {
