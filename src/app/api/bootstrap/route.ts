@@ -61,6 +61,7 @@ export async function GET(request: Request) {
         // Collections (no cache — small table, always fresh)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         prisma.collection.findMany({
+            where: { workspaceId },
             orderBy: { name: 'asc' },
             include: { _count: { select: { scripts: true } } },
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -46,13 +46,16 @@ model Script {
 }
 
 model Tag {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  color     String   @default("#6366f1")
-  createdAt DateTime @default(now()) @map("created_at")
+  id          String   @id @default(uuid())
+  workspaceId String   @default("default") @map("workspace_id")
+  name        String
+  color       String   @default("#6366f1")
+  createdAt   DateTime @default(now()) @map("created_at")
 
   scripts ScriptTag[]
 
+  @@unique([workspaceId, name])
+  @@index([workspaceId, name])
   @@map("tags")
 }
 
@@ -230,7 +233,8 @@ model Setting {
 
 model ScriptTemplate {
   id          String   @id @default(uuid())
-  name        String   @unique
+  workspaceId String   @default("default") @map("workspace_id")
+  name        String
   description String   @default("")
   category    String   @default("general")
   language    String   @default("python")
@@ -240,6 +244,8 @@ model ScriptTemplate {
   isBuiltIn   Boolean  @default(false) @map("is_built_in")
   createdAt   DateTime @default(now()) @map("created_at")
 
+  @@unique([workspaceId, name])
+  @@index([workspaceId, isBuiltIn, name])
   @@map("script_templates")
 }
 

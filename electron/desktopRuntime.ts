@@ -1447,9 +1447,9 @@ async function importLocalScripts(payload: ScriptExportBundle): Promise<{ messag
         if (!tagInfo || typeof tagInfo.name !== 'string' || !tagInfo.name.trim()) continue
         const tagName = tagInfo.name.trim().toLowerCase()
         const tag = await prisma.tag.upsert({
-          where: { name: tagName },
+          where: { workspaceId_name: { workspaceId: actor.workspaceId, name: tagName } },
           update: {},
-          create: { name: tagName, color: tagInfo.color ?? '#6366f1' },
+          create: { workspaceId: actor.workspaceId, name: tagName, color: tagInfo.color ?? '#6366f1' },
         })
         await prisma.scriptTag.upsert({
           where: { scriptId_tagId: { scriptId: script.id, tagId: tag.id } },
@@ -2209,16 +2209,16 @@ async function readLocalScriptVersion(payload: { scriptId: string; versionId: st
 }
 
 async function listLocalTags() {
-  await createDesktopActorContext(prisma)
-  const tags = await prisma.tag.findMany({ orderBy: { name: 'asc' }, include: { _count: { select: { scripts: true } } } })
+  const actor = await createDesktopActorContext(prisma)
+  const tags = await prisma.tag.findMany({ where: { workspaceId: actor.workspaceId }, orderBy: { name: 'asc' }, include: { _count: { select: { scripts: true } } } })
   return tags.map((tag) => ({ id: tag.id, name: tag.name, color: tag.color, script_count: tag._count.scripts, created_at: tag.createdAt.toISOString() }))
 }
 
 async function addLocalTag(payload: { scriptId: string; name: string; color?: string }) {
-  await getAuthorizedDesktopScript(payload.scriptId)
+  const { actor } = await getAuthorizedDesktopScript(payload.scriptId)
   const name = payload.name.trim().toLowerCase()
   if (!name) throw new Error('Tag name is required')
-  const tag = await prisma.tag.upsert({ where: { name }, update: {}, create: { name, color: payload.color ?? '#6366f1' } })
+  const tag = await prisma.tag.upsert({ where: { workspaceId_name: { workspaceId: actor.workspaceId, name } }, update: {}, create: { workspaceId: actor.workspaceId, name, color: payload.color ?? '#6366f1' } })
   await prisma.scriptTag.upsert({
     where: { scriptId_tagId: { scriptId: payload.scriptId, tagId: tag.id } },
     update: {},
@@ -2249,24 +2249,25 @@ function serializeLocalTemplate(template: { id: string; name: string; descriptio
 }
 
 async function listLocalTemplates() {
-  await createDesktopActorContext(prisma)
-  if (await prisma.scriptTemplate.count() === 0) {
-    await prisma.scriptTemplate.createMany({ data: BUILT_IN_TEMPLATES })
+  const actor = await createDesktopActorContext(prisma)
+  if (await prisma.scriptTemplate.count({ where: { workspaceId: actor.workspaceId } }) === 0) {
+    await prisma.scriptTemplate.createMany({ data: BUILT_IN_TEMPLATES.map((template) => ({ ...template, workspaceId: actor.workspaceId })) })
   }
-  const templates = await prisma.scriptTemplate.findMany({ orderBy: [{ isBuiltIn: 'desc' }, { name: 'asc' }] })
+  const templates = await prisma.scriptTemplate.findMany({ where: { workspaceId: actor.workspaceId }, orderBy: [{ isBuiltIn: 'desc' }, { name: 'asc' }] })
   return templates.map(serializeLocalTemplate)
 }
 
 async function saveLocalTemplate(payload: SaveTemplatePayload) {
-  await createDesktopActorContext(prisma)
+  const actor = await createDesktopActorContext(prisma)
   const name = payload.name.trim()
   if (!name) throw new Error('Name is required')
   if (payload.content === undefined || payload.content === null) throw new Error('Content is required')
-  const existing = await prisma.scriptTemplate.findUnique({ where: { name } })
+  const existing = await prisma.scriptTemplate.findUnique({ where: { workspaceId_name: { workspaceId: actor.workspaceId, name } } })
   if (existing) throw new Error('A template with this name already exists')
   const parameters = Array.isArray(payload.parameters) ? JSON.stringify(payload.parameters) : '[]'
   const template = await prisma.scriptTemplate.create({
     data: {
+      workspaceId: actor.workspaceId,
       name,
       description: payload.description?.trim() ?? '',
       category: payload.category?.trim() || 'general',
@@ -2281,8 +2282,8 @@ async function saveLocalTemplate(payload: SaveTemplatePayload) {
 }
 
 async function deleteLocalTemplate(id: string) {
-  await createDesktopActorContext(prisma)
-  const template = await prisma.scriptTemplate.findUnique({ where: { id } })
+  const actor = await createDesktopActorContext(prisma)
+  const template = await prisma.scriptTemplate.findFirst({ where: { id, workspaceId: actor.workspaceId } })
   if (!template) throw new Error('Template not found')
   if (template.isBuiltIn) throw new Error('Built-in templates cannot be deleted')
   await prisma.scriptTemplate.delete({ where: { id } })

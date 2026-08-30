@@ -2,10 +2,14 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getScriptResolvedFilePath } from '@/lib/scriptRunner'
 import fs from 'fs'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 // GET /api/export — export all scripts as a JSON bundle
-export async function GET() {
+export async function GET(req: Request) {
+  const authorization = await authorizeRequest(req, 'script', 'read')
+  if (authorization.response) return authorization.response
   const scripts = await prisma.script.findMany({
+    where: { workspaceId: authorization.context.workspaceId },
     orderBy: { name: 'asc' },
     include: { tags: { include: { tag: true } } },
   })

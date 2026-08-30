@@ -93,9 +93,9 @@ export async function POST(req: Request) {
         if (!tagInfo.name) continue
         const tagName = tagInfo.name.toLowerCase()
         const tag = await prisma.tag.upsert({
-          where: { name: tagName },
+          where: { workspaceId_name: { workspaceId, name: tagName } },
           update: {},
-          create: { name: tagName, color: tagInfo.color ?? '#6366f1' },
+          create: { workspaceId, name: tagName, color: tagInfo.color ?? '#6366f1' },
         })
         await prisma.scriptTag.upsert({
           where: { scriptId_tagId: { scriptId: script.id, tagId: tag.id } },

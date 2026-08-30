@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { BUILT_IN_TEMPLATES } from '@/lib/templateCatalog'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 // ---- Helper ----
 
@@ -32,20 +33,23 @@ function toApiShape(t: {
 
 // ---- Lazy seed ----
 
-async function seedBuiltInsIfEmpty() {
-  const count = await prisma.scriptTemplate.count()
+async function seedBuiltInsIfEmpty(workspaceId: string) {
+  const count = await prisma.scriptTemplate.count({ where: { workspaceId } })
   if (count > 0) return
   await prisma.scriptTemplate.createMany({
-    data: BUILT_IN_TEMPLATES,
+    data: BUILT_IN_TEMPLATES.map((template) => ({ ...template, workspaceId })),
   })
 }
 
 // ---- Route handlers ----
 
-export async function GET() {
-  await seedBuiltInsIfEmpty()
+export async function GET(req: Request) {
+  const authorization = await authorizeRequest(req, 'script', 'read')
+  if (authorization.response) return authorization.response
+  await seedBuiltInsIfEmpty(authorization.context.workspaceId)
 
   const templates = await prisma.scriptTemplate.findMany({
+    where: { workspaceId: authorization.context.workspaceId },
     orderBy: [
       { isBuiltIn: 'desc' },
       { name: 'asc' },
@@ -56,6 +60,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const authorization = await authorizeRequest(req, 'script', 'create')
+  if (authorization.response) return authorization.response
   const data = await req.json()
   const { name, description, category, language, interpreter, content, parameters } = data
 
@@ -71,13 +77,14 @@ export async function POST(req: Request) {
     try { parametersJson = JSON.stringify(parameters) } catch { parametersJson = '[]' }
   }
 
-  const existing = await prisma.scriptTemplate.findUnique({ where: { name: name.trim() } })
+  const existing = await prisma.scriptTemplate.findUnique({ where: { workspaceId_name: { workspaceId: authorization.context.workspaceId, name: name.trim() } } })
   if (existing) {
     return NextResponse.json({ error: 'A template with this name already exists' }, { status: 409 })
   }
 
   const template = await prisma.scriptTemplate.create({
     data: {
+      workspaceId: authorization.context.workspaceId,
       name: name.trim(),
       description: description?.trim() ?? '',
       category: category?.trim() || 'general',

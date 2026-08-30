@@ -51,9 +51,9 @@ export async function POST(
 
   // Upsert tag
   const tag = await prisma.tag.upsert({
-    where: { name: tagName },
+    where: { workspaceId_name: { workspaceId: authorization.context.workspaceId, name: tagName } },
     update: {},
-    create: { name: tagName, color },
+    create: { workspaceId: authorization.context.workspaceId, name: tagName, color },
   })
 
   // Create join (ignore if already exists)

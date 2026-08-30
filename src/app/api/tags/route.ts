@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 // GET /api/tags — list all tags
-export async function GET() {
+export async function GET(req: Request) {
+  const authorization = await authorizeRequest(req, 'script', 'read')
+  if (authorization.response) return authorization.response
   const tags = await prisma.tag.findMany({
+    where: { workspaceId: authorization.context.workspaceId },
     orderBy: { name: 'asc' },
     include: { _count: { select: { scripts: true } } },
   })
@@ -20,7 +24,10 @@ export async function GET() {
 
 // POST /api/tags — create a tag
 export async function POST(req: Request) {
+  const authorization = await authorizeRequest(req, 'script', 'update')
+  if (authorization.response) return authorization.response
   const body = await req.json()
+  const workspaceId = authorization.context.workspaceId
   const name = (body.name ?? '').trim().toLowerCase()
   const color = body.color ?? '#6366f1'
 
@@ -28,7 +35,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Tag name is required' }, { status: 400 })
   }
 
-  const existing = await prisma.tag.findUnique({ where: { name } })
+  const existing = await prisma.tag.findUnique({ where: { workspaceId_name: { workspaceId, name } } })
   if (existing) {
     return NextResponse.json(
       { id: existing.id, name: existing.name, color: existing.color, created_at: existing.createdAt.toISOString() },
@@ -36,7 +43,7 @@ export async function POST(req: Request) {
     )
   }
 
-  const tag = await prisma.tag.create({ data: { name, color } })
+  const tag = await prisma.tag.create({ data: { workspaceId, name, color } })
   return NextResponse.json(
     { id: tag.id, name: tag.name, color: tag.color, created_at: tag.createdAt.toISOString() },
     { status: 201 }
