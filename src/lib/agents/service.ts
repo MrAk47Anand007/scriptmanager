@@ -30,7 +30,7 @@ export function createAgentService(database: PrismaClient, adapters: Record<AcpP
     else if (event.type === 'artifact') await repository.appendArtifact(runId, event.artifact)
     else if (event.type === 'usage') await repository.updateRun(runId, { usage: event.usage })
     else if (event.type === 'error') await repository.updateRun(runId, { status: event.error.recoverable ? 'interrupted' : 'failed', error: event.error, finishedAt: event.error.recoverable ? undefined : new Date() })
-    else if (event.type === 'state') await repository.updateRun(runId, { status: event.state, finishedAt: ['terminated', 'error', 'interrupted'].includes(event.state) ? new Date() : undefined })
+    else if (event.type === 'state') await repository.updateRun(runId, { status: event.state, finishedAt: ['succeeded', 'terminated', 'error', 'interrupted'].includes(event.state) ? new Date() : undefined })
     else if (event.type === 'permission_request' && profile && session) {
       const decision = await authorizeAgentAction(database, { actorId: profile.id, workspaceId: profile.workspaceId, runId, correlationId: (await database.agentRun.findUniqueOrThrow({ where: { id: runId } })).correlationId, accessLevel: profile.accessLevel as AgentAccessLevel, capability: event.request.capability, operation: event.request.operation, resource: event.request.resource, reason: event.request.reason, preview: event.request.preview })
       if (decision.status === 'allowed') await session.decidePermission(event.request.id, true)

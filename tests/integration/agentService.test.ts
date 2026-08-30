@@ -42,6 +42,20 @@ describe('agent service', () => {
     await expect(completion).resolves.toMatchObject({ id: run.id, status: 'terminated' })
   })
 
+  it('persists successful ACP turns as finished runs', async () => {
+    const codex = new FakeAcpProviderAdapter('codex')
+    const service = createAgentService(prisma, { codex, claude: new FakeAcpProviderAdapter('claude') })
+    const config = await service.createProviderConfig({ provider: 'codex', name: 'Codex', executable: 'codex' })
+    const profile = await service.createProfile({ name: 'Dev', provider: 'codex', providerConfigId: config.id, accessLevel: 'develop', workspaceId: 'default' })
+    const run = await service.launch({ profileId: profile.id, prompt: 'inspect', cwd: '.', desktopHost: true })
+
+    await codex.emit(run.providerSessionId!, { type: 'state', state: 'succeeded' })
+
+    const durable = await service.getRun(run.id)
+    expect(durable?.status).toBe('succeeded')
+    expect(durable?.finishedAt).toBeInstanceOf(Date)
+  })
+
   it('routes permission approvals back to the active ACP session', async () => {
     const codex = new FakeAcpProviderAdapter('codex')
     const service = createAgentService(prisma, { codex, claude: new FakeAcpProviderAdapter('claude') })

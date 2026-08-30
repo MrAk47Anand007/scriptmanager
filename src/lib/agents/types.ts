@@ -1,5 +1,5 @@
 export type AcpProvider = 'codex' | 'claude'
-export type AcpSessionState = 'starting' | 'running' | 'interrupted' | 'terminated' | 'error'
+export type AcpSessionState = 'starting' | 'running' | 'interrupted' | 'succeeded' | 'terminated' | 'error'
 
 export interface AcpMessage { id?: string; role: 'user' | 'assistant' | 'system' | 'tool'; content: string; createdAt?: string }
 export interface AcpToolRequest { id: string; name: string; arguments: Record<string, unknown> }
