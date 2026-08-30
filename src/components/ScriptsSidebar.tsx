@@ -37,6 +37,7 @@ import { CloudStorageDialog } from './sidebar/CloudStorageDialog';
 import { syncCollectionRemote } from '@/lib/storageRuntimeClient';
 import { importDesktopScannedScripts, readScriptContentRuntime } from '@/lib/scriptsRuntimeClient';
 import { getDesktopDroppedScriptPaths } from '@/lib/desktopFileDrop';
+import { inferScriptDraft } from '@/lib/scriptDraft';
 import { SaveAsTemplateDialog } from './sidebar/SaveAsTemplateDialog';
 import { ScriptTree, getCollectionTreeKey, type ScriptTreeCallbacks } from './sidebar/ScriptTree';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
@@ -247,51 +248,6 @@ const ScriptsSidebarComponent = () => {
         setIsOpenFolderDialogOpen(true);
     };
 
-    const inferScriptDraft = useCallback((rawName: string, collectionId?: string | null) => {
-        const collection = collectionId ? collections.find((entry) => entry.id === collectionId) : null;
-        const runtimePreset = collection?.runtime_preset ?? 'general';
-        let finalName = rawName.trim();
-        let language = 'python';
-        let content = 'print("Hello World")';
-
-        const lowerName = finalName.toLowerCase();
-        const hasExtension = /\.[a-z0-9]+$/i.test(finalName);
-
-        if (lowerName.endsWith('.py')) {
-            language = 'python';
-            content = 'print("Hello World")';
-        } else if (lowerName.endsWith('.js') || lowerName.endsWith('.ts')) {
-            language = 'node';
-            content = 'console.log("Hello World");';
-        } else if (lowerName.endsWith('.ps1')) {
-            language = 'powershell';
-            content = 'Write-Host "Hello World"';
-        } else if (lowerName.endsWith('.sh')) {
-            language = 'shell';
-            content = '#!/bin/bash\necho "Hello World"';
-        } else if (!hasExtension) {
-            if (runtimePreset === 'node') {
-                finalName += '.js';
-                language = 'node';
-                content = 'console.log("Hello World");';
-            } else if (runtimePreset === 'shell') {
-                finalName += '.sh';
-                language = 'shell';
-                content = '#!/bin/bash\necho "Hello World"';
-            } else if (runtimePreset === 'powershell') {
-                finalName += '.ps1';
-                language = 'powershell';
-                content = 'Write-Host "Hello World"';
-            } else {
-                finalName += '.py';
-                language = 'python';
-                content = 'print("Hello World")';
-            }
-        }
-
-        return { finalName, language, content };
-    }, [collections]);
-
     const openPythonEnvironmentDialog = useCallback((collection: Collection) => {
         setPythonEnvCollection(collection);
     }, []);
@@ -413,7 +369,10 @@ const ScriptsSidebarComponent = () => {
 
         setIsCreatingScript(true);
         try {
-            const { finalName, content, language } = inferScriptDraft(values.name, values.collectionId);
+            const runtimePreset = values.collectionId
+                ? collections.find((entry) => entry.id === values.collectionId)?.runtime_preset ?? 'general'
+                : 'general';
+            const { finalName, content, language } = inferScriptDraft(values.name, runtimePreset);
 
             const result = await dispatch(createScript({
                 name: finalName,
