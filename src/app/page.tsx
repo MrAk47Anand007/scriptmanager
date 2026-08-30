@@ -35,6 +35,7 @@ import { selectActiveActivity, selectTabs, selectActiveTabId } from '@/features/
 import { EditorTabs } from '@/components/workbench/EditorTabs'
 import { useTabSync } from '@/components/workbench/tabSync'
 import { BottomDock } from '@/components/workbench/BottomDock'
+import { DesktopNotificationHost } from '@/components/notifications/DesktopNotificationHost'
 
 const ScriptsManager = dynamic(
   () => import('@/components/ScriptsManager').then((mod) => mod.ScriptsManager),
@@ -291,6 +292,7 @@ export default function Home() {
       sidePanel={<SidePanel />}
       dock={<BottomDock />}
     >
+      <DesktopNotificationHost />
       <div className="flex h-full flex-col">
         {isBootstrapping && (
           <div className="h-0.5 shrink-0 overflow-hidden bg-slate-200 dark:bg-slate-800">

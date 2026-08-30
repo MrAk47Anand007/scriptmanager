@@ -70,4 +70,24 @@ describe('notification route authorization', () => {
     }))
     expect(ruleResponse.status).toBe(404)
   })
+
+  it('returns only new delivered desktop notifications for incremental polling', async () => {
+    const webhook = await prisma.notificationChannel.create({ data: { id: `webhook_${crypto.randomUUID()}`, workspaceId: 'default', name: 'Webhook', kind: 'webhook' } })
+    const old = new Date(Date.now() - 60_000)
+    const current = new Date(Date.now() - 1_000)
+    await prisma.notificationDelivery.createMany({ data: [
+      { channelId: localChannelId, workspaceId: 'default', dedupeKey: `old_${crypto.randomUUID()}`, status: 'delivered', createdAt: old, payloadJson: '{"title":"old","body":"old"}' },
+      { channelId: localChannelId, workspaceId: 'default', dedupeKey: `current_${crypto.randomUUID()}`, status: 'delivered', createdAt: current, payloadJson: '{"title":"current","body":"current"}' },
+      { channelId: webhook.id, workspaceId: 'default', dedupeKey: `webhook_${crypto.randomUUID()}`, status: 'delivered', createdAt: current, payloadJson: '{"title":"webhook","body":"webhook"}' },
+      { channelId: localChannelId, workspaceId: 'default', dedupeKey: `retry_${crypto.randomUUID()}`, status: 'retrying', createdAt: current, payloadJson: '{"title":"retry","body":"retry"}' },
+    ] })
+
+    const headers = { cookie: sessionCookie }
+    const response = await listDeliveries(new Request(`http://localhost/api/notifications/deliveries?since=${encodeURIComponent(old.toISOString())}`, { headers }))
+    expect(response.status).toBe(200)
+    expect((await response.json() as Array<{ payloadJson: string }>).map((delivery) => JSON.parse(delivery.payloadJson).title)).toEqual(['current'])
+
+    const invalid = await listDeliveries(new Request('http://localhost/api/notifications/deliveries?since=not-a-date', { headers }))
+    expect(invalid.status).toBe(400)
+  })
 })

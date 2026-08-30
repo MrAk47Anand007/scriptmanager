@@ -77,7 +77,7 @@ declare global {
         createNotificationChannel: (payload: { name: string; kind: string; config?: unknown }) => Promise<unknown>
         listNotificationRules: () => Promise<unknown[]>
         createNotificationRule: (payload: { channelId: string; name: string; eventTypes: string; filter?: unknown; template?: unknown; throttleSeconds?: number }) => Promise<unknown>
-        listNotificationDeliveries: () => Promise<unknown[]>
+        listNotificationDeliveries: (since?: string) => Promise<unknown[]>
         listPlugins: () => Promise<unknown[]>
         updatePlugin: (payload: { id: string; action: string; healthy?: boolean; message?: string; settings?: unknown }) => Promise<unknown>
         removePlugin: (id: string) => Promise<void>

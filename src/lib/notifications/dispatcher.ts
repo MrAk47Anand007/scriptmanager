@@ -14,6 +14,9 @@ type DirectNotificationOptions = {
   dedupeKey?: string
 }
 
+export const MAX_NOTIFICATION_ATTEMPTS = 3
+const NOTIFICATION_RETRY_DELAY_MS = 30_000
+
 function boundedMessage(message: DirectNotificationOptions['message']) {
   return {
     title: String(message.title || 'ScriptManager event').slice(0, 200),
@@ -50,6 +53,86 @@ export async function dispatchNotificationToChannel(
     await database.notificationDelivery.update({ where: { id: delivery.id }, data: { status: 'retrying', attemptCount: 1, lastError: error instanceof Error ? error.message : String(error), nextAttemptAt: new Date(Date.now() + 30_000) } })
     return { status: 'retrying', deliveryId: delivery.id, channelId: channel.id }
   }
+}
+
+type StoredNotificationPayload = { title: string; body: string; deepLink?: string }
+
+function parseStoredNotificationPayload(payloadJson: string): StoredNotificationPayload {
+  const payload = JSON.parse(payloadJson || '{}') as Partial<StoredNotificationPayload>
+  if (typeof payload.title !== 'string' || typeof payload.body !== 'string') {
+    throw new Error('Notification payload is invalid')
+  }
+  return {
+    title: payload.title.slice(0, 200),
+    body: payload.body.slice(0, 4000),
+    ...(typeof payload.deepLink === 'string' ? { deepLink: payload.deepLink.slice(0, 1000) } : {}),
+  }
+}
+
+export type NotificationDeliveryProcessingSummary = {
+  processed: number
+  delivered: number
+  retrying: number
+  failed: number
+}
+
+/**
+ * Deliver persisted failures after their backoff. The server starts one loop
+ * for this function; the claim update prevents duplicate sends if two server
+ * instances happen to poll at the same time.
+ */
+export async function processPendingNotificationDeliveries(
+  database: PrismaClient,
+  adapters: Record<string, NotificationAdapter> = notificationAdapters,
+  now = new Date(),
+  limit = 50,
+): Promise<NotificationDeliveryProcessingSummary> {
+  const summary: NotificationDeliveryProcessingSummary = { processed: 0, delivered: 0, retrying: 0, failed: 0 }
+  const deliveries = await database.notificationDelivery.findMany({
+    where: { status: 'retrying', nextAttemptAt: { lte: now } },
+    include: { channel: true },
+    orderBy: { createdAt: 'asc' },
+    take: Math.max(1, Math.min(limit, 100)),
+  })
+
+  for (const delivery of deliveries) {
+    const claim = await database.notificationDelivery.updateMany({
+      where: { id: delivery.id, status: 'retrying' },
+      data: { status: 'sending' },
+    })
+    if (claim.count !== 1) continue
+
+    summary.processed += 1
+    const attemptCount = delivery.attemptCount + 1
+    try {
+      if (!delivery.channel.enabled) throw new Error('Notification channel is disabled')
+      if (attemptCount > MAX_NOTIFICATION_ATTEMPTS) throw new Error('Notification retry limit reached')
+      const adapter = adapters[delivery.channel.kind]
+      if (!adapter) throw new Error(`Unsupported notification channel: ${delivery.channel.kind}`)
+      const payload = parseStoredNotificationPayload(delivery.payloadJson)
+      await adapter.send(await resolveNotificationConfig(database, delivery.channel.id, delivery.channel.configJson, delivery.workspaceId), payload)
+      await database.notificationDelivery.update({
+        where: { id: delivery.id },
+        data: { status: 'delivered', attemptCount, lastError: null, nextAttemptAt: null, deliveredAt: new Date() },
+      })
+      summary.delivered += 1
+    } catch (error) {
+      const lastError = error instanceof Error ? error.message : String(error)
+      const terminal = attemptCount >= MAX_NOTIFICATION_ATTEMPTS || lastError === 'Notification channel is disabled' || lastError === 'Notification retry limit reached'
+      await database.notificationDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: terminal ? 'failed' : 'retrying',
+          attemptCount,
+          lastError,
+          nextAttemptAt: terminal ? null : new Date(now.getTime() + NOTIFICATION_RETRY_DELAY_MS * Math.max(1, attemptCount)),
+        },
+      })
+      if (terminal) summary.failed += 1
+      else summary.retrying += 1
+    }
+  }
+  return summary
 }
 
 async function resolveEventWorkspace(database: PrismaClient, event: ExecutionEvent): Promise<string> {

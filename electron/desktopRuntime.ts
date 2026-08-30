@@ -3384,9 +3384,22 @@ export function initDesktopRuntimeIpc() {
     })
   })
 
-  ipcMain.handle('scriptmanager:runtime:list-notification-deliveries', async () => {
+  ipcMain.handle('scriptmanager:runtime:list-notification-deliveries', async (_event, sinceValue?: string) => {
     const actor = await createDesktopActorContext(prisma)
-    return prisma.notificationDelivery.findMany({ where: { workspaceId: actor.workspaceId }, include: { channel: { select: { id: true, name: true, kind: true } }, rule: { select: { id: true, name: true } } }, orderBy: { createdAt: 'desc' }, take: 100 })
+    let since: Date | undefined
+    if (sinceValue) {
+      since = new Date(sinceValue)
+      if (Number.isNaN(since.getTime())) throw new Error('Invalid since timestamp')
+    }
+    return prisma.notificationDelivery.findMany({
+      where: {
+        workspaceId: actor.workspaceId,
+        ...(since ? { createdAt: { gt: since }, status: 'delivered', channel: { kind: 'desktop' } } : {}),
+      },
+      include: { channel: { select: { id: true, name: true, kind: true } }, rule: { select: { id: true, name: true } } },
+      orderBy: { createdAt: since ? 'asc' : 'desc' },
+      take: 100,
+    })
   })
 
   ipcMain.handle('scriptmanager:runtime:list-plugins', async () => {

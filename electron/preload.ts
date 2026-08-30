@@ -88,7 +88,7 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     listNotificationRules: () => ipcRenderer.invoke('scriptmanager:runtime:list-notification-rules') as Promise<unknown[]>,
     createNotificationRule: (payload: { channelId: string; name: string; eventTypes: string; filter?: unknown; template?: unknown; throttleSeconds?: number }) =>
       ipcRenderer.invoke('scriptmanager:runtime:create-notification-rule', payload) as Promise<unknown>,
-    listNotificationDeliveries: () => ipcRenderer.invoke('scriptmanager:runtime:list-notification-deliveries') as Promise<unknown[]>,
+    listNotificationDeliveries: (since?: string) => ipcRenderer.invoke('scriptmanager:runtime:list-notification-deliveries', since) as Promise<unknown[]>,
     listPlugins: () => ipcRenderer.invoke('scriptmanager:runtime:list-plugins') as Promise<unknown[]>,
     updatePlugin: (payload: { id: string; action: string; healthy?: boolean; message?: string; settings?: unknown }) =>
       ipcRenderer.invoke('scriptmanager:runtime:update-plugin', payload) as Promise<unknown>,

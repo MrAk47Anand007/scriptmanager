@@ -12,6 +12,9 @@ export const notificationAdapters: Record<string, NotificationAdapter> = {
   webhook: { send: (config, message) => post(config.url, message) },
   slack: { send: (config, message) => post(config.url, { text:`*${message.title}*\n${message.body}${message.deepLink ? `\n${message.deepLink}` : ''}` }) },
   teams: { send: (config, message) => post(config.url, { type:'message', attachments:[{contentType:'application/vnd.microsoft.card.adaptive',content:{type:'AdaptiveCard',version:'1.4',body:[{type:'TextBlock',weight:'Bolder',text:message.title},{type:'TextBlock',wrap:true,text:message.body}]}}] }) },
-  desktop: { send: async (_config, message) => { const notify = (globalThis as typeof globalThis & { scriptManagerNotify?: (message: NotificationMessage) => Promise<void> }).scriptManagerNotify; if (!notify) throw new Error('Desktop host is unavailable'); await notify(message) } },
+  // The Electron renderer consumes persisted desktop deliveries. Keep the
+  // callback for development and embedded hosts, but do not fail when the
+  // production server runs in its own child process.
+  desktop: { send: async (_config, message) => { const notify = (globalThis as typeof globalThis & { scriptManagerNotify?: (message: NotificationMessage) => Promise<void> }).scriptManagerNotify; if (notify) await notify(message) } },
   smtp: { send: async (config, message) => { const send = (globalThis as typeof globalThis & { scriptManagerSendMail?: (config:Record<string,unknown>, message:NotificationMessage)=>Promise<void> }).scriptManagerSendMail; if (!send) throw new Error('SMTP transport is unavailable'); await send(config, message) } },
 }

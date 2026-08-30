@@ -32,6 +32,7 @@ let serverProcess: ChildProcess | null = null
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+let nativeNotificationsEnabled = true
 
 registerAgentRuntimeIpc(ipcMain, (sessionId, event) => {
   void persistDesktopAgentEvent(sessionId, event).catch((error) => {
@@ -720,12 +721,13 @@ app.whenReady().then(() => {
 })
 
 ipcMain.handle('scriptmanager:set-notifications-enabled', (_event, enabled: boolean) => {
+  nativeNotificationsEnabled = enabled !== false
   setDesktopNotificationsEnabled(enabled !== false)
   return true
 })
 
 ipcMain.handle('scriptmanager:show-notification', (_event, payload: { title: string; body: string; deepLink?: string }) => {
-  if (!Notification.isSupported()) return false
+  if (!nativeNotificationsEnabled || !Notification.isSupported()) return false
   const deepLink = payload.deepLink?.startsWith('/approvals') ? payload.deepLink : undefined
   const notification = new Notification({ title: String(payload.title).slice(0, 120), body: String(payload.body).slice(0, 1000) })
   notification.on('click', () => {

@@ -31,6 +31,15 @@ app.prepare().then(async () => {
     console.error('[Server] Failed to start workflow worker:', err)
   }
 
+  // Retry notification deliveries independently of workflow execution so a
+  // transient webhook or desktop-shell outage cannot leave history stuck.
+  try {
+    const { startNotificationWorker } = await import('./src/lib/notifications/worker')
+    startNotificationWorker()
+  } catch (err) {
+    console.error('[Server] Failed to start notification worker:', err)
+  }
+
   const server = createServer(async (req, res) => {
     try {
       const parsedUrl = parse(req.url!, true)

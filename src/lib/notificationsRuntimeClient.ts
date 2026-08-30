@@ -24,6 +24,7 @@ export interface NotificationDelivery {
   attemptCount: number
   lastError?: string | null
   createdAt: string
+  payloadJson?: string
   deliveredAt?: string | null
   channel?: Pick<NotificationChannel, 'id' | 'name' | 'kind'>
   rule?: Pick<NotificationRule, 'id' | 'name'> | null
@@ -75,11 +76,12 @@ export async function createNotificationRuleRuntime(payload: CreateNotificationR
   return response.json()
 }
 
-export async function listNotificationDeliveriesRuntime(): Promise<NotificationDelivery[]> {
+export async function listNotificationDeliveriesRuntime(since?: string): Promise<NotificationDelivery[]> {
   if (window.scriptManagerDesktop?.runtime?.listNotificationDeliveries) {
-    return window.scriptManagerDesktop.runtime.listNotificationDeliveries() as Promise<NotificationDelivery[]>
+    return window.scriptManagerDesktop.runtime.listNotificationDeliveries(since) as Promise<NotificationDelivery[]>
   }
-  const response = await fetch('/api/notifications/deliveries')
+  const query = since ? `?since=${encodeURIComponent(since)}` : ''
+  const response = await fetch(`/api/notifications/deliveries${query}`)
   if (!response.ok) {
     throw new Error('Unable to load notification deliveries')
   }

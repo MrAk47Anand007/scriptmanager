@@ -260,6 +260,9 @@ describe('desktop runtime bridge', () => {
     await expect(createNotificationRuleRuntime({ channelId: 'channel-1', name: 'Failures', eventTypes: 'execution.failed' })).resolves.toEqual({ id: 'rule-1' })
     await expect(listNotificationDeliveriesRuntime()).resolves.toEqual([{ id: 'delivery-1', status: 'delivered' }])
     expect(createNotificationRule).toHaveBeenCalledWith({ channelId: 'channel-1', name: 'Failures', eventTypes: 'execution.failed' })
+
+    await listNotificationDeliveriesRuntime('2026-08-30T00:00:00.000Z')
+    expect(listNotificationDeliveries).toHaveBeenLastCalledWith('2026-08-30T00:00:00.000Z')
   })
 
   it('falls back to the hosted notification APIs outside desktop mode', async () => {
@@ -267,6 +270,7 @@ describe('desktop runtime bridge', () => {
       .mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'rule-1' }] })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'rule-2' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'delivery-1' }] })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'delivery-2' }] })
     vi.stubGlobal('fetch', fetch)
 
     await expect(listNotificationRulesRuntime()).resolves.toEqual([{ id: 'rule-1' }])
@@ -275,5 +279,7 @@ describe('desktop runtime bridge', () => {
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/notifications/rules')
     expect(fetch).toHaveBeenNthCalledWith(2, '/api/notifications/rules', expect.objectContaining({ method: 'POST' }))
     expect(fetch).toHaveBeenNthCalledWith(3, '/api/notifications/deliveries')
+    await import('@/lib/notificationsRuntimeClient').then(({ listNotificationDeliveriesRuntime }) => listNotificationDeliveriesRuntime('2026-08-30T00:00:00.000Z'))
+    expect(fetch).toHaveBeenNthCalledWith(4, '/api/notifications/deliveries?since=2026-08-30T00%3A00%3A00.000Z')
   })
 })
