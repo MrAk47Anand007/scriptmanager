@@ -23,10 +23,10 @@ export interface ApprovalDecisionInput {
 export function createApprovalService(database: PrismaClient) {
   const events = createExecutionEventRepository(database)
   return {
-    list(status = 'pending') {
-      return database.approvalRequest.findMany({ where: status === 'all' ? {} : { status }, include: { decisions: true }, orderBy: { createdAt: 'desc' } })
+    list(status = 'pending', workspaceId?: string) {
+      return database.approvalRequest.findMany({ where: { ...(status === 'all' ? {} : { status }), ...(workspaceId ? { workspaceId } : {}) }, include: { decisions: true }, orderBy: { createdAt: 'desc' } })
     },
-    get(id: string) { return database.approvalRequest.findUnique({ where: { id }, include: { decisions: true } }) },
+    get(id: string, workspaceId?: string) { return database.approvalRequest.findFirst({ where: { id, ...(workspaceId ? { workspaceId } : {}) }, include: { decisions: true } }) },
     async create(input: CreateApprovalInput) {
       const { preview, ...fields } = input
       const request = await database.approvalRequest.create({ data: {

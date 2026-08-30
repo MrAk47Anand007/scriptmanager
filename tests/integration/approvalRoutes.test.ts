@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { createSessionToken, SESSION_COOKIE } from '@/lib/auth'
 import { createApprovalService } from '@/lib/approvals/service'
 import { GET } from '@/app/api/approvals/route'
+import { GET as getApproval } from '@/app/api/approvals/[id]/route'
 import { POST } from '@/app/api/approvals/[id]/decision/route'
 import { ensureDefaultWorkspace } from '@/lib/rbac/bootstrap'
 import { hashSessionToken } from '@/lib/rbac/requestContext'
@@ -71,5 +72,26 @@ describe('approval routes', () => {
         }),
       ],
     })
+  })
+
+  it('does not expose approval requests from another workspace', async () => {
+    const foreign = await createApprovalService(prisma).create({
+      actorType: 'agent',
+      actorId: 'foreign-agent',
+      workspaceId: 'foreign-workspace',
+      capability: 'read',
+      operation: 'inspect',
+      resource: 'foreign-src',
+      risk: 'low',
+      correlationId: 'foreign_route_corr',
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+
+    const list = await GET(new Request('http://localhost/api/approvals', { headers: { cookie: sessionCookie } }))
+    expect(list.status).toBe(200)
+    expect((await list.json() as Array<{ id: string }>).some((item) => item.id === foreign.id)).toBe(false)
+
+    const detail = await getApproval(new Request(`http://localhost/api/approvals/${foreign.id}`, { headers: { cookie: sessionCookie } }), { params: Promise.resolve({ id: foreign.id }) })
+    expect(detail.status).toBe(404)
   })
 })
