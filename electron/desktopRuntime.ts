@@ -36,6 +36,7 @@ import { createWorkflowTriggerService } from '../src/lib/workflows/triggers'
 import { validateWorkflowGraph } from '../src/lib/workflows/graph'
 import { filterPublicSettings, parsePublicSettings } from '../src/lib/settingsVisibility'
 import { getDesktopWorkspaceLayout, ensureDesktopWorkspaceLayout, sanitizeWorkspaceName } from '../src/lib/workspaceLayout'
+import { resolveScriptWorkingDirectory } from '../src/lib/scriptPathResolver'
 import {
   deleteStorageProvider as deleteDesktopStorageProvider,
   listStorageProviders as listDesktopStorageProviders,
@@ -1125,8 +1126,14 @@ async function getScriptExecutionContext(script: {
   if (script.sourcePath && script.sourceAvailable === false) {
     throw new Error('Canonical script source is unavailable')
   }
-  const cwd = script.collection?.folderPath ? path.resolve(script.collection.folderPath) : await getWorkspaceRoot()
-  const inspection = script.collection?.folderPath ? inspectFolderState(script.collection.folderPath) : { hasVenv: false, venvPath: null, interpreterPath: null, manifests: [] }
+  const collectionPath = script.collection?.folderPath ? path.resolve(script.collection.folderPath) : null
+  const cwd = script.sourcePath
+    ? resolveScriptWorkingDirectory(script.sourcePath)
+    : collectionPath ?? await getWorkspaceRoot()
+  const inspectionPath = collectionPath ?? (script.sourcePath ? cwd : null)
+  const inspection = inspectionPath
+    ? inspectFolderState(inspectionPath)
+    : { hasVenv: false, venvPath: null, interpreterPath: null, manifests: [] }
   const venvPath = script.collection?.pythonToolchainEnabled ? (script.collection.pythonVenvPath ?? inspection.venvPath) : null
   const interpreterPath = script.collection?.pythonToolchainEnabled ? (script.collection.pythonInterpreterPath ?? inspection.interpreterPath) : null
 

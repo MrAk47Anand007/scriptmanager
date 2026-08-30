@@ -21,3 +21,7 @@ export function resolveScriptFilePath(script: ScriptPathInput, scriptsRoot: stri
   }
   return path.resolve(scriptsRoot, path.basename(script.filename))
 }
+
+export function resolveScriptWorkingDirectory(scriptPath: string): string {
+  return path.dirname(path.resolve(scriptPath))
+}

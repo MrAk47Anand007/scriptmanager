@@ -8,6 +8,7 @@ import os from 'os'
 import { assertSafeStoredFilename } from '@/lib/executionSafety'
 import { ensureDesktopWorkspaceLayout, getDesktopWorkspaceLayout } from '@/lib/workspaceLayout'
 import { ensureFreshScript } from '@/lib/storage/syncService'
+import { resolveScriptWorkingDirectory } from './scriptPathResolver'
 import { executionTelemetry, lifecycleEventType, type ExecutionContext, createCorrelationId } from '@/lib/execution'
 
 // Module-level map: buildId -> EventEmitter (Node.js equivalent of Python's _output_queues dict)
@@ -173,6 +174,7 @@ export async function executeScriptAsync(
     const timeoutMs = script.timeoutMs ?? defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS
 
     const child = spawn(cmd, args, {
+      cwd: resolveScriptWorkingDirectory(scriptPath),
       // Precedence: process.env < script env vars < param values (most specific wins)
       env: { ...process.env, PYTHONUNBUFFERED: '1', ...scriptEnv, ...paramEnv },
       stdio: ['ignore', 'pipe', 'pipe']
