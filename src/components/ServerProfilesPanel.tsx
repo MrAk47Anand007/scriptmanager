@@ -63,6 +63,12 @@ const defaultForm = (): ProfileFormState => ({
     notes: '',
 })
 
+function getOperationError(value: unknown, fallback: string): string {
+    if (value instanceof Error && value.message) return value.message
+    if (typeof value === 'string' && value) return value
+    return fallback
+}
+
 export function ServerProfilesPanel() {
     const dispatch = useAppDispatch()
     const serverProfiles = useAppSelector(selectServerProfiles)
@@ -106,10 +112,12 @@ export function ServerProfilesPanel() {
                 key_path: form.key_path || undefined,
                 project_id: form.project_id || null,
                 notes: form.notes,
-            }))
+            })).unwrap()
             setForm(defaultForm())
             setIsAdding(false)
             setShowSecret(false)
+        } catch (value) {
+            setFormError(getOperationError(value, 'Server profile could not be saved'))
         } finally {
             setIsSaving(false)
         }
@@ -147,9 +155,11 @@ export function ServerProfilesPanel() {
                 key_path: form.key_path || undefined,
                 project_id: form.project_id || null,
                 notes: form.notes,
-            }))
+            })).unwrap()
             setEditingId(null)
             setForm(defaultForm())
+        } catch (value) {
+            setFormError(getOperationError(value, 'Server profile could not be saved'))
         } finally {
             setIsSaving(false)
         }
@@ -157,7 +167,20 @@ export function ServerProfilesPanel() {
 
     const handleDelete = async (id: string) => {
         if (!confirm('Delete this server profile?')) return
-        await dispatch(deleteServerProfile(id))
+        try {
+            await dispatch(deleteServerProfile(id)).unwrap()
+        } catch (value) {
+            setFormError(getOperationError(value, 'Server profile could not be deleted'))
+        }
+    }
+
+    const startAdd = () => {
+        setIsAdding(true)
+        setIsExpanded(true)
+        setEditingId(null)
+        setForm(defaultForm())
+        setFormError('')
+        setShowSecret(false)
     }
 
     const cancelForm = () => {
@@ -187,7 +210,7 @@ export function ServerProfilesPanel() {
                         size="icon"
                         className="h-5 w-5"
                         title="Add server profile"
-                        onClick={() => { setIsAdding(true); setIsExpanded(true); setEditingId(null) }}
+                        onClick={startAdd}
                     >
                         <Plus className="h-3 w-3 text-slate-400" />
                     </Button>
@@ -209,6 +232,9 @@ export function ServerProfilesPanel() {
                 <div className="px-3 pb-3 space-y-1.5">
                     {serverProfilesStatus === 'loading' && (
                         <p className="text-[10px] text-slate-400 italic">Loading…</p>
+                    )}
+                    {formError && !isFormOpen && (
+                        <p role="alert" className="text-[10px] text-red-500">{formError}</p>
                     )}
 
                     {serverProfiles.length === 0 && !isFormOpen && (
