@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, CircleStop, History, RotateCcw } from 'lucide-r
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { selectActiveWorkflow, selectSelectedExecution, selectSelectedWorkflowNode, selectWorkflowRuns } from '@/features/workflows/selectors'
 import { cancelWorkflowRun, fetchWorkflowRun, fetchWorkflowRuns, retryWorkflowNode, selectNode, setSelectedExecution } from '@/features/workflows/workflowsSlice'
+import { isWorkflowRunActive } from '@/lib/workflows/runStatus'
 
 const labels: Record<string,string> = { pending:'Pending',running:'Running',succeeded:'Succeeded',failed:'Failed',waiting:'Waiting',waiting_approval:'Waiting for approval',skipped:'Skipped',interrupted:'Interrupted',cancelled:'Cancelled',queued:'Queued' }
 const json = (value:unknown) => value===undefined||value===null?'No data':typeof value==='string'?value:JSON.stringify(value,null,2)
@@ -17,6 +18,25 @@ export function WorkflowExecutionDrawer() {
   const [expanded,setExpanded] = useState(true)
   const [tab,setTab] = useState<'output'|'input'|'logs'|'errors'>('output')
   useEffect(()=>{if(workflow)void dispatch(fetchWorkflowRuns(workflow.id))},[dispatch,workflow?.id])
+  const shouldPoll = runs.some((run) => isWorkflowRunActive(run.status)) || isWorkflowRunActive(detail?.status)
+  useEffect(() => {
+    if (!workflow?.id || !shouldPoll) return
+    const workflowId = workflow.id
+    const detailId = detail?.id
+    let inFlight = false
+    const refresh = () => {
+      if (inFlight) return
+      inFlight = true
+      void Promise.all([
+        dispatch(fetchWorkflowRuns(workflowId)),
+        detailId ? dispatch(fetchWorkflowRun(detailId)) : Promise.resolve(),
+      ]).finally(() => {
+        inFlight = false
+      })
+    }
+    const timer = window.setInterval(refresh, 2_000)
+    return () => window.clearInterval(timer)
+  }, [detail?.id, dispatch, shouldPoll, workflow?.id])
   const nodeRun = useMemo(()=>detail?.nodeRuns.find((item)=>item.nodeId===node?.id)??null,[detail,node?.id])
   if(!workflow)return null
   const tabValue = nodeRun ? tab==='input' ? nodeRun.input : tab==='errors' ? nodeRun.error : tab==='logs' ? (nodeRun.output as Record<string,unknown>|undefined)?.logs : nodeRun.output : undefined
