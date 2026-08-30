@@ -59,7 +59,7 @@ export async function DELETE(
       // But here we can use the service directly
       const { deleteGistFromGitHub } = await import('@/lib/gistService')
       try {
-        await deleteGistFromGitHub(script.gistId)
+        await deleteGistFromGitHub(script.gistId, { workspaceId: authorization.context.workspaceId, actorId: authorization.context.userId })
       } catch (err) {
         console.error('[Delete] Failed to delete Gist:', err)
         // We continue deleting the local script even if Gist deletion fails

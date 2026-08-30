@@ -19,14 +19,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   try { rawBody = new TextDecoder().decode(await readBoundedBody(request, MAX_WEBHOOK_BYTES)) }
   catch { return Response.json({ error: 'Webhook body too large' }, { status: 413 }) }
   const signingSecret = trigger.webhookSecretEncrypted.startsWith('secretref:')
-    ? await resolveResourceSecret(prisma, trigger.webhookSecretEncrypted, { resourceType: 'workflow-trigger', resourceId: trigger.id, field: 'webhook-signing' }, 'workflow-webhook-runtime') ?? ''
+    ? await resolveResourceSecret(prisma, trigger.webhookSecretEncrypted, { resourceType: 'workflow-trigger', resourceId: trigger.id, field: 'webhook-signing', workspaceId: trigger.workflow.workspaceId }, 'workflow-webhook-runtime') ?? ''
     : decryptString(trigger.webhookSecretEncrypted)
   if (!verifyWorkflowWebhookSignature(rawBody, request.headers.get('x-scriptmanager-signature'), signingSecret)) return Response.json({ error: 'Invalid signature' }, { status: 401 })
   const version = trigger.workflow.versions.find((item) => item.version === trigger.workflow.publishedVersion)
   if (!version) return Response.json({ error: 'Workflow is not published' }, { status: 409 })
   let payload: unknown = {}
   try { payload = rawBody ? JSON.parse(rawBody) : {} } catch { return Response.json({ error: 'Invalid JSON body' }, { status: 400 }) }
-  const run = await createWorkflowTriggerService(createWorkflowRepository(prisma)).webhook({ workflowId: trigger.workflowId, versionId: version.id, triggerId: trigger.id, deliveryId: request.headers.get('x-delivery-id') ?? undefined, rawBody, payload })
+  const run = await createWorkflowTriggerService(createWorkflowRepository(prisma)).webhook({ workflowId: trigger.workflowId, versionId: version.id, triggerId: trigger.id, deliveryId: request.headers.get('x-delivery-id') ?? undefined, rawBody, payload, workspaceId: trigger.workflow.workspaceId })
   notifyWorkflowWorker()
   return Response.json(run, { status: 202 })
 }

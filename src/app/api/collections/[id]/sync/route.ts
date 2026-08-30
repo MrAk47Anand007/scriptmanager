@@ -17,7 +17,7 @@ export async function POST(
   const root = await getScriptsRootDir()
   const summary = await syncCollection(prisma, id, root)
   if (summary.pulled > 0) {
-    await cache.del('all_scripts')
+    await cache.del(`all_scripts:${authorization.context.workspaceId}`)
   }
   return NextResponse.json(summary, { status: summary.ok ? 200 : 400 })
 }

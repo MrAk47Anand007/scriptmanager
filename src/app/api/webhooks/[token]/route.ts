@@ -52,7 +52,7 @@ export async function POST(
     catch { return NextResponse.json({ error: 'Invalid or stale webhook timestamp' }, { status: 401 }) }
     const signatureHeader = req.headers.get('x-hub-signature-256')
     const signingSecret = script.webhookSecret.startsWith('secretref:')
-      ? await resolveResourceSecret(prisma, script.webhookSecret, { resourceType: 'script', resourceId: script.id, field: 'webhook-signing' }, 'script-webhook-runtime') ?? ''
+      ? await resolveResourceSecret(prisma, script.webhookSecret, { resourceType: 'script', resourceId: script.id, field: 'webhook-signing', workspaceId: script.workspaceId }, 'script-webhook-runtime') ?? ''
       : script.webhookSecret
     const valid = verifySignature(signingSecret, rawBody, signatureHeader)
     if (!valid) {

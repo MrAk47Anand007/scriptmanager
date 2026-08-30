@@ -197,7 +197,7 @@ export async function POST(req: Request) {
   // Sync to GitHub Gist if enabled (unless skipped)
   if (script.syncToGist && content !== undefined && !data.skipGist) {
     try {
-      await syncScriptToGist(script, content ?? '')
+      await syncScriptToGist(script, content ?? '', { workspaceId, actorId: authorization.context.userId })
       script = await prisma.script.findFirst({ where: { id: script.id, workspaceId }, include: { collection: true } }) ?? script
     } catch (err) {
       // Non-fatal - log and continue

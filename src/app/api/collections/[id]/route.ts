@@ -113,7 +113,7 @@ export async function DELETE(
 
     await prisma.script.deleteMany({ where: { collectionId: id } })
     await prisma.collection.delete({ where: { id } })
-    await cache.del('all_scripts')
+    await cache.del(`all_scripts:${authorization.context.workspaceId}`)
     return NextResponse.json({ message: 'Collection removed', deleted_script_ids: scripts.map((script) => script.id) })
   }
 
@@ -124,7 +124,7 @@ export async function DELETE(
   })
 
   await prisma.collection.delete({ where: { id } })
-  await cache.del('all_scripts')
+  await cache.del(`all_scripts:${authorization.context.workspaceId}`)
 
   return NextResponse.json({ message: 'Collection deleted' })
 }

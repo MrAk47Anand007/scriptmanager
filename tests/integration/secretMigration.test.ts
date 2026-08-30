@@ -113,7 +113,7 @@ describe('secret integration migration', () => {
     expect(script.webhookSecret).not.toContain(scriptBody.webhook_secret)
 
     await prisma.workflow.create({ data: { id: 'workflow_phase5_webhook', name: 'Vault workflow', draftDefinition: '{}' } })
-    const triggerResponse = await createWorkflowTrigger(new Request('http://localhost/api/workflows/x/triggers', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'webhook' }) }), { params: Promise.resolve({ id: 'workflow_phase5_webhook' }) })
+    const triggerResponse = await createWorkflowTrigger(new Request('http://localhost/api/workflows/x/triggers', { method: 'POST', headers: { 'content-type': 'application/json', cookie: sessionCookie }, body: JSON.stringify({ type: 'webhook' }) }), { params: Promise.resolve({ id: 'workflow_phase5_webhook' }) })
     const triggerBody = await triggerResponse.json()
     const trigger = await prisma.workflowTrigger.findUniqueOrThrow({ where: { id: triggerBody.id } })
     expect(trigger.webhookSecretEncrypted).toMatch(/^secretref:/)

@@ -30,7 +30,7 @@ export async function POST(
   const content = fs.readFileSync(filePath, 'utf8')
 
   try {
-    const result = await syncScriptToGist(script, content)
+    const result = await syncScriptToGist(script, content, { workspaceId: authorization.context.workspaceId, actorId: authorization.context.userId })
     return NextResponse.json(result)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

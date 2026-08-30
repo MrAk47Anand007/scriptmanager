@@ -358,6 +358,7 @@ export async function syncCollection(
             filename: relative,
             language: inferLanguageFromExtension(relative),
             parameters: '[]',
+            workspaceId: collection.workspaceId,
             webhookToken: randomWebhookToken(),
             collectionId: collection.id,
             remoteEtag: remoteFile.etag,

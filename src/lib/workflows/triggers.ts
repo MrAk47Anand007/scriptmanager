@@ -44,12 +44,13 @@ export function createWorkflowTriggerService(repository: TriggerRepository) {
         payload: input.payload,
       })
     },
-    webhook(input: { workflowId: string; versionId: string; triggerId: string; deliveryId?: string; rawBody: string; payload?: unknown }) {
+    webhook(input: { workflowId: string; versionId: string; triggerId: string; deliveryId?: string; rawBody: string; payload?: unknown; workspaceId?: string }) {
       return repository.enqueueRun({
         workflowId: input.workflowId,
         versionId: input.versionId,
         triggerType: 'webhook',
         actorId: input.triggerId,
+        workspaceId: input.workspaceId,
         idempotencyKey: deriveWebhookIdempotencyKey(input.triggerId, input.deliveryId, input.rawBody),
         payload: input.payload,
       })

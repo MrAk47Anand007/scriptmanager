@@ -19,7 +19,7 @@ export async function DELETE(
   // Try to delete from GitHub (non-fatal if fails)
   if (script.gistId) {
     try {
-      await deleteGistFromGitHub(script.gistId)
+      await deleteGistFromGitHub(script.gistId, { workspaceId: authorization.context.workspaceId, actorId: authorization.context.userId })
     } catch (err) {
       console.error('[Gist] Failed to delete from GitHub:', err)
     }

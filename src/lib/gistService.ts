@@ -14,6 +14,7 @@ interface ScriptForGist {
 }
 
 type SecretVaultService = ReturnType<typeof createSecretVaultService>
+export type GistServiceOptions = { vault?: SecretVaultService; workspaceId?: string; actorId?: string }
 
 function calculateGistFilename(scriptName: string, collectionName?: string): string {
   if (collectionName) {
@@ -25,7 +26,7 @@ function calculateGistFilename(scriptName: string, collectionName?: string): str
 
 export function createGistService(
   database: PrismaClient = prisma,
-  options: { vault?: SecretVaultService; workspaceId?: string; actorId?: string } = {},
+  options: GistServiceOptions = {},
 ) {
   const vault = options.vault ?? createSecretVaultService(database, createServerSecretStore())
   const credentials = createGithubGistCredentialService(database, vault)
@@ -109,10 +110,10 @@ export function createGistService(
   return { syncScriptToGist, deleteGistFromGitHub }
 }
 
-export async function syncScriptToGist(script: ScriptForGist, content: string) {
-  return createGistService().syncScriptToGist(script, content)
+export async function syncScriptToGist(script: ScriptForGist, content: string, options: GistServiceOptions = {}) {
+  return createGistService(prisma, options).syncScriptToGist(script, content)
 }
 
-export async function deleteGistFromGitHub(gistId: string) {
-  return createGistService().deleteGistFromGitHub(gistId)
+export async function deleteGistFromGitHub(gistId: string, options: GistServiceOptions = {}) {
+  return createGistService(prisma, options).deleteGistFromGitHub(gistId, options.workspaceId)
 }
