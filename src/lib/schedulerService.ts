@@ -20,10 +20,14 @@ interface ScriptScheduleInfo {
   scheduleEnabled: boolean
 }
 
-export async function initScheduler(): Promise<void> {
-  const scripts = await prisma.script.findMany({
-    where: { scheduleEnabled: true, scheduleCron: { not: null } }
-  })
+export async function initScheduler(options: { includeScripts?: boolean; includeWorkflowTriggers?: boolean } = {}): Promise<void> {
+  const includeScripts = options.includeScripts !== false
+  const includeWorkflowTriggers = options.includeWorkflowTriggers !== false
+  const scripts = includeScripts
+    ? await prisma.script.findMany({
+      where: { scheduleEnabled: true, scheduleCron: { not: null } },
+    })
+    : []
 
   let registered = 0
   for (const script of scripts) {
@@ -37,7 +41,9 @@ export async function initScheduler(): Promise<void> {
     }
   }
 
-  const workflowTriggers = await prisma.workflowTrigger.findMany({ where: { type: 'cron', enabled: true }, select: { id: true, workflowId: true, configJson: true } })
+  const workflowTriggers = includeWorkflowTriggers
+    ? await prisma.workflowTrigger.findMany({ where: { type: 'cron', enabled: true }, select: { id: true, workflowId: true, configJson: true } })
+    : []
   for (const trigger of workflowTriggers) {
     const config = JSON.parse(trigger.configJson) as { cron?: string }
     if (!config.cron) continue

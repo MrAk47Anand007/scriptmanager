@@ -23,6 +23,7 @@ import { startWorkflowWorker } from '../src/lib/workflows/workerLoop'
 import { getPackagedServerLaunch } from './serverLaunch'
 import { createDesktopActorContext } from '../src/lib/runtime/trustedContext'
 import { isTrustedAppUrl } from './windowSecurity'
+import { initScheduler } from '../src/lib/schedulerService'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
 // In production (packaged), Electron spawns the standalone server itself.
@@ -532,6 +533,7 @@ function startServer() {
       PORT: String(PORT),
       NODE_ENV: 'production',
       DESKTOP_AUTH_SECRET: DESKTOP_SECRET,
+      SCRIPT_MANAGER_EMBEDDED_SERVER: 'true',
       DATABASE_URL: `file:${path.join(app.getPath('userData'), 'scriptmanager.db')}`,
       SCRIPTS_DIR: path.join(app.getPath('userData'), 'user_scripts'),
       BUILDS_DIR: path.join(app.getPath('userData'), 'builds'),
@@ -728,8 +730,13 @@ function createTray() {
   })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   ensureDesktopProcessEnv()
+  try {
+    await initScheduler({ includeWorkflowTriggers: false })
+  } catch (error) {
+    console.error('[Electron] Failed to initialize script scheduler:', error)
+  }
   startWorkflowWorker({
     workerId: `desktop-${process.pid}`,
     supportsAgentNodes: true,

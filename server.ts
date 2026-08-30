@@ -18,7 +18,7 @@ app.prepare().then(async () => {
   try {
     // Dynamic import to avoid circular deps during build
     const { initScheduler } = await import('./src/lib/schedulerService')
-    await initScheduler()
+    await initScheduler({ includeScripts: process.env.SCRIPT_MANAGER_EMBEDDED_SERVER !== 'true' })
   } catch (err) {
     console.error('[Server] Failed to initialize scheduler:', err)
   }

@@ -21,7 +21,7 @@ import { resolveScriptEnvironment } from '../src/lib/secrets/runtime'
 import { createSecretVaultService } from '../src/lib/secrets/service'
 import { createServerSecretStore } from '../src/lib/secrets/serverStore'
 import { parseSecretReference, serializeSecretReference } from '../src/lib/secrets/references'
-import { getNextRunTime } from '../src/lib/schedulerService'
+import { getNextRunTime, registerSchedule, removeSchedule } from '../src/lib/schedulerService'
 import { resolveLocalBuildStatus } from '../src/lib/localRunLifecycle'
 import { parseWorkspacePolicy } from '../src/lib/git/policy'
 import { runGit } from '../src/lib/git/process'
@@ -2046,6 +2046,8 @@ async function saveLocalSchedule(payload: { scriptId: string; cron: string; enab
     where: { id: payload.scriptId },
     data: { scheduleCron: cron || null, scheduleEnabled: Boolean(payload.enabled) },
   })
+  if (script.scheduleEnabled && script.scheduleCron) registerSchedule(script)
+  else removeSchedule(script.id)
   return {
     schedule_cron: script.scheduleCron,
     schedule_enabled: script.scheduleEnabled,
@@ -2056,6 +2058,7 @@ async function saveLocalSchedule(payload: { scriptId: string; cron: string; enab
 async function deleteLocalSchedule(scriptId: string) {
   await getAuthorizedDesktopScript(scriptId)
   await prisma.script.update({ where: { id: scriptId }, data: { scheduleCron: null, scheduleEnabled: false } })
+  removeSchedule(scriptId)
   return null
 }
 
