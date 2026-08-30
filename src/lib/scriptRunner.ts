@@ -85,6 +85,10 @@ function resolveInterpreter(language: string, interpreter: string | null | undef
       }
       return ['bash', [scriptPath]]
     }
+    case 'powershell':
+      return process.platform === 'win32'
+        ? [interpreter ?? 'powershell.exe', ['-NoLogo', '-File', scriptPath]]
+        : [interpreter ?? 'pwsh', ['-NoLogo', '-File', scriptPath]]
     case 'custom':
       return [interpreter ?? (process.platform === 'win32' ? 'python' : 'python3'), [scriptPath]]
     default:

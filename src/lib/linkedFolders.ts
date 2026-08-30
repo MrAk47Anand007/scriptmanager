@@ -1,19 +1,11 @@
 import fs from 'fs'
 import path from 'path'
+export { inferScriptLanguage } from './scriptLanguage'
 
 const SCRIPT_EXTENSIONS = new Set(['.py', '.js', '.ts', '.sh', '.ps1', '.bat'])
 
 export function isSupportedScriptFile(fileName: string): boolean {
   return SCRIPT_EXTENSIONS.has(path.extname(fileName).toLowerCase())
-}
-
-export function inferScriptLanguage(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase()
-
-  if (ext === '.py') return 'python'
-  if (ext === '.js' || ext === '.ts') return 'node'
-  if (ext === '.sh' || ext === '.ps1' || ext === '.bat') return 'shell'
-  return 'custom'
 }
 
 export function getFolderDisplayName(folderPath: string): string {

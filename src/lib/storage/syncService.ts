@@ -5,6 +5,7 @@ import { createProviderClient } from './index'
 import { getDecryptedStorageProvider } from './providerStore'
 import type { RemoteFile, StorageProviderClient } from './types'
 import { resolveScriptFilePath } from '../scriptPathResolver'
+import { inferScriptLanguage } from '../scriptLanguage'
 import { atomicWriteLocalFile, getConflictCopyPath } from './localFile'
 import { withStorageRetry } from './retry'
 import type { SecretVaultService } from '../secrets/service'
@@ -202,14 +203,6 @@ export async function pushScript(
   }
 }
 
-function inferLanguageFromExtension(filename: string): string {
-  const ext = path.extname(filename).toLowerCase()
-  if (ext === '.py') return 'python'
-  if (ext === '.js') return 'node'
-  if (ext === '.sh' || ext === '.ps1') return 'shell'
-  return 'custom'
-}
-
 function randomWebhookToken(): string {
   // crypto.randomUUID is available in Node 16+ in both runtimes.
   return globalThis.crypto.randomUUID().replace(/-/g, '')
@@ -359,7 +352,7 @@ export async function syncCollection(
           data: {
             name,
             filename: relative,
-            language: inferLanguageFromExtension(relative),
+            language: inferScriptLanguage(relative),
             parameters: '[]',
             workspaceId: collection.workspaceId,
             webhookToken: randomWebhookToken(),

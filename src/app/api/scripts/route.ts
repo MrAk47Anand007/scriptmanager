@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid'
 
 import { cache } from '@/lib/cache'
 import { sanitizeScriptFilename } from '@/lib/executionSafety'
+import { defaultScriptExtension } from '@/lib/scriptLanguage'
 import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function GET(req: Request) {
@@ -150,7 +151,8 @@ export async function POST(req: Request) {
       ? await prisma.collection.findFirst({ where: { id: collection_id, workspaceId } })
       : null
 
-    const filename = sanitizeScriptFilename(name, '.py')
+    const scriptLanguage = typeof language === 'string' && language.trim() ? language : 'python'
+    const filename = sanitizeScriptFilename(name, defaultScriptExtension(scriptLanguage))
     let filePath = await getScriptFilePath(filename)
     let sourcePath: string | null = null
 
@@ -182,7 +184,7 @@ export async function POST(req: Request) {
         name,
         description,
         filename,
-        language: language ?? 'python',
+        language: scriptLanguage,
         interpreter: language === 'custom' ? (interpreter ?? null) : null,
         syncToGist: sync_to_gist ?? defaultSyncToGist,
         parameters: parametersJson,

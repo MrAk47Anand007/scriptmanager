@@ -37,6 +37,7 @@ import { validateWorkflowGraph } from '../src/lib/workflows/graph'
 import { filterPublicSettings, parsePublicSettings } from '../src/lib/settingsVisibility'
 import { getDesktopWorkspaceLayout, ensureDesktopWorkspaceLayout, sanitizeWorkspaceName } from '../src/lib/workspaceLayout'
 import { resolveScriptWorkingDirectory } from '../src/lib/scriptPathResolver'
+import { defaultScriptExtension, inferScriptLanguage } from '../src/lib/scriptLanguage'
 import {
   deleteStorageProvider as deleteDesktopStorageProvider,
   listStorageProviders as listDesktopStorageProviders,
@@ -654,14 +655,6 @@ function serializeCollectionRecord(collection: CollectionRecord): CollectionDto 
 
 function isSupportedScriptFile(fileName: string): boolean {
   return SCRIPT_EXTENSIONS.has(path.extname(fileName).toLowerCase())
-}
-
-function inferScriptLanguage(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase()
-  if (ext === '.py') return 'python'
-  if (ext === '.js' || ext === '.ts') return 'node'
-  if (ext === '.sh' || ext === '.ps1' || ext === '.bat') return 'shell'
-  return 'custom'
 }
 
 function getFolderDisplayName(folderPath: string): string {
@@ -1855,7 +1848,7 @@ async function createLocalScript(payload: CreateScriptPayload): Promise<ScriptDt
     throw new Error('Collection not found')
   }
   const runtimePreset = collection?.runtimePreset ?? 'general'
-  const defaultExtension = runtimePreset === 'node' ? '.js' : runtimePreset === 'shell' || runtimePreset === 'powershell' ? '.sh' : '.py'
+  const defaultExtension = defaultScriptExtension(runtimePreset)
   const filename = sanitizeScriptFilename(name, defaultExtension)
   const workspaceRoot = collection?.folderPath ? path.resolve(collection.folderPath) : await getWorkspaceRoot()
   fs.mkdirSync(workspaceRoot, { recursive: true })
