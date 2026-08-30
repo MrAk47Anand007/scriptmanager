@@ -3,6 +3,7 @@ import { defaultSecretVaultService } from '@/lib/secrets/defaultService'
 import { resolveTrustedRequestContext } from '@/lib/rbac/requestContext'
 import { requireTrustedContext } from '@/lib/runtime/trustedContext'
 import { prisma } from '@/lib/db'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 function errorStatus(message: string) {
   if (message.includes('Unauthorized')) return 401
@@ -13,6 +14,8 @@ function errorStatus(message: string) {
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const authorization = await authorizeRequest(request, 'secret', 'update')
+    if (authorization.response) return authorization.response
     const actor = requireTrustedContext(await resolveTrustedRequestContext(request, prisma))
     const { id } = await params
     const body = await request.json().catch(() => ({}))

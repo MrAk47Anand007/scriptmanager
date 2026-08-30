@@ -5,6 +5,9 @@ import { createSessionToken, SESSION_COOKIE } from '@/lib/auth'
 import { GET, POST } from '@/app/api/secrets/route'
 import { POST as rotate } from '@/app/api/secrets/[id]/rotate/route'
 import { POST as reveal } from '@/app/api/secrets/[id]/reveal/route'
+import { POST as disable } from '@/app/api/secrets/[id]/disable/route'
+import { POST as bind } from '@/app/api/secrets/[id]/bindings/route'
+import { GET as history } from '@/app/api/secrets/[id]/history/route'
 import { ensureDefaultWorkspace } from '@/lib/rbac/bootstrap'
 import { hashSessionToken } from '@/lib/rbac/requestContext'
 import { defaultSecretVaultService } from '@/lib/secrets/defaultService'
@@ -83,5 +86,32 @@ describe('secret vault routes', () => {
     await expect(response.json()).resolves.toMatchObject({
       error: 'Secret workspace does not match',
     })
+  })
+
+  it('does not allow foreign secret mutation or history access', async () => {
+    const secret = await defaultSecretVaultService().createSecret({
+      name: 'Foreign secret',
+      plaintext: 'do-not-touch',
+      workspaceId: 'workspace-b',
+      createdBy: 'seed-user',
+    })
+
+    const disableResponse = await disable(jsonRequest('http://localhost/api/secrets/x/disable', { resource: '*', reason: 'forged disable' }), context(secret.id))
+    expect(disableResponse.status).toBe(403)
+    expect((await prisma.secret.findUniqueOrThrow({ where: { id: secret.id } })).status).toBe('active')
+
+    const bindResponse = await bind(jsonRequest('http://localhost/api/secrets/x/bindings', { resourceType: 'script', resourceId: 'local-script', field: 'token' }), context(secret.id))
+    expect(bindResponse.status).toBe(403)
+    expect(await prisma.secretBinding.findFirst({ where: { secretId: secret.id } })).toBeNull()
+
+    const historyResponse = await history(new Request(`http://localhost/api/secrets/${secret.id}/history`, { headers: { cookie: sessionCookie } }), context(secret.id))
+    expect(historyResponse.status).toBe(403)
+  })
+
+  it('requires secret permissions for vault operations', async () => {
+    const viewerRole = await prisma.role.findUniqueOrThrow({ where: { workspaceId_key: { workspaceId: 'default', key: 'viewer' } } })
+    await prisma.membership.updateMany({ where: { userId: 'local-admin', workspaceId: 'default' }, data: { roleId: viewerRole.id } })
+
+    expect((await POST(jsonRequest('http://localhost/api/secrets', { name: 'Viewer secret', plaintext: 'not-allowed' }))).status).toBe(403)
   })
 })
