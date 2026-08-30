@@ -78,6 +78,16 @@ const GistSyncStatus = () => {
     );
 };
 
+function getScriptsSidebarError(value: unknown, fallback: string): string {
+    if (value instanceof Error && value.message) return value.message;
+    if (typeof value === 'string' && value) return value;
+    if (value && typeof value === 'object' && 'message' in value) {
+        const message = (value as { message?: unknown }).message;
+        if (typeof message === 'string' && message) return message;
+    }
+    return fallback;
+}
+
 const ScriptsSidebarComponent = () => {
     const dispatch = useAppDispatch();
     const store = useAppStore();
@@ -156,18 +166,26 @@ const ScriptsSidebarComponent = () => {
             uat: '#f59e0b',
             production: '#ef4444',
         };
-        await dispatch(createProject({
-            name: newProjectName.trim(),
-            environment: newProjectEnv,
-            color: envColors[newProjectEnv] ?? '#6366f1',
-        }));
-        setNewProjectName('');
-        setIsCreatingProject(false);
+        try {
+            await dispatch(createProject({
+                name: newProjectName.trim(),
+                environment: newProjectEnv,
+                color: envColors[newProjectEnv] ?? '#6366f1',
+            })).unwrap();
+            setNewProjectName('');
+            setIsCreatingProject(false);
+        } catch (error) {
+            toast.error(getScriptsSidebarError(error, 'Failed to create project'));
+        }
     };
 
     const handleDeleteProject = useCallback(async (id: string) => {
         if (confirm('Delete this project? Collections will become unassigned (not deleted).')) {
-            await dispatch(deleteProject(id));
+            try {
+                await dispatch(deleteProject(id)).unwrap();
+            } catch (error) {
+                toast.error(getScriptsSidebarError(error, 'Failed to delete project'));
+            }
         }
     }, [dispatch]);
 
@@ -196,7 +214,9 @@ const ScriptsSidebarComponent = () => {
     }, [dispatch]);
 
     const handleDuplicateScript = useCallback((scriptId: string) => {
-        dispatch(duplicateScript(scriptId));
+        void dispatch(duplicateScript(scriptId)).unwrap().catch((error) => {
+            toast.error(getScriptsSidebarError(error, 'Failed to duplicate script'));
+        });
     }, [dispatch]);
 
     const handleDeleteScriptRequest = useCallback((script: Script) => {
@@ -253,7 +273,11 @@ const ScriptsSidebarComponent = () => {
     }, []);
 
     const handlePythonEnvChanged = useCallback(async () => {
-        await dispatch(fetchCollections());
+        try {
+            await dispatch(fetchCollections()).unwrap();
+        } catch (error) {
+            toast.error(getScriptsSidebarError(error, 'Failed to refresh collections'));
+        }
     }, [dispatch]);
 
     const openCloudStorageDialog = useCallback((collection: Collection) => {
@@ -374,22 +398,22 @@ const ScriptsSidebarComponent = () => {
                 : 'general';
             const { finalName, content, language } = inferScriptDraft(values.name, runtimePreset);
 
-            const result = await dispatch(createScript({
+            await dispatch(createScript({
                 name: finalName,
                 description: values.description.trim() || undefined,
                 syncToGist: values.syncToGist,
                 content,
                 language,
                 collectionId: values.collectionId,
-            }));
+            })).unwrap();
 
-            if (createScript.fulfilled.match(result)) {
-                if (values.collectionId) {
-                    const createdInCollectionId = values.collectionId;
-                    setExpandedCollections(prev => ({ ...prev, [createdInCollectionId]: true }));
-                }
-                setIsCreateScriptOpen(false);
+            if (values.collectionId) {
+                const createdInCollectionId = values.collectionId;
+                setExpandedCollections(prev => ({ ...prev, [createdInCollectionId]: true }));
             }
+            setIsCreateScriptOpen(false);
+        } catch (error) {
+            toast.error(getScriptsSidebarError(error, 'Failed to create script'));
         } finally {
             setIsCreatingScript(false);
         }
@@ -415,6 +439,8 @@ const ScriptsSidebarComponent = () => {
                 setExpandedProjects(prev => ({ ...prev, [createdCollection.project_id!]: true }));
             }
             resetCollectionCreationState();
+        } catch (error) {
+            toast.error(getScriptsSidebarError(error, 'Failed to create collection'));
         } finally {
             setIsSubmittingCollection(false);
         }
@@ -440,6 +466,8 @@ const ScriptsSidebarComponent = () => {
                 await dispatch(deleteCollection(collectionToDelete.id)).unwrap();
             }
             setCollectionToDelete(null);
+        } catch (error) {
+            toast.error(getScriptsSidebarError(error, 'Failed to delete collection'));
         } finally {
             setPendingCollectionDeleteId((current) => current === collectionToDelete.id ? null : current);
             setIsDeletingCollectionDialog(false);
@@ -455,14 +483,14 @@ const ScriptsSidebarComponent = () => {
         if (!collectionToConvert || !convertCollectionName.trim() || isConvertingCollection) return;
         setIsConvertingCollection(true);
         try {
-            const result = await dispatch(convertTemporaryCollection({
+            await dispatch(convertTemporaryCollection({
                 id: collectionToConvert.id,
                 name: convertCollectionName.trim(),
-            }));
-            if (convertTemporaryCollection.fulfilled.match(result)) {
-                setCollectionToConvert(null);
-                setConvertCollectionName('');
-            }
+            })).unwrap();
+            setCollectionToConvert(null);
+            setConvertCollectionName('');
+        } catch (error) {
+            toast.error(getScriptsSidebarError(error, 'Failed to save collection'));
         } finally {
             setIsConvertingCollection(false);
         }
@@ -488,27 +516,31 @@ const ScriptsSidebarComponent = () => {
         const activeData = active.data.current;
         const overData = over.data.current;
 
-        if (activeData?.type === 'script' && overData?.type === 'collection') {
-            const scriptId = activeData.script.id;
-            const collectionId = overData.collection.id;
-            if (activeData.script.collection_id !== collectionId) {
-                await dispatch(moveScript({ scriptId, collectionId }));
-                setExpandedCollections(prev => ({ ...prev, [collectionId]: true }));
+        try {
+            if (activeData?.type === 'script' && overData?.type === 'collection') {
+                const scriptId = activeData.script.id;
+                const collectionId = overData.collection.id;
+                if (activeData.script.collection_id !== collectionId) {
+                    await dispatch(moveScript({ scriptId, collectionId })).unwrap();
+                    setExpandedCollections(prev => ({ ...prev, [collectionId]: true }));
+                }
+            } else if (activeData?.type === 'collection' && overData?.type === 'collection') {
+                const collectionId = activeData.collection.id;
+                const parentId = overData.collection.id;
+                if (activeData.collection.parent_id !== parentId && activeData.collection.id !== parentId) {
+                    await dispatch(moveCollection({ collectionId, parentId, projectId: overData.collection.project_id })).unwrap();
+                    setExpandedCollections(prev => ({ ...prev, [parentId]: true }));
+                }
+            } else if (activeData?.type === 'collection' && overData?.type === 'project') {
+                const collectionId = activeData.collection.id;
+                const projectId = overData.project.id;
+                if (activeData.collection.project_id !== projectId || activeData.collection.parent_id !== null) {
+                    await dispatch(moveCollection({ collectionId, projectId, parentId: null })).unwrap();
+                    setExpandedProjects(prev => ({ ...prev, [projectId]: true }));
+                }
             }
-        } else if (activeData?.type === 'collection' && overData?.type === 'collection') {
-            const collectionId = activeData.collection.id;
-            const parentId = overData.collection.id;
-            if (activeData.collection.parent_id !== parentId && activeData.collection.id !== parentId) {
-                await dispatch(moveCollection({ collectionId, parentId, projectId: overData.collection.project_id }));
-                setExpandedCollections(prev => ({ ...prev, [parentId]: true }));
-            }
-        } else if (activeData?.type === 'collection' && overData?.type === 'project') {
-            const collectionId = activeData.collection.id;
-            const projectId = overData.project.id;
-            if (activeData.collection.project_id !== projectId || activeData.collection.parent_id !== null) {
-                await dispatch(moveCollection({ collectionId, projectId, parentId: null }));
-                setExpandedProjects(prev => ({ ...prev, [projectId]: true }));
-            }
+        } catch (error) {
+            toast.error(getScriptsSidebarError(error, 'Failed to move item'));
         }
     };
 
@@ -562,16 +594,20 @@ const ScriptsSidebarComponent = () => {
 
     const handleCreateFromTemplate = async (tpl: ScriptTemplate, name: string) => {
         setIsTemplatePickerOpen(false);
-        const result = await dispatch(createScript({
-            name,
-            content: tpl.content,
-            language: tpl.language,
-            interpreter: tpl.interpreter ?? null,
-            parameters: tpl.parameters,
-        }));
-        if (createScript.fulfilled.match(result) && parentCollectionId) {
-            await dispatch(moveScript({ scriptId: result.payload.id, collectionId: parentCollectionId }));
-            setExpandedCollections(prev => ({ ...prev, [parentCollectionId]: true }));
+        try {
+            const createdScript = await dispatch(createScript({
+                name,
+                content: tpl.content,
+                language: tpl.language,
+                interpreter: tpl.interpreter ?? null,
+                parameters: tpl.parameters,
+            })).unwrap();
+            if (parentCollectionId) {
+                await dispatch(moveScript({ scriptId: createdScript.id, collectionId: parentCollectionId })).unwrap();
+                setExpandedCollections(prev => ({ ...prev, [parentCollectionId]: true }));
+            }
+        } catch (error) {
+            toast.error(getScriptsSidebarError(error, 'Failed to create script from template'));
         }
     };
 
@@ -760,7 +796,12 @@ const ScriptsSidebarComponent = () => {
                                 </Button>
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" size="icon" className="h-6 w-6">
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6"
+                                            aria-label="Create script, collection, or project"
+                                        >
                                             <Plus className="h-4 w-4 text-slate-500 dark:text-slate-400" />
                                         </Button>
                                     </DropdownMenuTrigger>
