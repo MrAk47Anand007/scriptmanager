@@ -24,13 +24,14 @@ type EnqueueInput = {
   actorId: string
   idempotencyKey?: string
   payload?: unknown
+  workspaceId?: string
 }
 
 type TriggerRepository = { enqueueRun(input: EnqueueInput): Promise<unknown> }
 
 export function createWorkflowTriggerService(repository: TriggerRepository) {
   return {
-    manual(input: { workflowId: string; versionId: string; actorId: string; payload?: unknown }) {
+    manual(input: { workflowId: string; versionId: string; actorId: string; payload?: unknown; workspaceId?: string }) {
       return repository.enqueueRun({ ...input, triggerType: 'manual' })
     },
     cron(input: { workflowId: string; versionId: string; triggerId: string; scheduledAt: Date; payload?: unknown }) {

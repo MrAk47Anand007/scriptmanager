@@ -6,13 +6,16 @@ import type { WorkflowDefinition } from './types'
 type Database = PrismaClient
 
 export function createWorkflowRepository(database: Database) {
+  const workflowWhere = (id: string, workspaceId?: string) => workspaceId ? { id, workspaceId } : { id }
+  const workflowRelation = (workspaceId?: string) => workspaceId ? { workspaceId } : undefined
+
   return {
     listWorkflows(workspaceId = 'default') {
       return database.workflow.findMany({ where: { workspaceId }, orderBy: { updatedAt: 'desc' }, include: { _count: { select: { versions: true, runs: true } } } })
     },
 
-    getWorkflow(id: string) {
-      return database.workflow.findUnique({ where: { id }, include: { versions: { orderBy: { version: 'desc' } }, triggers: true } })
+    getWorkflow(id: string, workspaceId?: string) {
+      return database.workflow.findFirst({ where: workflowWhere(id, workspaceId), include: { versions: { orderBy: { version: 'desc' } }, triggers: true } })
     },
 
     async createDraft(input: { name: string; description?: string; definition: WorkflowDefinition; projectId?: string | null; workspaceId?: string }) {
@@ -27,29 +30,36 @@ export function createWorkflowRepository(database: Database) {
       })
     },
 
-    async updateDraft(id: string, definitionInput: WorkflowDefinition) {
+    async updateDraft(id: string, definitionInput: WorkflowDefinition, workspaceId?: string) {
       const definition = parseWorkflowDefinition(definitionInput)
+      const existing = await database.workflow.findFirst({ where: workflowWhere(id, workspaceId), select: { id: true } })
+      if (!existing) throw new Error('Workflow not found')
       return database.workflow.update({
         where: { id },
         data: { name: definition.name, description: definition.description ?? '', draftDefinition: JSON.stringify(definition) },
       })
     },
 
-    async setProject(id: string, projectId: string | null) {
+    async setProject(id: string, projectId: string | null, workspaceId?: string) {
       if (projectId) {
-        const project = await database.project.findUnique({ where: { id: projectId } })
+        const project = await database.project.findFirst({ where: { id: projectId, workspaceId: workspaceId ?? undefined } })
         if (!project?.repositoryRoot) throw new Error('Selected project is not connected to a repository')
       }
+      const existing = await database.workflow.findFirst({ where: workflowWhere(id, workspaceId), select: { id: true } })
+      if (!existing) throw new Error('Workflow not found')
       return database.workflow.update({ where: { id }, data: { projectId } })
     },
 
-    deleteWorkflow(id: string) {
-      return database.workflow.delete({ where: { id } })
+    async deleteWorkflow(id: string, workspaceId?: string) {
+      const result = await database.workflow.deleteMany({ where: workflowWhere(id, workspaceId) })
+      if (!result.count) throw new Error('Workflow not found')
+      return { id }
     },
 
-    async publish(id: string) {
+    async publish(id: string, workspaceId?: string) {
       return database.$transaction(async (tx) => {
-        const workflow = await tx.workflow.findUniqueOrThrow({ where: { id } })
+        const workflow = await tx.workflow.findFirst({ where: workflowWhere(id, workspaceId) })
+        if (!workflow) throw new Error('Workflow not found')
         const definition = parseWorkflowDefinition(JSON.parse(workflow.draftDefinition))
         const version = (workflow.publishedVersion ?? 0) + 1
         const published = await tx.workflowVersion.create({
@@ -67,9 +77,13 @@ export function createWorkflowRepository(database: Database) {
       actorId: string
       idempotencyKey?: string
       payload?: unknown
+      workspaceId?: string
     }) {
       const createRun = (tx: Prisma.TransactionClient) => (async () => {
-        const version = await tx.workflowVersion.findFirstOrThrow({ where: { id: input.versionId, workflowId: input.workflowId } })
+        const version = await tx.workflowVersion.findFirst({
+          where: { id: input.versionId, workflowId: input.workflowId, workflow: workflowRelation(input.workspaceId) },
+        })
+        if (!version) throw new Error('Workflow version not found')
         const definition = parseWorkflowDefinition(JSON.parse(version.definitionJson))
         const run = await tx.workflowRun.create({
           data: {
@@ -152,8 +166,8 @@ export function createWorkflowRepository(database: Database) {
       return run
     },
 
-    listRuns(workflowId: string) {
-      return database.workflowRun.findMany({ where: { workflowId }, orderBy: { createdAt: 'desc' }, include: { nodeRuns: true }, take: 50 })
+    listRuns(workflowId: string, workspaceId?: string) {
+      return database.workflowRun.findMany({ where: { workflowId, workflow: workflowRelation(workspaceId) }, orderBy: { createdAt: 'desc' }, include: { nodeRuns: true }, take: 50 })
     },
 
     async retryNode(runId: string, nodeId: string, workspaceId?: string) {

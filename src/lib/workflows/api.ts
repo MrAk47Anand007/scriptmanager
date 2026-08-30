@@ -15,10 +15,7 @@ export function apiError(error: unknown) {
 }
 
 export async function resolveWorkflowActor(request: Request): Promise<{ userId: string; workspaceId: string }> {
-  const headerUserId = request.headers.get('x-scriptmanager-user-id')
-  const headerWorkspaceId = request.headers.get('x-scriptmanager-workspace-id')
-  if (headerUserId && headerWorkspaceId) return { userId: headerUserId, workspaceId: headerWorkspaceId }
-  const context = await resolveRequestContext(request).catch(() => null)
-  if (context) return { userId: context.userId, workspaceId: context.workspaceId }
-  return { userId: 'admin', workspaceId: 'default' }
+  const context = await resolveRequestContext(request)
+  if (!context) throw new Error('Unauthorized')
+  return { userId: context.userId, workspaceId: context.workspaceId }
 }

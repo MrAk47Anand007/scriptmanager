@@ -3087,19 +3087,21 @@ async function requireDesktopWorkflowRun(id: string) {
 }
 
 async function cancelDesktopObservabilityRun(id: string) {
+  const actor = await createDesktopActorContext(prisma)
   const run = await requireDesktopWorkflowRun(id)
-  return createWorkflowRepository(prisma).requestCancellation(run.id)
+  return createWorkflowRepository(prisma).requestCancellation(run.id, actor.workspaceId)
 }
 
 async function retryDesktopObservabilityRun(payload: { id: string; nodeId?: string }) {
+  const actor = await createDesktopActorContext(prisma)
   const run = await prisma.workflowRun.findFirst({
-    where: { id: payload.id, workflow: { workspaceId: (await createDesktopActorContext(prisma)).workspaceId } },
+    where: { id: payload.id, workflow: { workspaceId: actor.workspaceId } },
     include: { nodeRuns: true },
   })
   if (!run) throw new Error('Workflow run not found')
   const nodeId = payload.nodeId ?? run.nodeRuns.find(node => ['failed', 'interrupted'].includes(node.status))?.nodeId
   if (!nodeId) throw new Error('No failed node is eligible for retry')
-  return createWorkflowRepository(prisma).retryNode(run.id, nodeId)
+  return createWorkflowRepository(prisma).retryNode(run.id, nodeId, actor.workspaceId)
 }
 
 async function readDesktopObservabilityLog(payload: { kind: ExecutionKind; id: string }) {
@@ -3154,13 +3156,15 @@ async function saveWorkflowDraftForDesktop(payload: {
   definition: unknown
   projectId?: string | null
 }) {
+  const actor = await createDesktopActorContext(prisma)
   const updated = await desktopWorkflowRepository.updateDraft(
     payload.id,
-    parseWorkflowDefinition(payload.definition)
+    parseWorkflowDefinition(payload.definition),
+    actor.workspaceId,
   )
 
   if (payload.projectId !== undefined) {
-    await desktopWorkflowRepository.setProject(payload.id, payload.projectId)
+    await desktopWorkflowRepository.setProject(payload.id, payload.projectId, actor.workspaceId)
   }
 
   return serializeWorkflow({
@@ -3170,7 +3174,8 @@ async function saveWorkflowDraftForDesktop(payload: {
 }
 
 async function publishWorkflowForDesktop(id: string) {
-  const stored = await desktopWorkflowRepository.getWorkflow(id)
+  const actor = await createDesktopActorContext(prisma)
+  const stored = await desktopWorkflowRepository.getWorkflow(id, actor.workspaceId)
   if (!stored) {
     throw new Error('Workflow not found')
   }
@@ -3180,12 +3185,12 @@ async function publishWorkflowForDesktop(id: string) {
     throw new Error('Workflow is invalid')
   }
 
-  return desktopWorkflowRepository.publish(id)
+  return desktopWorkflowRepository.publish(id, actor.workspaceId)
 }
 
 async function runWorkflowForDesktop(payload: { id: string; input?: unknown }) {
   const actor = await createDesktopActorContext(prisma)
-  const workflow = await desktopWorkflowRepository.getWorkflow(payload.id)
+  const workflow = await desktopWorkflowRepository.getWorkflow(payload.id, actor.workspaceId)
   if (!workflow?.publishedVersion) {
     throw new Error('Publish the workflow before running it')
   }
@@ -3199,6 +3204,7 @@ async function runWorkflowForDesktop(payload: { id: string; input?: unknown }) {
     workflowId: payload.id,
     versionId: version.id,
     actorId: actor.actorId,
+    workspaceId: actor.workspaceId,
     payload: payload.input ?? {},
   })
 
@@ -3320,30 +3326,37 @@ export function initDesktopRuntimeIpc() {
   })
 
   ipcMain.handle('scriptmanager:runtime:list-workflow-runs', async (_event, workflowId: string) => {
-    return desktopWorkflowRepository.listRuns(workflowId)
+    const actor = await createDesktopActorContext(prisma)
+    if (!await desktopWorkflowRepository.getWorkflow(workflowId, actor.workspaceId)) throw new Error('Workflow not found')
+    return desktopWorkflowRepository.listRuns(workflowId, actor.workspaceId)
   })
 
   ipcMain.handle('scriptmanager:runtime:read-workflow-run', async (_event, runId: string) => {
-    return desktopWorkflowRepository.getRun(runId)
+    const actor = await createDesktopActorContext(prisma)
+    return desktopWorkflowRepository.getRun(runId, actor.workspaceId)
   })
 
   ipcMain.handle('scriptmanager:runtime:retry-workflow-node', async (_event, payload: { runId: string; nodeId: string }) => {
-    return desktopWorkflowRepository.retryNode(payload.runId, payload.nodeId)
+    const actor = await createDesktopActorContext(prisma)
+    return desktopWorkflowRepository.retryNode(payload.runId, payload.nodeId, actor.workspaceId)
   })
 
   ipcMain.handle('scriptmanager:runtime:cancel-workflow-run', async (_event, runId: string) => {
-    return desktopWorkflowRepository.requestCancellation(runId)
+    const actor = await createDesktopActorContext(prisma)
+    return desktopWorkflowRepository.requestCancellation(runId, actor.workspaceId)
   })
 
   ipcMain.handle('scriptmanager:runtime:list-notification-channels', async () => {
-    return prisma.notificationChannel.findMany({ include: { _count: { select: { rules: true, deliveries: true } } }, orderBy: { createdAt: 'desc' } })
+    const actor = await createDesktopActorContext(prisma)
+    return prisma.notificationChannel.findMany({ where: { workspaceId: actor.workspaceId }, include: { _count: { select: { rules: true, deliveries: true } } }, orderBy: { createdAt: 'desc' } })
   })
 
   ipcMain.handle('scriptmanager:runtime:create-notification-channel', async (_event, payload: { name: string; kind: string; config?: unknown }) => {
+    const actor = await createDesktopActorContext(prisma)
     if (!['desktop', 'webhook', 'slack', 'smtp', 'teams'].includes(payload.kind)) throw new Error('Invalid channel')
     const id = crypto.randomUUID()
-    const config = await vaultNotificationConfig(prisma, id, payload.config)
-    return prisma.notificationChannel.create({ data: { id, name: payload.name, kind: payload.kind, configJson: JSON.stringify(config) } })
+    const config = await vaultNotificationConfig(prisma, id, payload.config, { workspaceId: actor.workspaceId, actorId: actor.actorId })
+    return prisma.notificationChannel.create({ data: { id, workspaceId: actor.workspaceId, name: payload.name.trim(), kind: payload.kind, configJson: JSON.stringify(config) } })
   })
 
   ipcMain.handle('scriptmanager:runtime:list-plugins', async () => {
