@@ -8,6 +8,7 @@ import { selectScriptItems } from '@/features/scripts/selectors'
 import { Button } from '@/components/ui/button'
 import { ClipboardList, ChevronDown, ChevronUp, RefreshCw, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getOperationError } from '@/lib/operationError'
 
 const STATUS_STYLES: Record<string, { badge: string; dot: string }> = {
     pending_approval: { badge: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400', dot: 'bg-amber-400' },
@@ -44,17 +45,23 @@ export function AuditTrailPanel() {
     const [filterProfileId, setFilterProfileId] = useState('')
     const [filterScriptId, setFilterScriptId] = useState('')
     const [offset, setOffset] = useState(0)
+    const [loadError, setLoadError] = useState('')
 
     const LIMIT = 20
 
-    const load = (newOffset = 0) => {
-        dispatch(fetchAuditLog({
-            profileId: filterProfileId || undefined,
-            scriptId: filterScriptId || undefined,
-            limit: LIMIT,
-            offset: newOffset,
-        }))
+    const load = async (newOffset = 0) => {
         setOffset(newOffset)
+        try {
+            await dispatch(fetchAuditLog({
+                profileId: filterProfileId || undefined,
+                scriptId: filterScriptId || undefined,
+                limit: LIMIT,
+                offset: newOffset,
+            })).unwrap()
+            setLoadError('')
+        } catch (error) {
+            setLoadError(getOperationError(error, 'Unable to load audit trail'))
+        }
     }
 
     useEffect(() => {
@@ -88,7 +95,7 @@ export function AuditTrailPanel() {
                         size="icon"
                         className="h-5 w-5"
                         title="Refresh"
-                        onClick={() => load(0)}
+                        onClick={() => void load(0)}
                     >
                         <RefreshCw className={cn("h-3 w-3 text-slate-400", auditLogStatus === 'loading' && "animate-spin")} />
                     </Button>
@@ -136,7 +143,11 @@ export function AuditTrailPanel() {
                         <p className="text-[10px] text-slate-400 italic">Loading…</p>
                     )}
 
-                    {auditLog.length === 0 && auditLogStatus !== 'loading' && (
+                    {loadError && (
+                        <p role="alert" className="text-[10px] text-red-500">{loadError}</p>
+                    )}
+
+                    {auditLog.length === 0 && auditLogStatus !== 'loading' && !loadError && (
                         <p className="text-[10px] text-slate-400 italic">No executions recorded yet.</p>
                     )}
 
@@ -215,7 +226,7 @@ export function AuditTrailPanel() {
                                 variant="ghost"
                                 className="h-6 text-xs flex-1"
                                 disabled={offset === 0 || auditLogStatus === 'loading'}
-                                onClick={() => load(Math.max(0, offset - LIMIT))}
+                                onClick={() => void load(Math.max(0, offset - LIMIT))}
                             >
                                 ← Newer
                             </Button>
@@ -224,7 +235,7 @@ export function AuditTrailPanel() {
                                 variant="ghost"
                                 className="h-6 text-xs flex-1"
                                 disabled={offset + LIMIT >= auditLogTotal || auditLogStatus === 'loading'}
-                                onClick={() => load(offset + LIMIT)}
+                                onClick={() => void load(offset + LIMIT)}
                             >
                                 Older →
                             </Button>
