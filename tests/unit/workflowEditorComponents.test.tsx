@@ -2,7 +2,7 @@
 import React from 'react'
 import '@testing-library/jest-dom/vitest'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Provider } from 'react-redux'
 import { ReactFlowProvider } from '@xyflow/react'
 import { makeStore } from '@/store/store'
@@ -16,6 +16,7 @@ import { WorkflowCommandBar } from '@/components/workflows/WorkflowCommandBar'
 import { WorkflowExecutionDrawer } from '@/components/workflows/WorkflowExecutionDrawer'
 import { WorkflowEditorShell } from '@/components/workflows/WorkflowEditorShell'
 import { WorkflowSidebar } from '@/components/workflows/WorkflowSidebar'
+import { toast } from '@/components/ui/toast'
 
 beforeAll(() => {
   class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -24,7 +25,11 @@ beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, value: 600 })
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  delete window.scriptManagerDesktop
+  vi.restoreAllMocks()
+})
 
 describe('workflow editor components', () => {
   it('searches the node launcher and supports keyboard selection', () => {
@@ -102,6 +107,24 @@ describe('workflow editor components', () => {
     expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Run workflow' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
+  })
+
+  it('reports workflow save failures without clearing unsaved changes', async () => {
+    const saveWorkflow = vi.fn().mockRejectedValue(new Error('Workflow could not be saved'))
+    const errorToast = vi.spyOn(toast, 'error')
+    window.scriptManagerDesktop = { runtime: { saveWorkflow } } as never
+    const store = makeStore()
+    store.dispatch(selectWorkflow({ id: 'w', name: 'Flow', publishedVersion: null, definition: {
+      schemaVersion: 1, name: 'Flow', nodes: [{ id: 'wait', type: 'delay', name: 'Wait', config: { durationMs: 1000 } }], edges: [],
+    } }))
+    store.dispatch(moveNodes([{ id: 'wait', position: { x: 20, y: 20 } }]))
+    render(<Provider store={store}><WorkflowCommandBar /></Provider>)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(errorToast).toHaveBeenCalledWith('Workflow could not be saved'))
+    expect(saveWorkflow).toHaveBeenCalledOnce()
+    expect(store.getState().workflows.dirty).toBe(true)
   })
 
   it('inspects historical run and selected node details without changing the draft', () => {
