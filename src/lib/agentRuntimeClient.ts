@@ -1,6 +1,14 @@
 export type AgentProvider = 'codex' | 'claude'
 export type AgentAccessLevel = 'observe' | 'develop' | 'full'
 
+export type AgentProviderDiscovery = {
+  provider: AgentProvider
+  available: boolean
+  executable?: string
+  version?: string
+  error?: string
+}
+
 export type AgentProfileRuntime = {
   id: string
   name: string
@@ -36,6 +44,13 @@ type AgentRunPayload = {
   profileId: string
   prompt: string
   cwd: string
+}
+
+export async function discoverAgentProvidersRuntime(): Promise<AgentProviderDiscovery[]> {
+  if (window.scriptManagerDesktop?.agents?.discover) {
+    return window.scriptManagerDesktop.agents.discover() as Promise<AgentProviderDiscovery[]>
+  }
+  return []
 }
 
 export async function launchAgentRuntime(payload: AgentRunPayload): Promise<AgentRunRuntime> {

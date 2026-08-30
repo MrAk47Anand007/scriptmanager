@@ -526,6 +526,7 @@ export function createDesktopAcpProviderAdapters(runtime: DesktopAgentRuntime): 
 }
 
 type DesktopAgentServiceController = {
+  discover(): Promise<unknown[]>
   launch(input: { profileId: string; prompt: string; cwd: string; desktopHost: boolean; workspaceId: string }): Promise<unknown>
   interrupt(runId: string, workspaceId: string): Promise<unknown>
   resume(runId: string, prompt: string, workspaceId: string): Promise<unknown>
@@ -542,6 +543,7 @@ export function registerAgentServiceIpc(
   service: DesktopAgentServiceController,
   getWorkspaceId: () => Promise<string>,
 ) {
+  ipc.handle('scriptmanager:agents:discover', async () => service.discover())
   ipc.handle('scriptmanager:agents:run', async (_event, payload: unknown) => {
     const profileId = requiredAgentString(payload, 'profileId')
     const prompt = requiredAgentString(payload, 'prompt')

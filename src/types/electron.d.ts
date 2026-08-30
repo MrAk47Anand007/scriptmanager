@@ -39,6 +39,7 @@ declare global {
       }>
       oauthDefaults?: () => Promise<{ gdrive: boolean; onedrive: boolean }>
       agents?: {
+        discover: () => Promise<unknown[]>
         run: (payload: { profileId: string; prompt: string; cwd: string }) => Promise<unknown>
         interruptRun: (runId: string) => Promise<unknown>
         resumeRun: (payload: { runId: string; prompt: string }) => Promise<unknown>

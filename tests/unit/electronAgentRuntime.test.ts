@@ -50,6 +50,7 @@ describe('electron ACP runtime bridge', () => {
   it('routes desktop agent controls through the durable agent service', async () => {
     const handlers = new Map<string, (...args: any[]) => unknown>()
     const service = {
+      discover: vi.fn().mockResolvedValue([{ provider: 'codex', available: true }]),
       launch: vi.fn().mockResolvedValue({ id: 'run-1' }),
       interrupt: vi.fn().mockResolvedValue({ id: 'run-1' }),
       resume: vi.fn().mockResolvedValue({ id: 'run-1' }),
@@ -61,6 +62,7 @@ describe('electron ACP runtime bridge', () => {
       async () => 'workspace-1',
     )
 
+    await expect(handlers.get('scriptmanager:agents:discover')?.({})).resolves.toEqual([{ provider: 'codex', available: true }])
     await expect(handlers.get('scriptmanager:agents:run')?.({}, { profileId: 'profile-1', prompt: 'inspect', cwd: '/tmp' })).resolves.toEqual({ id: 'run-1' })
     expect(service.launch).toHaveBeenCalledWith({ profileId: 'profile-1', prompt: 'inspect', cwd: '/tmp', desktopHost: true, workspaceId: 'workspace-1' })
     await handlers.get('scriptmanager:agents:run-interrupt')?.({}, 'run-1')

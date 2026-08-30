@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
   oauthDefaults: () =>
     ipcRenderer.invoke('scriptmanager:oauth-defaults') as Promise<{ gdrive: boolean; onedrive: boolean }>,
   agents: {
+    discover: () => ipcRenderer.invoke('scriptmanager:agents:discover') as Promise<unknown[]>,
     run: (payload: { profileId: string; prompt: string; cwd: string }) => ipcRenderer.invoke('scriptmanager:agents:run', payload) as Promise<unknown>,
     interruptRun: (runId: string) => ipcRenderer.invoke('scriptmanager:agents:run-interrupt', runId) as Promise<unknown>,
     resumeRun: (payload: { runId: string; prompt: string }) => ipcRenderer.invoke('scriptmanager:agents:run-resume', payload) as Promise<unknown>,

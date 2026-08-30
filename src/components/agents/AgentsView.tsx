@@ -1,11 +1,22 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  AlertTriangle, Bot, Check, CheckCircle2, ChevronRight, Copy, Cpu, Eye,
-  FileCode, FolderOpen, LoaderCircle, Lock, MessageSquare, Pause, Play,
-  Plus, RefreshCw, Send, Shield, ShieldAlert, ShieldCheck, Sparkles, Terminal, X, XCircle
+  Bot, Check, ChevronRight, Copy, FileCode, FolderOpen, LoaderCircle, MessageSquare, Pause, Play,
+  Plus, Send, ShieldAlert, ShieldCheck, Sparkles, Terminal, X
 } from 'lucide-react'
+import {
+  createAgentProfileRuntime,
+  discoverAgentProvidersRuntime,
+  interruptAgentRuntime,
+  launchAgentRuntime,
+  listAgentProfilesRuntime,
+  listAgentRunsRuntime,
+  readAgentRunRuntime,
+  resumeAgentRuntime,
+  type AgentProviderDiscovery,
+} from '@/lib/agentRuntimeClient'
+import { listProjectsRuntime } from '@/lib/opsRuntimeClient'
 
 type Profile = {
   id: string
@@ -37,24 +48,6 @@ type Detail = Run & {
   usageJson?: string | null
 }
 
-type ProviderDiscovery = {
-  provider: 'codex' | 'claude'
-  available: boolean
-  executable: string
-  version?: string
-  error?: string
-}
-
-type PendingPermission = {
-  sessionId: string
-  requestId: string
-  capability: string
-  operation: string
-  resource: string
-  reason?: string
-  preview?: unknown
-}
-
 const PRESET_PROMPTS = [
   { label: 'Analyze Architecture', prompt: 'Inspect this workspace architecture, identify core components, and summarize key data flows.' },
   { label: 'Generate Unit Tests', prompt: 'Analyze recent changes in this workspace and generate comprehensive unit tests with edge cases.' },
@@ -71,7 +64,7 @@ export function AgentsView() {
   const [runs, setRuns] = useState<Run[]>([])
   const [detail, setDetail] = useState<Detail | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
-  const [discoveries, setDiscoveries] = useState<ProviderDiscovery[]>([])
+  const [discoveries, setDiscoveries] = useState<AgentProviderDiscovery[]>([])
   const [activeTab, setActiveTab] = useState<'chat' | 'artifacts'>('chat')
   const [copiedText, setCopiedText] = useState<string | null>(null)
 
@@ -87,7 +80,6 @@ export function AgentsView() {
   const [cwd, setCwd] = useState('')
   const [error, setError] = useState('')
   const [isLaunching, setIsLaunching] = useState(false)
-  const [pendingPermissions, setPendingPermissions] = useState<PendingPermission[]>([])
 
   const chatBottomRef = useRef<HTMLDivElement | null>(null)
 
@@ -95,13 +87,13 @@ export function AgentsView() {
   const load = useCallback(async () => {
     try {
       const [p, r, j] = await Promise.all([
-        fetch('/api/agents/profiles').then((x) => x.json()),
-        fetch('/api/agents/runs').then((x) => x.json()),
-        fetch('/api/projects').then((x) => x.json()),
+        listAgentProfilesRuntime(),
+        listAgentRunsRuntime(),
+        listProjectsRuntime(),
       ])
       setProfiles(Array.isArray(p) ? p : [])
       setRuns(Array.isArray(r) ? r : [])
-      setProjects(Array.isArray(j) ? j.filter((item: Project) => item.repository_root) : [])
+      setProjects(Array.isArray(j) ? j.filter((item): item is Project => Boolean(item && typeof item === 'object' && 'repository_root' in item && (item as Project).repository_root)) : [])
     } catch {
       // ignore network errors on unmount
     }
@@ -111,7 +103,7 @@ export function AgentsView() {
   const discoverProviders = useCallback(async () => {
     if (typeof window !== 'undefined' && window.scriptManagerDesktop?.agents?.discover) {
       try {
-        const results = (await window.scriptManagerDesktop.agents.discover()) as ProviderDiscovery[]
+        const results = await discoverAgentProvidersRuntime()
         setDiscoveries(Array.isArray(results) ? results : [])
       } catch {
         // discovery error handled gracefully
@@ -121,11 +113,7 @@ export function AgentsView() {
 
   const selectRun = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`/api/agents/runs/${id}`)
-      if (res.ok) {
-        const data = await res.json()
-        setDetail(data)
-      }
+      setDetail(await readAgentRunRuntime(id))
     } catch {
       // ignore
     }
@@ -147,37 +135,8 @@ export function AgentsView() {
   useEffect(() => {
     if (!window.scriptManagerDesktop?.agents?.onEvent) return
 
-    const unsubscribe = window.scriptManagerDesktop.agents.onEvent(async ({ sessionId, event }: any) => {
-      if (!event) return
-
-      if (event.type === 'message' && event.message?.content) {
-        await fetch(`/api/agents/runs/${sessionId}/messages`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            role: event.message.role ?? 'assistant',
-            content: event.message.content,
-          }),
-        })
-      }
-
-      if (event.type === 'permission_request' && event.request) {
-        setPendingPermissions((prev) => [
-          ...prev.filter((p) => p.requestId !== event.request.id),
-          {
-            sessionId,
-            requestId: event.request.id,
-            capability: event.request.capability,
-            operation: event.request.operation,
-            resource: event.request.resource,
-            reason: event.request.reason,
-            preview: event.request.preview,
-          },
-        ])
-      }
-
-      await selectRun(sessionId)
-      await load()
+    const unsubscribe = window.scriptManagerDesktop.agents.onEvent(({ sessionId }) => {
+      void Promise.all([selectRun(sessionId), load()])
     })
 
     return () => {
@@ -189,33 +148,7 @@ export function AgentsView() {
   const createProfile = async () => {
     setError('')
     try {
-      const config = await fetch('/api/agents/providers', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          provider,
-          name: `${name} provider`,
-          executable: provider === 'codex' ? 'codex-acp' : 'claude-agent-acp',
-        }),
-      }).then((x) => x.json())
-
-      const response = await fetch('/api/agents/profiles', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          provider,
-          providerConfigId: config.id,
-          accessLevel,
-          projectId: projectId || undefined,
-        }),
-      })
-
-      if (!response.ok) {
-        const resData = await response.json()
-        return setError(resData.error || 'Failed to create profile')
-      }
-
+      await createAgentProfileRuntime({ name, provider, accessLevel, projectId: projectId || null })
       setIsCreatingProfile(false)
       await load()
     } catch (err) {
@@ -246,107 +179,61 @@ export function AgentsView() {
     setError('')
     setIsLaunching(true)
     try {
-      const response = await fetch('/api/agents/runs', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-scriptmanager-desktop': '1' },
-        body: JSON.stringify({ profileId: profile.id, prompt: finalPrompt, cwd: workspace }),
-      })
-      const run = await response.json()
-      if (!response.ok) {
-        setIsLaunching(false)
-        return setError(run.error || 'Failed to launch agent run.')
-      }
-
-      await window.scriptManagerDesktop!.agents!.launch({
-        provider: profile.provider,
-        sessionId: run.id,
-        profileId: profile.id,
-        cwd: workspace,
-      })
-      await window.scriptManagerDesktop!.agents!.input({
-        sessionId: run.id,
-        message: { role: 'user', content: finalPrompt },
-      })
+      const run = await launchAgentRuntime({ profileId: profile.id, prompt: finalPrompt, cwd: workspace })
 
       setInputPrompt('')
-      setIsLaunching(false)
       await load()
       await selectRun(run.id)
     } catch (err) {
-      setIsLaunching(false)
       setError(err instanceof Error ? err.message : 'Failed to launch agent.')
+    } finally {
+      setIsLaunching(false)
     }
   }
 
   // Send follow-up message in active session
   const sendMessage = async () => {
     if (!inputPrompt.trim() || !detail) return
+    if (!desktop) return setError('Open ScriptManager Desktop to send prompts to local ACP agents.')
+    if (detail.status === 'waiting_approval') return setError('This run is waiting for approval. Review it in Approval Inbox.')
     const text = inputPrompt.trim()
-    setInputPrompt('')
-
-    if (desktop && detail.status === 'running') {
-      await window.scriptManagerDesktop?.agents?.input({
-        sessionId: detail.id,
-        message: { role: 'user', content: text },
-      })
+    try {
+      setError('')
+      await resumeAgentRuntime(detail.id, text)
+      setInputPrompt('')
+      await load()
+      await selectRun(detail.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send prompt.')
     }
-
-    await fetch(`/api/agents/runs/${detail.id}/messages`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ role: 'user', content: text }),
-    })
-
-    if (detail.status !== 'running' && desktop) {
-      await fetch(`/api/agents/runs/${detail.id}/resume`, {
-        method: 'POST',
-        headers: { 'x-scriptmanager-desktop': '1' },
-      })
-    }
-
-    await load()
-    await selectRun(detail.id)
-  }
-
-  // Handle in-line permission decision
-  const handlePermissionDecision = async (perm: PendingPermission, allowed: boolean) => {
-    if (desktop) {
-      await window.scriptManagerDesktop?.agents?.permissionDecision({
-        sessionId: perm.sessionId,
-        requestId: perm.requestId,
-        allowed,
-      })
-    }
-    setPendingPermissions((prev) => prev.filter((p) => p.requestId !== perm.requestId))
-    await selectRun(perm.sessionId)
-    await load()
   }
 
   // Interrupt session
   const interrupt = async (run: Run) => {
-    await window.scriptManagerDesktop?.agents?.interrupt(run.id)
-    await fetch(`/api/agents/runs/${run.id}/interrupt`, {
-      method: 'POST',
-      headers: { 'x-scriptmanager-desktop': '1' },
-    })
-    await load()
-    await selectRun(run.id)
+    if (!desktop) return setError('Open ScriptManager Desktop to control local ACP agents.')
+    try {
+      setError('')
+      await interruptAgentRuntime(run.id)
+      await load()
+      await selectRun(run.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to interrupt agent.')
+    }
   }
 
   // Resume session
   const resume = async (run: Run) => {
     const promptToSend = inputPrompt.trim() || 'Please continue.'
-    await window.scriptManagerDesktop?.agents?.input({
-      sessionId: run.id,
-      message: { role: 'user', content: promptToSend },
-    })
-    await fetch(`/api/agents/runs/${run.id}/resume`, {
-      method: 'POST',
-      headers: { 'x-scriptmanager-desktop': '1' },
-    })
-    setInputPrompt('')
-    await load()
-    await selectRun(run.id)
+    if (!desktop) return setError('Open ScriptManager Desktop to control local ACP agents.')
+    try {
+      setError('')
+      await resumeAgentRuntime(run.id, promptToSend)
+      setInputPrompt('')
+      await load()
+      await selectRun(run.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resume agent.')
+    }
   }
 
   // Render formatted message content with code blocks
@@ -711,46 +598,12 @@ export function AgentsView() {
                     )
                   })}
 
-                  {/* In-Line Permission Request Cards */}
-                  {pendingPermissions
-                    .filter((p) => p.sessionId === detail.id)
-                    .map((perm) => (
-                      <div
-                        key={perm.requestId}
-                        className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 shadow-sm space-y-2.5 max-w-2xl"
-                      >
-                        <div className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
-                          <ShieldAlert className="h-4 w-4 shrink-0" />
-                          <span>Action Requires Approval: {perm.capability}</span>
-                        </div>
-                        <div className="text-[11px] text-muted-foreground space-y-1">
-                          <div>
-                            <strong>Resource:</strong> <span className="font-mono">{perm.resource}</span>
-                          </div>
-                          {perm.reason && (
-                            <div>
-                              <strong>Reason:</strong> {perm.reason}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 pt-1">
-                          <button
-                            onClick={() => void handlePermissionDecision(perm, true)}
-                            className="flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 shadow-xs"
-                          >
-                            <Check className="h-3.5 w-3.5" />
-                            <span>Allow Action</span>
-                          </button>
-                          <button
-                            onClick={() => void handlePermissionDecision(perm, false)}
-                            className="flex items-center gap-1.5 rounded-md border border-wb-border bg-background px-3 py-1.5 text-xs font-medium text-rose-500 hover:bg-muted shadow-xs"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                            <span>Deny</span>
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                  {detail.status === 'waiting_approval' && (
+                    <div className="flex max-w-2xl items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs text-amber-700 dark:text-amber-300">
+                      <ShieldAlert className="h-4 w-4 shrink-0" />
+                      <span>This run is paused. Review the request in Approval Inbox before resuming.</span>
+                    </div>
+                  )}
 
                   <div ref={chatBottomRef} />
                 </div>
@@ -833,7 +686,7 @@ export function AgentsView() {
                   className="min-h-[52px] max-h-32 flex-1 resize-y rounded-lg border border-wb-border bg-background p-2.5 text-xs outline-none focus:border-accent-brand font-sans leading-relaxed"
                 />
                 <button
-                  disabled={!inputPrompt.trim()}
+                  disabled={!inputPrompt.trim() || !desktop || detail.status === 'waiting_approval'}
                   onClick={() => void sendMessage()}
                   className="flex h-[52px] w-12 items-center justify-center rounded-lg bg-accent-brand text-white shadow-xs hover:opacity-90 disabled:opacity-40 transition-opacity"
                 >
