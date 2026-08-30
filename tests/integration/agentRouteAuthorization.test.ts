@@ -101,6 +101,17 @@ describe('agent route authorization', () => {
     expect(created.workspaceId).toBe('default')
   })
 
+  it('rejects a profile that references a provider configuration for another provider', async () => {
+    const provider = await prisma.agentProviderConfig.findFirstOrThrow({ where: { provider: 'codex' } })
+    const response = await createProfile(new Request('http://localhost/api/agents/profiles', {
+      method: 'POST',
+      headers: { cookie: sessionCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Mismatched profile', provider: 'claude', providerConfigId: provider.id, accessLevel: 'observe' }),
+    }))
+    expect(response.status).toBe(400)
+    expect(await prisma.agentProfile.count({ where: { name: 'Mismatched profile' } })).toBe(0)
+  })
+
   it('restricts global agent provider configuration to session managers', async () => {
     const viewerRole = await prisma.role.findUniqueOrThrow({ where: { workspaceId_key: { workspaceId: 'default', key: 'viewer' } } })
     await prisma.membership.updateMany({ where: { userId: 'local-admin', workspaceId: 'default' }, data: { roleId: viewerRole.id } })

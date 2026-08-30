@@ -15,5 +15,10 @@ export async function POST(request: Request) {
   const workspaceId = authorization.context.workspaceId
   if (!body.name || !['codex', 'claude'].includes(body.provider) || !['observe', 'develop', 'full'].includes(body.accessLevel)) return NextResponse.json({ error: 'name, provider, and an explicit accessLevel are required' }, { status: 400 })
   if (body.projectId) { const project = await prisma.project.findFirst({ where: { id: body.projectId, workspaceId } }); if (!project?.repositoryRoot) return NextResponse.json({ error: 'Selected project is not connected to a repository in this workspace' }, { status: 400 }) }
-  return NextResponse.json(await prisma.agentProfile.create({ data: { name: body.name, provider: body.provider, providerConfigId: body.providerConfigId, accessLevel: body.accessLevel, workspaceId, projectId: body.projectId, model: body.model, systemPrompt: body.systemPrompt ?? '' } }), { status: 201 })
+  const providerConfigId = typeof body.providerConfigId === 'string' && body.providerConfigId.trim() ? body.providerConfigId.trim() : undefined
+  if (providerConfigId) {
+    const providerConfig = await prisma.agentProviderConfig.findUnique({ where: { id: providerConfigId }, select: { provider: true, enabled: true } })
+    if (!providerConfig || providerConfig.provider !== body.provider || !providerConfig.enabled) return NextResponse.json({ error: 'Provider configuration does not match the selected provider' }, { status: 400 })
+  }
+  return NextResponse.json(await prisma.agentProfile.create({ data: { name: String(body.name).trim(), provider: body.provider, providerConfigId, accessLevel: body.accessLevel, workspaceId, projectId: body.projectId, model: body.model, systemPrompt: body.systemPrompt ?? '' } }), { status: 201 })
 }
