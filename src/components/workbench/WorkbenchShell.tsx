@@ -7,7 +7,7 @@ import { StatusBar } from './StatusBar'
 import { CommandPalette } from './CommandPalette'
 import { Toaster } from '@/components/ui/toast'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { toggleDock, setPaletteOpen } from '@/features/workbench/workbenchSlice'
+import { toggleDock, setActiveActivity, setPaletteOpen } from '@/features/workbench/workbenchSlice'
 import { selectTabs, selectActiveTabId } from '@/features/workbench/selectors'
 import { useRequestCloseTab } from './tabSync'
 
@@ -42,6 +42,21 @@ export function WorkbenchShell({ activityBar, sidePanel, dock, children }: {
   //   Ctrl+W        close active editor tab (with dirty confirm)
   //   Ctrl+Enter    run active script / send active api request (via CustomEvent,
   //                 handled in ScriptsManager / ApiRequestEditor)
+  useEffect(() => {
+    const openPaletteFromMenu = () => dispatch(setPaletteOpen(true))
+    window.addEventListener('scriptmanager:open-command-palette', openPaletteFromMenu)
+    return () => window.removeEventListener('scriptmanager:open-command-palette', openPaletteFromMenu)
+  }, [dispatch])
+
+  useEffect(() => {
+    const handleNewScriptFromMenu = () => {
+      dispatch(setActiveActivity('scripts'))
+      window.dispatchEvent(new CustomEvent('scriptmanager:new-script'))
+    }
+    window.addEventListener('scriptmanager:desktop-new-script', handleNewScriptFromMenu)
+    return () => window.removeEventListener('scriptmanager:desktop-new-script', handleNewScriptFromMenu)
+  }, [dispatch])
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return

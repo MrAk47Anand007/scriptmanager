@@ -454,6 +454,28 @@ export async function openDesktopScriptsFolder(payload: DesktopOpenFolderPayload
   }>
 }
 
+export type DesktopScannedScriptImportPayload = {
+  files: Array<{ path: string }>
+  mode: 'misc' | 'by-folder'
+  rootForGrouping?: string
+}
+
+export type DesktopScannedScriptImportResult = {
+  imported: number
+  skipped: number
+  collections: string[]
+}
+
+export async function importDesktopScannedScripts(
+  payload: DesktopScannedScriptImportPayload,
+): Promise<DesktopScannedScriptImportResult> {
+  if (!window.scriptManagerDesktop?.runtime?.importScannedScripts) {
+    throw new Error('Desktop script import is unavailable')
+  }
+
+  return window.scriptManagerDesktop.runtime.importScannedScripts(payload)
+}
+
 export async function rescanCanonicalFolder(collectionId: string) {
   if (!window.scriptManagerDesktop?.runtime?.rescanCanonicalFolder) throw new Error('Desktop runtime unavailable')
   return window.scriptManagerDesktop.runtime.rescanCanonicalFolder(collectionId)

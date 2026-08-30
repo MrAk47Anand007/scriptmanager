@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, useCallback, useDeferredValue, memo } from 'react';
+import { useState, useMemo, useEffect, useCallback, useDeferredValue, useRef, memo } from 'react';
 import { useAppDispatch, useAppSelector, useAppStore } from '@/store/hooks';
 import type { RootState } from '@/store/store';
 import {
@@ -35,7 +35,8 @@ import { DeleteCollectionDialog } from './sidebar/DeleteCollectionDialog';
 import { PythonEnvDialog } from './sidebar/PythonEnvDialog';
 import { CloudStorageDialog } from './sidebar/CloudStorageDialog';
 import { syncCollectionRemote } from '@/lib/storageRuntimeClient';
-import { readScriptContentRuntime } from '@/lib/scriptsRuntimeClient';
+import { importDesktopScannedScripts, readScriptContentRuntime } from '@/lib/scriptsRuntimeClient';
+import { getDesktopDroppedScriptPaths } from '@/lib/desktopFileDrop';
 import { SaveAsTemplateDialog } from './sidebar/SaveAsTemplateDialog';
 import { ScriptTree, getCollectionTreeKey, type ScriptTreeCallbacks } from './sidebar/ScriptTree';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
@@ -95,6 +96,8 @@ const ScriptsSidebarComponent = () => {
     const [parentCreationCollectionId, setParentCreationCollectionId] = useState<string | null>(null);
     const [activeDragScript, setActiveDragScript] = useState<Script | null>(null);
     const [activeDragCollection, setActiveDragCollection] = useState<Collection | null>(null);
+    const [isExternalDragOver, setIsExternalDragOver] = useState(false);
+    const externalDragDepth = useRef(0);
 
     // New Script Dialog State
     const [isCreateScriptOpen, setIsCreateScriptOpen] = useState(false);
@@ -359,6 +362,51 @@ const ScriptsSidebarComponent = () => {
             setIsOpeningFolder(false);
         }
     };
+
+    const handleExternalDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+        if (!hasDesktopPcScan || !Array.from(event.dataTransfer.types).includes('Files')) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        externalDragDepth.current += 1;
+        setIsExternalDragOver(true);
+    }, [hasDesktopPcScan]);
+
+    const handleExternalDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+        if (!hasDesktopPcScan || !Array.from(event.dataTransfer.types).includes('Files')) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+    }, [hasDesktopPcScan]);
+
+    const handleExternalDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+        if (!hasDesktopPcScan || !Array.from(event.dataTransfer.types).includes('Files')) return;
+        event.preventDefault();
+        externalDragDepth.current = Math.max(0, externalDragDepth.current - 1);
+        if (externalDragDepth.current === 0) setIsExternalDragOver(false);
+    }, [hasDesktopPcScan]);
+
+    const handleExternalDrop = useCallback(async (event: React.DragEvent<HTMLDivElement>) => {
+        if (!hasDesktopPcScan || !Array.from(event.dataTransfer.types).includes('Files')) return;
+        event.preventDefault();
+        externalDragDepth.current = 0;
+        setIsExternalDragOver(false);
+
+        const paths = getDesktopDroppedScriptPaths(Array.from(event.dataTransfer.files) as Array<{ path?: string | null }>);
+        if (paths.length === 0) {
+            toast.info('Drop supported script files (.py, .js, .ts, .sh, .ps1, or .bat).');
+            return;
+        }
+
+        try {
+            const result = await importDesktopScannedScripts({
+                files: paths.map((path) => ({ path })),
+                mode: 'misc',
+            });
+            await Promise.all([dispatch(fetchScripts()), dispatch(fetchCollections())]);
+            toast.success(`Linked ${result.imported} script${result.imported === 1 ? '' : 's'}${result.skipped > 0 ? `, skipped ${result.skipped} already linked` : ''}`);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Could not link dropped scripts');
+        }
+    }, [dispatch, hasDesktopPcScan]);
 
     const handleCreateScriptSubmit = async (values: { name: string; description: string; collectionId: string | null; syncToGist: boolean }) => {
         if (!values.name.trim() || isCreatingScript) return;
@@ -721,7 +769,21 @@ const ScriptsSidebarComponent = () => {
                 onSelect={handleCreateFromTemplate}
             />
             <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-                <div className="bg-white dark:bg-slate-950 border-r dark:border-slate-800 flex flex-col h-full">
+                <div
+                    className={cn(
+                        "relative bg-white dark:bg-slate-950 border-r dark:border-slate-800 flex flex-col h-full",
+                        isExternalDragOver && "ring-2 ring-inset ring-blue-500/70"
+                    )}
+                    onDragEnter={handleExternalDragEnter}
+                    onDragOver={handleExternalDragOver}
+                    onDragLeave={handleExternalDragLeave}
+                    onDrop={(event) => { void handleExternalDrop(event); }}
+                >
+                    {isExternalDragOver && (
+                        <div className="pointer-events-none absolute inset-x-2 top-2 z-10 rounded-md border border-dashed border-blue-500 bg-blue-50/95 px-3 py-2 text-center text-xs font-medium text-blue-700 shadow-sm dark:bg-blue-950/95 dark:text-blue-200">
+                            Drop scripts to link them in place
+                        </div>
+                    )}
                     <div className="p-3 border-b dark:border-slate-800">
                         <div className="flex items-center justify-between mb-2">
                             <h2 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Scripts</h2>

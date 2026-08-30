@@ -8,7 +8,7 @@ import { listApprovalsRuntime } from '@/lib/approvalsRuntimeClient'
 import { loadWorkspaceAccessRuntime } from '@/lib/workspacesRuntimeClient'
 import { listWorkflowsRuntime } from '@/lib/workflowsRuntimeClient'
 import { clearGithubGistSettingsRuntime, readGithubGistSettingsRuntime, saveGithubGistSettingsRuntime } from '@/lib/gistCredentialsRuntimeClient'
-import { deleteDesktopGist, deleteDesktopTemplate, exportScriptRuntime, exportScriptsRuntime, importScriptsRuntime, readScriptContentRuntime, syncDesktopScriptToGist } from '@/lib/scriptsRuntimeClient'
+import { deleteDesktopGist, deleteDesktopTemplate, exportScriptRuntime, exportScriptsRuntime, importDesktopScannedScripts, importScriptsRuntime, readScriptContentRuntime, syncDesktopScriptToGist } from '@/lib/scriptsRuntimeClient'
 import { runScript as runScriptThunk } from '@/features/scripts/scriptsSlice'
 import { runGitActionRuntime } from '@/lib/gitRuntimeClient'
 import {
@@ -171,6 +171,20 @@ describe('desktop runtime bridge', () => {
     await expect(importScriptsRuntime({ _export_version: 1, scripts: [] })).resolves.toMatchObject({ message: expect.stringContaining('Imported') })
     expect(exportScripts).toHaveBeenCalledOnce()
     expect(importScripts).toHaveBeenCalledWith({ _export_version: 1, scripts: [] })
+  })
+
+  it('uses desktop IPC for linking dropped script files', async () => {
+    const importScannedScripts = vi.fn().mockResolvedValue({ imported: 1, skipped: 0, collections: ['Miscellaneous'] })
+    window.scriptManagerDesktop = { runtime: { importScannedScripts } } as never
+
+    await expect(importDesktopScannedScripts({
+      files: [{ path: '/workspace/deploy.py' }],
+      mode: 'misc',
+    })).resolves.toEqual({ imported: 1, skipped: 0, collections: ['Miscellaneous'] })
+    expect(importScannedScripts).toHaveBeenCalledWith({
+      files: [{ path: '/workspace/deploy.py' }],
+      mode: 'misc',
+    })
   })
 
   it('uses desktop IPC for single-script export', async () => {

@@ -466,6 +466,15 @@ function createApplicationMenu() {
       label: 'File',
       submenu: [
         {
+          label: 'New Script',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => {
+            void BrowserWindow.getFocusedWindow()?.webContents.executeJavaScript(
+              'window.dispatchEvent(new CustomEvent("scriptmanager:desktop-new-script"))'
+            )
+          },
+        },
+        {
           label: 'Open Folder',
           accelerator: 'CmdOrCtrl+O',
           click: () => {
@@ -491,6 +500,20 @@ function createApplicationMenu() {
       ],
     },
     {
+      label: 'Run',
+      submenu: [
+        {
+          label: 'Run Active Script',
+          accelerator: 'CmdOrCtrl+R',
+          click: () => {
+            void BrowserWindow.getFocusedWindow()?.webContents.executeJavaScript(
+              'window.dispatchEvent(new CustomEvent("scriptmanager:run-active-script"))'
+            )
+          },
+        },
+      ],
+    },
+    {
       label: 'View',
       submenu: [
         { role: 'reload' },
@@ -502,6 +525,16 @@ function createApplicationMenu() {
         { role: 'zoomOut' },
         { type: 'separator' },
         { role: 'togglefullscreen' },
+        { type: 'separator' },
+        {
+          label: 'Command Palette',
+          accelerator: 'CmdOrCtrl+P',
+          click: () => {
+            void BrowserWindow.getFocusedWindow()?.webContents.executeJavaScript(
+              'window.dispatchEvent(new CustomEvent("scriptmanager:open-command-palette"))'
+            )
+          },
+        },
       ],
     },
     {
