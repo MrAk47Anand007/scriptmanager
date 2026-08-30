@@ -3,13 +3,13 @@ import { prisma } from '@/lib/db'
 import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function GET(request: Request) {
-  const authorization = await authorizeRequest(request, 'agent', 'read')
+  const authorization = await authorizeRequest(request, 'session', 'read')
   if (authorization.response) return authorization.response
   return NextResponse.json({ desktopHostRequired: true, providers: await prisma.agentProviderConfig.findMany({ orderBy: { createdAt: 'desc' } }) })
 }
 
 export async function POST(request: Request) {
-  const authorization = await authorizeRequest(request, 'agent', 'create')
+  const authorization = await authorizeRequest(request, 'session', 'manage')
   if (authorization.response) return authorization.response
   const body = await request.json()
   if (!['codex', 'claude'].includes(body.provider) || !body.name || !body.executable) return NextResponse.json({ error: 'provider, name, and executable are required' }, { status: 400 })

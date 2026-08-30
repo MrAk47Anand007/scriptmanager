@@ -97,4 +97,11 @@ describe('agent route authorization', () => {
     const created = await response.json() as { workspaceId: string }
     expect(created.workspaceId).toBe('default')
   })
+
+  it('restricts global agent provider configuration to session managers', async () => {
+    const viewerRole = await prisma.role.findUniqueOrThrow({ where: { workspaceId_key: { workspaceId: 'default', key: 'viewer' } } })
+    await prisma.membership.updateMany({ where: { userId: 'local-admin', workspaceId: 'default' }, data: { roleId: viewerRole.id } })
+
+    expect((await listProviders(new Request('http://localhost/api/agents/providers', { headers: { cookie: sessionCookie } }))).status).toBe(403)
+  })
 })
