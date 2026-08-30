@@ -145,6 +145,25 @@ describe('workflow editor components', () => {
     expect(JSON.stringify(store.getState().workflows.active!.definition)).toBe(original)
   })
 
+  it('reports workflow node retry failures', async () => {
+    const retryWorkflowNode = vi.fn().mockRejectedValue(new Error('Retry could not be started'))
+    const errorToast = vi.spyOn(toast, 'error')
+    window.scriptManagerDesktop = { runtime: { retryWorkflowNode } } as never
+    const store = makeStore()
+    store.dispatch(selectWorkflow({ id: 'w', name: 'Flow', publishedVersion: 1, definition: {
+      schemaVersion: 1, name: 'Flow', nodes: [{ id: 'build', type: 'script', name: 'Build', config: { scriptId: 'release' } }], edges: [],
+    } }))
+    store.dispatch(setExecutionDetail({ id: 'run-1', status: 'failed', createdAt: '2026-07-15T00:00:00.000Z', nodeRuns: [{ nodeId: 'build', status: 'failed', attempt: 1, error: { message: 'Build failed' } }] }))
+    store.dispatch(setSelectedExecution('run-1'))
+    store.dispatch(selectNode('build'))
+    render(<Provider store={store}><WorkflowExecutionDrawer /></Provider>)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Build' }))
+
+    await waitFor(() => expect(errorToast).toHaveBeenCalledWith('Retry could not be started'))
+    expect(retryWorkflowNode).toHaveBeenCalledWith({ runId: 'run-1', nodeId: 'build' })
+  })
+
   it('composes named responsive regions and an actionable empty workflow state', () => {
     const store = makeStore()
     store.dispatch(selectWorkflow({ id: 'w', name: 'Empty flow', publishedVersion: null, definition: { schemaVersion: 1, name: 'Empty flow', nodes: [], edges: [] } }))
