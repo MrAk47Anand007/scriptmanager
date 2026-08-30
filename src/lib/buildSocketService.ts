@@ -3,6 +3,8 @@ import type { Server } from 'http'
 import { isAuthenticatedCookieHeader } from '@/lib/session'
 import { getBuildEmitter } from '@/lib/scriptRunner'
 import { prisma } from '@/lib/db'
+import { resolveTrustedRequestContext } from '@/lib/rbac/requestContext'
+import { permissionAllows } from '@/lib/rbac/authorization'
 
 type BuildSocketMessage =
   | { type: 'subscribe'; buildId: string }
@@ -33,6 +35,13 @@ export const initBuildWebSocketServer = (server: Server) => {
       return
     }
 
+    const actorPromise = resolveTrustedRequestContext(new Request('http://localhost/api/build-stream', {
+      headers: req.headers.cookie ? { cookie: req.headers.cookie } : {},
+    })).catch(() => null)
+    void actorPromise.then((actor) => {
+      if (!actor || !permissionAllows(actor.permissions, 'script', 'read')) ws.close(1008, 'Unauthorized')
+    })
+
     const subscriptions = new Map<string, BuildSubscription>()
 
     const sendJson = (payload: Record<string, unknown>) => {
@@ -40,8 +49,16 @@ export const initBuildWebSocketServer = (server: Server) => {
       ws.send(JSON.stringify(payload))
     }
 
-    const subscribe = (buildId: string) => {
+    const subscribe = async (buildId: string) => {
       if (!buildId || subscriptions.has(buildId)) return
+
+      const actor = await actorPromise
+      if (!actor || !permissionAllows(actor.permissions, 'script', 'read')) return
+      const build = await prisma.build.findFirst({ where: { id: buildId, script: { workspaceId: actor.workspaceId } }, select: { id: true } })
+      if (!build) {
+        sendJson({ type: 'error', buildId, message: 'Build not found' })
+        return
+      }
 
       let emitter = getBuildEmitter(buildId)
       let finished = false
@@ -121,7 +138,7 @@ export const initBuildWebSocketServer = (server: Server) => {
       }
 
       if (payload.type === 'subscribe') {
-        subscribe(payload.buildId)
+        void subscribe(payload.buildId)
       }
 
       if (payload.type === 'unsubscribe') {

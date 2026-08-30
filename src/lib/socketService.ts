@@ -6,6 +6,9 @@ import { URL } from 'url';
 import fs from 'fs';
 import { isAuthenticatedCookieHeader } from '@/lib/session';
 import { getDesktopWorkspaceLayout } from '@/lib/workspaceLayout';
+import { resolveTrustedRequestContext } from '@/lib/rbac/requestContext';
+import { permissionAllows } from '@/lib/rbac/authorization';
+import { prisma } from '@/lib/db';
 
 interface TerminalSession {
     process: pty.IPty;
@@ -195,35 +198,45 @@ export const initWebSocketServer = (server: Server) => {
             return;
         }
 
-        console.log('[Terminal] Client connected');
-        const session = ensureTerminalSession(sessionKey);
-        session.sockets.add(ws);
-        socketToSessionKey.set(ws, sessionKey);
-        ws.send('\r\n[ScriptManager] Reusing warm terminal session\r\n');
-
-        // Pipe websocket input to pty
-        ws.on('message', (message) => {
-            const msg = message.toString();
-            if (msg === '\x01kill') {
-                destroySession(sessionKey);
-            } else if (msg.startsWith('\x01resize:')) {
-                // Handle resize: \x01resize:cols,rows
-                const parts = msg.slice(8).split(',');
-                const cols = parseInt(parts[0]);
-                const rows = parseInt(parts[1]);
-                if (!isNaN(cols) && !isNaN(rows) && cols > 0 && rows > 0) {
-                    session.process.resize(cols, rows);
-                }
-            } else {
-                session.process.write(msg);
+        void (async () => {
+            const actor = await resolveTrustedRequestContext(new Request('http://localhost/api/terminal', {
+                headers: req.headers.cookie ? { cookie: req.headers.cookie } : {},
+            }), prisma).catch(() => null);
+            if (!actor || !permissionAllows(actor.permissions, 'ops', 'run')) {
+                ws.close(1008, 'Unauthorized');
+                return;
             }
-        });
 
-        ws.on('close', () => {
-            console.log('[Terminal] Client disconnected');
-            session.sockets.delete(ws);
-            socketToSessionKey.delete(ws);
-            scheduleSessionCleanup(sessionKey);
-        });
+            console.log('[Terminal] Client connected');
+            const session = ensureTerminalSession(sessionKey);
+            session.sockets.add(ws);
+            socketToSessionKey.set(ws, sessionKey);
+            ws.send('\r\n[ScriptManager] Reusing warm terminal session\r\n');
+
+            // Pipe websocket input to pty
+            ws.on('message', (message) => {
+                const msg = message.toString();
+                if (msg === '\x01kill') {
+                    destroySession(sessionKey);
+                } else if (msg.startsWith('\x01resize:')) {
+                    // Handle resize: \x01resize:cols,rows
+                    const parts = msg.slice(8).split(',');
+                    const cols = parseInt(parts[0]);
+                    const rows = parseInt(parts[1]);
+                    if (!isNaN(cols) && !isNaN(rows) && cols > 0 && rows > 0) {
+                        session.process.resize(cols, rows);
+                    }
+                } else {
+                    session.process.write(msg);
+                }
+            });
+
+            ws.on('close', () => {
+                console.log('[Terminal] Client disconnected');
+                session.sockets.delete(ws);
+                socketToSessionKey.delete(ws);
+                scheduleSessionCleanup(sessionKey);
+            });
+        })();
     });
 };

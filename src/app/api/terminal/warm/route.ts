@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server'
 import { warmTerminalSession } from '@/lib/socketService'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
+import { prisma } from '@/lib/db'
 
 export async function POST(req: Request) {
+  const authorization = await authorizeRequest(req, 'ops', 'run')
+  if (authorization.response) return authorization.response
   let sessionId: string | null = null
 
   try {
