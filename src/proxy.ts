@@ -9,8 +9,6 @@ import type { RbacAction, RbacResource } from '@/lib/rbac/catalog'
 export const config = {
   // Match everything except Next.js internals and static assets
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
-  // Run in Node.js runtime, not Edge, so we can use node:crypto
-  runtime: 'nodejs',
 }
 
 // Public paths that do not require authentication

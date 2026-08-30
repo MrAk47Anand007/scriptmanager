@@ -1,5 +1,5 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import * as pty from 'node-pty';
+import type { IPty } from 'node-pty';
 import { Server } from 'http';
 import os from 'os';
 import { URL } from 'url';
@@ -11,15 +11,25 @@ import { permissionAllows } from '@/lib/rbac/authorization';
 import { prisma } from '@/lib/db';
 
 interface TerminalSession {
-    process: pty.IPty;
+    process: IPty;
     sockets: Set<WebSocket>;
     idleTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const sessionsByKey = new Map<string, TerminalSession>();
 const socketToSessionKey = new Map<WebSocket, string>();
+const sessionsStartingByKey = new Map<string, Promise<TerminalSession>>();
+let ptyModulePromise: Promise<typeof import('node-pty')> | null = null;
 const TERMINAL_IDLE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_TERMINAL_SESSION_ID = 'terminal-1';
+
+function loadPtyModule() {
+    ptyModulePromise ??= import('node-pty');
+    return ptyModulePromise.catch((error) => {
+        ptyModulePromise = null;
+        throw error;
+    });
+}
 
 function getUserSessionKey(cookieHeader?: string): string | null {
     if (!cookieHeader) return null;
@@ -53,7 +63,8 @@ function getDefaultTerminalCwd() {
     }
 }
 
-function createPtyProcess() {
+async function createPtyProcess() {
+    const pty = await loadPtyModule();
     const isWindows = os.platform() === 'win32';
     const env = {
         ...(process.env as { [key: string]: string }),
@@ -115,7 +126,7 @@ function scheduleSessionCleanup(sessionKey: string) {
     }, TERMINAL_IDLE_TTL_MS);
 }
 
-function ensureTerminalSession(sessionKey: string): TerminalSession {
+async function ensureTerminalSession(sessionKey: string): Promise<TerminalSession> {
     const existing = sessionsByKey.get(sessionKey);
     if (existing) {
         if (existing.idleTimer) {
@@ -125,37 +136,49 @@ function ensureTerminalSession(sessionKey: string): TerminalSession {
         return existing;
     }
 
-    const ptyProcess = createPtyProcess();
-    const session: TerminalSession = {
-        process: ptyProcess,
-        sockets: new Set<WebSocket>(),
-        idleTimer: null,
-    };
+    const starting = sessionsStartingByKey.get(sessionKey);
+    if (starting) return starting;
 
-    ptyProcess.onData((data) => {
-        for (const socket of session.sockets) {
-            if (socket.readyState === WebSocket.OPEN) {
-                socket.send(data);
+    const startup = (async () => {
+        const ptyProcess = await createPtyProcess();
+        const session: TerminalSession = {
+            process: ptyProcess,
+            sockets: new Set<WebSocket>(),
+            idleTimer: null,
+        };
+
+        ptyProcess.onData((data) => {
+            for (const socket of session.sockets) {
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(data);
+                }
             }
-        }
-    });
+        });
 
-    ptyProcess.onExit(() => {
-        console.warn('[Terminal] PTY session exited');
-        for (const socket of session.sockets) {
-            if (socket.readyState === WebSocket.OPEN) {
-                socket.close();
+        ptyProcess.onExit(() => {
+            console.warn('[Terminal] PTY session exited');
+            for (const socket of session.sockets) {
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.close();
+                }
             }
-        }
-        sessionsByKey.delete(sessionKey);
-    });
+            sessionsByKey.delete(sessionKey);
+        });
 
-    sessionsByKey.set(sessionKey, session);
-    console.log('[Terminal] Started warm terminal session');
-    return session;
+        sessionsByKey.set(sessionKey, session);
+        console.log('[Terminal] Started warm terminal session');
+        return session;
+    })();
+
+    sessionsStartingByKey.set(sessionKey, startup);
+    try {
+        return await startup;
+    } finally {
+        sessionsStartingByKey.delete(sessionKey);
+    }
 }
 
-export function warmTerminalSession(cookieHeader?: string, terminalSessionId?: string | null): boolean {
+export async function warmTerminalSession(cookieHeader?: string, terminalSessionId?: string | null): Promise<boolean> {
     if (!isAuthenticatedCookieHeader(cookieHeader)) {
         return false;
     }
@@ -165,7 +188,7 @@ export function warmTerminalSession(cookieHeader?: string, terminalSessionId?: s
         return false;
     }
 
-    ensureTerminalSession(sessionKey);
+    await ensureTerminalSession(sessionKey);
     return true;
 }
 
@@ -207,8 +230,16 @@ export const initWebSocketServer = (server: Server) => {
                 return;
             }
 
+            let session: TerminalSession;
+            try {
+                session = await ensureTerminalSession(sessionKey);
+            } catch (error) {
+                console.error('[Terminal] Native terminal runtime unavailable:', error);
+                ws.close(1011, 'Terminal runtime unavailable');
+                return;
+            }
+
             console.log('[Terminal] Client connected');
-            const session = ensureTerminalSession(sessionKey);
             session.sockets.add(ws);
             socketToSessionKey.set(ws, sessionKey);
             ws.send('\r\n[ScriptManager] Reusing warm terminal session\r\n');

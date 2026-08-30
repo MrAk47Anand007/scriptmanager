@@ -15,7 +15,12 @@ export async function POST(req: Request) {
     sessionId = null
   }
 
-  const warmed = warmTerminalSession(req.headers.get('cookie') ?? undefined, sessionId)
+  let warmed: boolean
+  try {
+    warmed = await warmTerminalSession(req.headers.get('cookie') ?? undefined, sessionId)
+  } catch {
+    return NextResponse.json({ error: 'Terminal runtime unavailable' }, { status: 503 })
+  }
 
   if (!warmed) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
