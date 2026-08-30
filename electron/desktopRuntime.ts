@@ -65,6 +65,7 @@ import {
 import { createOsBackedSecretStore } from './secretStore'
 import { createCanonicalFolderWatcher, getCanonicalFolderAvailability, type CanonicalFolderChange, writeCanonicalFile } from './canonicalFolderRuntime'
 import { createRecoveryDraftStore } from './recoveryDraftStore'
+import { moveManagedScriptFile } from './managedScriptFiles'
 import { normalizeTerminalSessionId, parseScriptExecutionPayload, parseTerminalInputPayload, parseTerminalResizePayload } from '../src/lib/runtime/desktopIpcPayloads'
 import { approveRemoteExecution, rejectRemoteExecution } from '../src/lib/ops/remoteExecutionApprovalService'
 import {
@@ -2245,11 +2246,28 @@ async function moveLocalScript(payload: { scriptId: string; collectionId: string
     ? await collectionRepository.get(payload.collectionId)
     : null
   if (payload.collectionId && !collection) throw new Error('Collection not found')
-  const updated = await prisma.script.update({
-    where: { id: script.id },
-    data: { collectionId: payload.collectionId },
-  })
-  return { scriptId: updated.id, collectionId: updated.collectionId }
+  const sourcePath = await resolveScriptPath(script)
+  const destinationDirectory = collection?.folderPath ? path.resolve(collection.folderPath) : await getWorkspaceRoot()
+  const destinationPath = path.resolve(destinationDirectory, path.basename(script.filename))
+  const moved = sourcePath !== destinationPath
+
+  if (moved) moveManagedScriptFile(sourcePath, destinationDirectory, script.filename)
+  try {
+    const updated = await prisma.script.update({
+      where: { id: script.id },
+      data: { collectionId: payload.collectionId },
+    })
+    return { scriptId: updated.id, collectionId: updated.collectionId }
+  } catch (error) {
+    if (moved) {
+      try {
+        moveManagedScriptFile(destinationPath, path.dirname(sourcePath), path.basename(script.filename))
+      } catch (rollbackError) {
+        console.error('[DesktopRuntime] Failed to roll back managed script move:', rollbackError)
+      }
+    }
+    throw error
+  }
 }
 
 async function deleteLocalScript(payload: DeleteScriptPayload): Promise<string> {
