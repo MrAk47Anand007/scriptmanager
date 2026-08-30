@@ -133,6 +133,16 @@ function parseDraft(request: ApiRequest): ApiRequestDraft {
   }
 }
 
+function getApiOperationError(value: unknown, fallback: string): string {
+  if (value instanceof Error && value.message) return value.message
+  if (typeof value === 'string' && value) return value
+  if (value && typeof value === 'object' && 'message' in value) {
+    const message = (value as { message?: unknown }).message
+    if (typeof message === 'string' && message) return message
+  }
+  return fallback
+}
+
 interface RequestItemProps {
   request: ApiRequest
   active: boolean
@@ -151,12 +161,20 @@ const RequestItem = memo(function RequestItem({ request, active, collections, in
       await onDeleteRequest(request)
       return
     }
-    await dispatch(deleteApiRequest(request.id))
+    try {
+      await dispatch(deleteApiRequest(request.id)).unwrap()
+    } catch (error) {
+      toast.error(getApiOperationError(error, 'Failed to delete request'))
+    }
   }
 
   const handleDuplicate = async () => {
     const draft = { ...parseDraft(request), id: undefined, name: `${request.name} (Copy)` }
-    await dispatch(saveApiRequest(draft))
+    try {
+      await dispatch(saveApiRequest(draft)).unwrap()
+    } catch (error) {
+      toast.error(getApiOperationError(error, 'Failed to duplicate request'))
+    }
   }
 
   const handleCopyAsCurl = async () => {
@@ -169,7 +187,11 @@ const RequestItem = memo(function RequestItem({ request, active, collections, in
   }
 
   const handleMoveToCollection = async (collectionId: string | null) => {
-    await dispatch(saveApiRequest({ ...parseDraft(request), collectionId }))
+    try {
+      await dispatch(saveApiRequest({ ...parseDraft(request), collectionId })).unwrap()
+    } catch (error) {
+      toast.error(getApiOperationError(error, 'Failed to move request'))
+    }
   }
 
   return (
@@ -280,10 +302,16 @@ const CollectionItem = memo(function CollectionItem({
   const variableCount = parseVariableRows(collection.variables).filter((row) => row.enabled && row.key).length
 
   const handleRename = async () => {
-    if (renameValue.trim() && renameValue.trim() !== collection.name) {
+    const name = renameValue.trim()
+    if (!name || name === collection.name) {
+      setRenaming(false)
+      return
+    }
+
+    try {
       await dispatch(updateApiCollection({
         id: collection.id,
-        name: renameValue.trim(),
+        name,
         description: collection.description,
         variables: ensureRows(parseVariableRows(collection.variables).map((row) => ({
           id: row.id ?? crypto.randomUUID(),
@@ -291,9 +319,11 @@ const CollectionItem = memo(function CollectionItem({
           value: row.value,
           enabled: row.enabled,
         }))),
-      }))
+      })).unwrap()
+      setRenaming(false)
+    } catch (error) {
+      toast.error(getApiOperationError(error, 'Failed to rename collection'))
     }
-    setRenaming(false)
   }
 
   const handleDelete = async () => {
@@ -535,9 +565,11 @@ export function ApiSidebar() {
     if (newCollectionName.trim()) {
       setIsCreatingCollection(true)
       try {
-        await dispatch(createApiCollection({ name: newCollectionName.trim() }))
+        await dispatch(createApiCollection({ name: newCollectionName.trim() })).unwrap()
         setNewCollectionName('')
         setShowNewCollection(false)
+      } catch (error) {
+        toast.error(getApiOperationError(error, 'Failed to create collection'))
       } finally {
         setIsCreatingCollection(false)
       }
@@ -552,8 +584,10 @@ export function ApiSidebar() {
         id: editingEnvironmentId ?? undefined,
         name: environmentName.trim(),
         variables: environmentVariables,
-      }))
+      })).unwrap()
       setEnvironmentDialogOpen(false)
+    } catch (error) {
+      toast.error(getApiOperationError(error, 'Failed to save environment'))
     } finally {
       setIsSavingEnvironment(false)
     }
@@ -562,8 +596,10 @@ export function ApiSidebar() {
   const handleSaveGlobals = async () => {
     setIsSavingGlobals(true)
     try {
-      await dispatch(saveApiGlobals(globalsDraft))
+      await dispatch(saveApiGlobals(globalsDraft)).unwrap()
       setGlobalsDialogOpen(false)
+    } catch (error) {
+      toast.error(getApiOperationError(error, 'Failed to save global variables'))
     } finally {
       setIsSavingGlobals(false)
     }
@@ -578,21 +614,25 @@ export function ApiSidebar() {
         name: collectionVariableTarget.name,
         description: collectionVariableTarget.description,
         variables: collectionVariableRows,
-      }))
+      })).unwrap()
       setCollectionVariablesOpen(false)
+    } catch (error) {
+      toast.error(getApiOperationError(error, 'Failed to save collection variables'))
     } finally {
       setIsSavingCollectionVariables(false)
     }
   }
 
   const handleRunCollection = async (collection: ApiCollection) => {
-    const result = await dispatch(runApiCollection({
-      collectionId: collection.id,
-      environmentId: activeEnvironmentId,
-    }))
-    if (runApiCollection.fulfilled.match(result)) {
-      dispatch(setActiveCollectionRun(result.payload))
+    try {
+      const result = await dispatch(runApiCollection({
+        collectionId: collection.id,
+        environmentId: activeEnvironmentId,
+      })).unwrap()
+      dispatch(setActiveCollectionRun(result))
       setRunDialogOpen(true)
+    } catch (error) {
+      toast.error(getApiOperationError(error, 'Failed to run collection'))
     }
   }
 
@@ -603,12 +643,11 @@ export function ApiSidebar() {
       const imported = importPostmanData(raw)
 
       for (const environment of imported.environments) {
-        await dispatch(saveApiEnvironment({ name: environment.name, variables: environment.variables }))
+        await dispatch(saveApiEnvironment({ name: environment.name, variables: environment.variables })).unwrap()
       }
 
       for (const collection of imported.collections) {
-        const createdCollection = await dispatch(createApiCollection({ name: collection.name }))
-        if (!createApiCollection.fulfilled.match(createdCollection)) continue
+        const createdCollection = await dispatch(createApiCollection({ name: collection.name })).unwrap()
 
         for (const request of collection.requests) {
           await dispatch(saveApiRequest({
@@ -626,10 +665,12 @@ export function ApiSidebar() {
             body: request.body ?? '',
             authType: request.authType ?? 'none',
             authConfig: request.authConfig ?? {},
-            collectionId: createdCollection.payload.id,
-          }))
+            collectionId: createdCollection.id,
+          })).unwrap()
         }
       }
+    } catch (error) {
+      toast.error(getApiOperationError(error, 'Failed to import Postman workspace'))
     } finally {
       setIsImporting(false)
     }
@@ -706,7 +747,9 @@ export function ApiSidebar() {
   const handleDeleteCollection = async (collection: ApiCollection) => {
     setDeletingCollectionId(collection.id)
     try {
-      await dispatch(deleteApiCollection(collection.id))
+      await dispatch(deleteApiCollection(collection.id)).unwrap()
+    } catch (error) {
+      toast.error(getApiOperationError(error, 'Failed to delete collection'))
     } finally {
       setDeletingCollectionId((current) => current === collection.id ? null : current)
     }
@@ -715,7 +758,9 @@ export function ApiSidebar() {
   const handleDeleteEnvironment = async (environment: ApiEnvironment) => {
     setDeletingEnvironmentId(environment.id)
     try {
-      await dispatch(deleteApiEnvironment(environment.id))
+      await dispatch(deleteApiEnvironment(environment.id)).unwrap()
+    } catch (error) {
+      toast.error(getApiOperationError(error, 'Failed to delete environment'))
     } finally {
       setDeletingEnvironmentId((current) => current === environment.id ? null : current)
     }
@@ -724,7 +769,9 @@ export function ApiSidebar() {
   const handleDeleteRequest = async (request: ApiRequest) => {
     setDeletingRequestId(request.id)
     try {
-      await dispatch(deleteApiRequest(request.id))
+      await dispatch(deleteApiRequest(request.id)).unwrap()
+    } catch (error) {
+      toast.error(getApiOperationError(error, 'Failed to delete request'))
     } finally {
       setDeletingRequestId((current) => current === request.id ? null : current)
     }
@@ -875,6 +922,7 @@ export function ApiSidebar() {
                 onClick={() => setShowNewCollection(true)}
                 className="h-4 w-4 flex items-center justify-center rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                 title="New collection"
+                aria-label="Create collection"
               >
                 <FolderPlus className="h-3 w-3" />
               </button>
@@ -1042,7 +1090,9 @@ export function ApiSidebar() {
                   onClick={async () => {
                     setIsClearingHistory(true)
                     try {
-                      await dispatch(clearApiHistory())
+                      await dispatch(clearApiHistory()).unwrap()
+                    } catch (error) {
+                      toast.error(getApiOperationError(error, 'Failed to clear request history'))
                     } finally {
                       setIsClearingHistory(false)
                     }
