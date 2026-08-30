@@ -35,7 +35,9 @@ export const WorkspaceAccessSection = () => {
   const invite = async () => {
     try { await createWorkspaceInvitationRuntime({ email, roleId }); setEmail(''); await load() } catch (error) { setError(error instanceof Error ? error.message : 'Invitation failed') }
   }
-  const revokeSessionGrants = async () => { await revokeWorkspaceGrantsRuntime(); await load() }
+  const revokeSessionGrants = async () => {
+    try { await revokeWorkspaceGrantsRuntime(); await load() } catch (error) { setError(error instanceof Error ? error.message : 'Grant revocation failed') }
+  }
   const createRole = async () => {
     try { await createWorkspaceRoleRuntime({ name: roleName, permissions: rolePermissions.split(',').map((entry) => entry.trim()).filter(Boolean) }); setRoleName(''); await load() } catch (error) { setError(error instanceof Error ? error.message : 'Role creation failed') }
   }
