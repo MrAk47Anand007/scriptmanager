@@ -63,21 +63,64 @@ function revisionFor(stats: fs.Stats): string {
   return `${stats.mtimeMs}:${stats.size}`
 }
 
-export async function readCanonicalFile(rootPath: string, sourcePath: string): Promise<CanonicalFile> {
+function isPathWithinRoot(rootPath: string, candidatePath: string): boolean {
+  const relative = path.relative(rootPath, candidatePath)
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+}
+
+async function validateCanonicalFilePath(rootPath: string, sourcePath: string, allowMissing: boolean): Promise<string> {
   const resolvedPath = assertPathWithinRoot(rootPath, sourcePath)
-  const [content, stats] = await Promise.all([
-    fs.promises.readFile(resolvedPath, 'utf8'),
-    fs.promises.stat(resolvedPath),
-  ])
-  return { content, revision: revisionFor(stats), sourcePath: resolvedPath }
+  const realRootPath = await fs.promises.realpath(path.resolve(rootPath))
+  const realParentPath = await fs.promises.realpath(path.dirname(resolvedPath))
+  if (!isPathWithinRoot(realRootPath, realParentPath)) {
+    throw new Error('Canonical file path is outside its canonical folder')
+  }
+
+  let stats: fs.Stats
+  try {
+    stats = await fs.promises.lstat(resolvedPath)
+  } catch (error) {
+    if (allowMissing && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return resolvedPath
+    }
+    throw error
+  }
+
+  if (stats.isSymbolicLink()) {
+    throw new Error('Canonical file cannot be a symlink')
+  }
+  if (!stats.isFile()) {
+    throw new Error('Canonical source is not a file')
+  }
+
+  const realFilePath = await fs.promises.realpath(resolvedPath)
+  if (!isPathWithinRoot(realRootPath, realFilePath)) {
+    throw new Error('Canonical file path is outside its canonical folder')
+  }
+  return resolvedPath
+}
+
+export async function assertCanonicalFilePath(rootPath: string, sourcePath: string): Promise<string> {
+  return validateCanonicalFilePath(rootPath, sourcePath, false)
+}
+
+export async function readCanonicalFile(rootPath: string, sourcePath: string): Promise<CanonicalFile> {
+  const resolvedPath = await assertCanonicalFilePath(rootPath, sourcePath)
+  const handle = await fs.promises.open(resolvedPath, 'r')
+  try {
+    const [content, stats] = await Promise.all([handle.readFile('utf8'), handle.stat()])
+    return { content, revision: revisionFor(stats), sourcePath: resolvedPath }
+  } finally {
+    await handle.close()
+  }
 }
 
 export async function writeCanonicalFile(rootPath: string, sourcePath: string, content: string): Promise<CanonicalFile> {
-  const resolvedPath = assertPathWithinRoot(rootPath, sourcePath)
+  const resolvedPath = await validateCanonicalFilePath(rootPath, sourcePath, true)
   const temporaryPath = path.join(path.dirname(resolvedPath), `.${path.basename(resolvedPath)}.${crypto.randomUUID()}.tmp`)
 
   try {
-    const handle = await fs.promises.open(temporaryPath, 'w', 0o600)
+    const handle = await fs.promises.open(temporaryPath, 'wx', 0o600)
     try {
       await handle.writeFile(content, 'utf8')
       await handle.sync()

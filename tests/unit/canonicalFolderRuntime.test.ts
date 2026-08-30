@@ -35,6 +35,31 @@ describe('canonical folder runtime', () => {
     expect(after.content).toBe('print("updated")')
   })
 
+  it.skipIf(process.platform === 'win32')('rejects reading a symlinked canonical file', async () => {
+    const { root, sourcePath } = createFixture()
+    const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'scriptmanager-canonical-outside-'))
+    temporaryDirectories.push(outsideRoot)
+    const outsidePath = path.join(outsideRoot, 'outside.py')
+    await fs.promises.writeFile(outsidePath, 'print("outside")', 'utf8')
+    await fs.promises.unlink(sourcePath)
+    await fs.promises.symlink(outsidePath, sourcePath)
+
+    await expect(readCanonicalFile(root, sourcePath)).rejects.toThrow('symlink')
+  })
+
+  it.skipIf(process.platform === 'win32')('rejects writing through a symlinked canonical file', async () => {
+    const { root, sourcePath } = createFixture()
+    const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'scriptmanager-canonical-outside-'))
+    temporaryDirectories.push(outsideRoot)
+    const outsidePath = path.join(outsideRoot, 'outside.py')
+    await fs.promises.writeFile(outsidePath, 'print("outside")', 'utf8')
+    await fs.promises.unlink(sourcePath)
+    await fs.promises.symlink(outsidePath, sourcePath)
+
+    await expect(writeCanonicalFile(root, sourcePath, 'print("should not write")')).rejects.toThrow('symlink')
+    await expect(fs.promises.readFile(outsidePath, 'utf8')).resolves.toBe('print("outside")')
+  })
+
   it('emits a changed event after an external canonical file write', async () => {
     const { root, sourcePath } = createFixture()
     const events: Array<{ type: string; collectionId: string; sourcePath?: string }> = []

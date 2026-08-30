@@ -66,7 +66,7 @@ import {
   sendApiRequest as sendDesktopApiRequest,
 } from './apiRuntime'
 import { createOsBackedSecretStore } from './secretStore'
-import { assertCanonicalFolderAvailable, createCanonicalFolderWatcher, getCanonicalFolderAvailability, type CanonicalFolderChange, writeCanonicalFile } from './canonicalFolderRuntime'
+import { assertCanonicalFilePath, assertCanonicalFolderAvailable, createCanonicalFolderWatcher, getCanonicalFolderAvailability, readCanonicalFile, type CanonicalFolderChange, writeCanonicalFile } from './canonicalFolderRuntime'
 import { createRecoveryDraftStore } from './recoveryDraftStore'
 import { moveManagedScriptFile } from './managedScriptFiles'
 import { normalizeTerminalSessionId, parseScriptExecutionPayload, parseTerminalInputPayload, parseTerminalResizePayload } from '../src/lib/runtime/desktopIpcPayloads'
@@ -1072,6 +1072,18 @@ async function resolveScriptPath(script: {
   return path.resolve(await getWorkspaceRoot(), path.basename(script.filename))
 }
 
+async function readResolvedScriptContent(script: {
+  filename: string
+  sourcePath: string | null
+  collection?: { folderPath: string | null } | null
+}): Promise<string> {
+  const filePath = await resolveScriptPath(script)
+  if (script.sourcePath && script.collection?.folderPath) {
+    return (await readCanonicalFile(script.collection.folderPath, filePath)).content
+  }
+  return fs.promises.readFile(filePath, 'utf8')
+}
+
 async function getCanonicalSourceFingerprint(sourcePath: string): Promise<string> {
   const content = await fs.promises.readFile(sourcePath)
   return crypto.createHash('sha256').update(content).digest('hex')
@@ -1127,6 +1139,9 @@ async function getScriptExecutionContext(script: {
   const collectionPath = script.collection?.folderPath ? path.resolve(script.collection.folderPath) : null
   if (script.sourcePath && collectionPath) {
     await assertCanonicalFolderAvailable(collectionPath, script.collection!.id)
+    if (fs.existsSync(script.sourcePath)) {
+      await assertCanonicalFilePath(collectionPath, script.sourcePath)
+    }
   }
   const cwd = script.sourcePath
     ? resolveScriptWorkingDirectory(script.sourcePath)
@@ -1321,8 +1336,7 @@ async function exportLocalScripts(): Promise<ScriptExportBundle & { _export_vers
   const exported = await Promise.all(scripts.map(async (script) => {
     let content = ''
     try {
-      const filePath = await resolveScriptPath(script)
-      content = fs.readFileSync(filePath, 'utf8')
+      content = await readResolvedScriptContent(script)
     } catch {
       // Preserve metadata when the source file is unavailable.
     }
@@ -1350,7 +1364,7 @@ async function exportLocalScript(scriptId: string) {
 
   let content = ''
   try {
-    content = fs.readFileSync(await resolveScriptPath(script), 'utf8')
+    content = await readResolvedScriptContent(script)
   } catch {
     // Preserve metadata when the source file is unavailable.
   }
@@ -1561,8 +1575,10 @@ async function readScript(scriptId: string): Promise<ScriptContentDto> {
     await assertCanonicalFolderAvailable(script.collection.folderPath, script.collection.id)
   }
 
-  const filePath = await resolveScriptPath(script)
-  const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : ''
+  let content = ''
+  if (fs.existsSync(await resolveScriptPath(script))) {
+    content = await readResolvedScriptContent(script)
+  }
   return serializeScriptContentRecord(script, content)
 }
 
@@ -1960,7 +1976,7 @@ async function syncLocalScriptToGist(scriptId: string) {
 
   const filePath = await resolveScriptPath(script)
   if (!fs.existsSync(filePath)) throw new Error('Script file not found on disk')
-  const content = fs.readFileSync(filePath, 'utf8')
+  const content = await readResolvedScriptContent(script)
   return createGistService(prisma, {
     vault: getDesktopSecretVaultService(),
     workspaceId: actor.workspaceId,
@@ -2309,7 +2325,7 @@ async function duplicateLocalScript(scriptId: string): Promise<ScriptDto> {
   const originalPath = await resolveScriptPath(original)
   let content = '# Duplicated script\n'
   if (fs.existsSync(originalPath)) {
-    content = fs.readFileSync(originalPath, 'utf8')
+    content = await readResolvedScriptContent(original)
   }
 
   const baseName = `${original.name} (copy)`
