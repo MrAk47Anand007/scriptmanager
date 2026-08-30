@@ -1,6 +1,4 @@
-import dns from 'node:dns/promises'
 import fs from 'node:fs'
-import net from 'node:net'
 import path from 'node:path'
 import vm from 'node:vm'
 import { randomUUID } from 'node:crypto'
@@ -25,13 +23,13 @@ import {
 import { resolveApiAuthConfig, vaultApiAuthConfig } from '../src/lib/secrets/apiAuth'
 import { apiGlobalsSettingKey, LEGACY_API_GLOBALS_KEY } from '../src/lib/apiWorkspace'
 import { createDesktopActorContext } from '../src/lib/runtime/trustedContext'
+import { fetchWithSafeRedirects, ProxyTargetError } from '../src/lib/proxyTarget'
 
 const prisma = new PrismaClient({
   log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
 })
 
 const MAX_BODY_SIZE = 1024 * 1024
-const PRIVATE_HOST_ERROR = 'Requests to localhost or private network addresses are blocked by default'
 const COOKIE_JAR_KEY_PREFIX = 'api_cookie_jar:'
 
 type ApiCollectionDto = {
@@ -269,66 +267,6 @@ function executeApiScripts({
   }
 
   return { request: runtimeRequest, consoleLogs, testResults }
-}
-
-function isPrivateIPv4(host: string): boolean {
-  const parts = host.split('.').map(Number)
-  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) return false
-  if (parts[0] === 10) return true
-  if (parts[0] === 127) return true
-  if (parts[0] === 169 && parts[1] === 254) return true
-  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true
-  if (parts[0] === 192 && parts[1] === 168) return true
-  return false
-}
-
-function isPrivateIPv6(host: string): boolean {
-  const normalized = host.toLowerCase()
-  return normalized === '::1'
-    || normalized.startsWith('fc')
-    || normalized.startsWith('fd')
-    || normalized.startsWith('fe80:')
-    || normalized === '::ffff:127.0.0.1'
-}
-
-function isBlockedIp(host: string): boolean {
-  const ipVersion = net.isIP(host)
-  if (ipVersion === 4) return isPrivateIPv4(host)
-  if (ipVersion === 6) return isPrivateIPv6(host)
-  return false
-}
-
-async function validateProxyTarget(rawUrl: string): Promise<{ ok: true; url: URL } | { ok: false; error: string }> {
-  let parsedUrl: URL
-  try {
-    parsedUrl = new URL(rawUrl)
-  } catch {
-    return { ok: false, error: 'Invalid URL' }
-  }
-
-  if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-    return { ok: false, error: 'Only http and https URLs are supported' }
-  }
-
-  if (process.env.ALLOW_PRIVATE_PROXY_TARGETS === 'true') {
-    return { ok: true, url: parsedUrl }
-  }
-
-  const hostname = parsedUrl.hostname.toLowerCase()
-  if (hostname === 'localhost' || hostname.endsWith('.localhost') || isBlockedIp(hostname)) {
-    return { ok: false, error: PRIVATE_HOST_ERROR }
-  }
-
-  try {
-    const records = await dns.lookup(parsedUrl.hostname, { all: true, verbatim: true })
-    if (records.some((record) => isBlockedIp(record.address))) {
-      return { ok: false, error: PRIVATE_HOST_ERROR }
-    }
-  } catch {
-    return { ok: false, error: 'Failed to resolve target host' }
-  }
-
-  return { ok: true, url: parsedUrl }
 }
 
 async function readApiGlobalsSetting(workspaceId: string) {
@@ -887,12 +825,7 @@ async function executeDesktopApiRequest(input: DesktopApiRequestInput) {
   })
   const runtimeRequest = preRequestExecution.request
 
-  const target = await validateProxyTarget(runtimeRequest.url)
-  if (!target.ok) {
-    return { ok: false as const, status: 400, error: target.error }
-  }
-
-  let finalUrl = target.url.toString()
+  let finalUrl = runtimeRequest.url
   try {
     const parsedUrl = new URL(finalUrl)
     const enabledParams = runtimeRequest.queryParams.filter((param) => param.enabled && param.key)
@@ -927,7 +860,7 @@ async function executeDesktopApiRequest(input: DesktopApiRequestInput) {
   }
 
   if (useCookieJar && !finalHeaders.Cookie) {
-    const cookieHeader = buildCookieHeader(cookieJar, target.url.hostname)
+    const cookieHeader = buildCookieHeader(cookieJar, new URL(finalUrl).hostname)
     if (cookieHeader) finalHeaders.Cookie = cookieHeader
   }
 
@@ -999,7 +932,17 @@ async function executeDesktopApiRequest(input: DesktopApiRequestInput) {
     fetchOptions.body = requestBody
   }
 
-  const response = await fetch(finalUrl, fetchOptions)
+  let response: Response
+  try {
+    const fetched = await fetchWithSafeRedirects(finalUrl, fetchOptions)
+    response = fetched.response
+    finalUrl = fetched.finalUrl
+  } catch (error) {
+    if (error instanceof ProxyTargetError) {
+      return { ok: false as const, status: 400, error: error.message }
+    }
+    throw error
+  }
   const duration = Date.now() - startTime
   const responseBuffer = await response.arrayBuffer()
   const totalSize = responseBuffer.byteLength
@@ -1019,12 +962,13 @@ async function executeDesktopApiRequest(input: DesktopApiRequestInput) {
   if (useCookieJar) {
     const setCookie = response.headers.get('set-cookie')
     if (setCookie) {
-      const jarForHost = cookieJar[target.url.hostname] ?? {}
+      const jarHost = new URL(finalUrl).hostname
+      const jarForHost = cookieJar[jarHost] ?? {}
       for (const rawCookie of setCookie.split(',')) {
         const pair = extractCookiePair(rawCookie)
         if (pair) jarForHost[pair.name] = pair.value
       }
-      cookieJar[target.url.hostname] = jarForHost
+      cookieJar[jarHost] = jarForHost
       await writeCookieJar(input.workspaceId, cookieJar)
     }
   }
@@ -1081,7 +1025,7 @@ async function executeDesktopApiRequest(input: DesktopApiRequestInput) {
     size: responseBuffer.byteLength,
     truncated,
     variables: materialized.variables,
-    cookieJarHost: useCookieJar ? target.url.hostname : null,
+    cookieJarHost: useCookieJar ? new URL(finalUrl).hostname : null,
     consoleLogs,
     testResults,
     mappingResults,
