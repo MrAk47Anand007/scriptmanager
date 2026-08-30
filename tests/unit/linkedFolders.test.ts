@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { listScriptFiles } from '@/lib/linkedFolders'
 
 const temporaryRoots: string[] = []
@@ -24,5 +24,19 @@ describe('linked folder file discovery', () => {
     fs.symlinkSync(outside, path.join(root, 'linked-folder'), 'dir')
 
     expect(listScriptFiles(root)).toEqual([path.join(root, 'local.py')])
+  })
+
+  it('skips nested folders that cannot be enumerated', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scriptmanager-linked-'))
+    const nested = path.join(root, 'restricted')
+    fs.mkdirSync(nested)
+    temporaryRoots.push(root)
+    const readdirSync = vi.spyOn(fs, 'readdirSync')
+      .mockImplementationOnce(() => [{ name: 'restricted', isDirectory: () => true, isSymbolicLink: () => false } as never])
+      .mockImplementationOnce(() => { throw Object.assign(new Error('permission denied'), { code: 'EACCES' }) })
+
+    expect(listScriptFiles(root)).toEqual([])
+
+    readdirSync.mockRestore()
   })
 })

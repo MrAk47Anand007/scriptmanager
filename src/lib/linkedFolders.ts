@@ -12,11 +12,22 @@ export function getFolderDisplayName(folderPath: string): string {
   return path.basename(folderPath) || folderPath
 }
 
+function isIgnorableDirectoryError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code
+  return code === 'EACCES' || code === 'EPERM' || code === 'ENOENT' || code === 'EBUSY'
+}
+
 export function listScriptFiles(folderPath: string): string[] {
   const results: string[] = []
 
   const walk = (currentPath: string) => {
-    const entries = fs.readdirSync(currentPath, { withFileTypes: true })
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(currentPath, { withFileTypes: true })
+    } catch (error) {
+      if (isIgnorableDirectoryError(error)) return
+      throw error
+    }
     for (const entry of entries) {
       const fullPath = path.join(currentPath, entry.name)
       if (entry.isSymbolicLink()) {
