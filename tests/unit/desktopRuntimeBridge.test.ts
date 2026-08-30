@@ -35,10 +35,16 @@ import {
   listDesktopTemplates,
   saveDesktopTemplate,
 } from '@/lib/scriptsRuntimeClient'
+import {
+  createNotificationRuleRuntime,
+  listNotificationDeliveriesRuntime,
+  listNotificationRulesRuntime,
+} from '@/lib/notificationsRuntimeClient'
 
 afterEach(() => {
   delete window.scriptManagerDesktop
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('desktop runtime bridge', () => {
@@ -240,5 +246,34 @@ describe('desktop runtime bridge', () => {
     await expect(listDesktopTemplates()).resolves.toEqual([])
     await expect(saveDesktopTemplate({ name: 'Release', description: '', category: 'general', language: 'python', content: 'print(1)' })).resolves.toMatchObject({ id: 'template-1' })
     expect(saveTemplate).toHaveBeenCalledWith({ name: 'Release', description: '', category: 'general', language: 'python', content: 'print(1)' })
+  })
+
+  it('uses desktop IPC for notification rules and delivery history', async () => {
+    const listNotificationRules = vi.fn().mockResolvedValue([{ id: 'rule-1' }])
+    const createNotificationRule = vi.fn().mockResolvedValue({ id: 'rule-1' })
+    const listNotificationDeliveries = vi.fn().mockResolvedValue([{ id: 'delivery-1', status: 'delivered' }])
+    window.scriptManagerDesktop = {
+      runtime: { listNotificationRules, createNotificationRule, listNotificationDeliveries },
+    } as never
+
+    await expect(listNotificationRulesRuntime()).resolves.toEqual([{ id: 'rule-1' }])
+    await expect(createNotificationRuleRuntime({ channelId: 'channel-1', name: 'Failures', eventTypes: 'execution.failed' })).resolves.toEqual({ id: 'rule-1' })
+    await expect(listNotificationDeliveriesRuntime()).resolves.toEqual([{ id: 'delivery-1', status: 'delivered' }])
+    expect(createNotificationRule).toHaveBeenCalledWith({ channelId: 'channel-1', name: 'Failures', eventTypes: 'execution.failed' })
+  })
+
+  it('falls back to the hosted notification APIs outside desktop mode', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'rule-1' }] })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'rule-2' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'delivery-1' }] })
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(listNotificationRulesRuntime()).resolves.toEqual([{ id: 'rule-1' }])
+    await expect(createNotificationRuleRuntime({ channelId: 'channel-1', name: 'Failures', eventTypes: 'execution.failed' })).resolves.toEqual({ id: 'rule-2' })
+    await expect(listNotificationDeliveriesRuntime()).resolves.toEqual([{ id: 'delivery-1' }])
+    expect(fetch).toHaveBeenNthCalledWith(1, '/api/notifications/rules')
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/notifications/rules', expect.objectContaining({ method: 'POST' }))
+    expect(fetch).toHaveBeenNthCalledWith(3, '/api/notifications/deliveries')
   })
 })

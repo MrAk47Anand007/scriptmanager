@@ -3354,9 +3354,38 @@ export function initDesktopRuntimeIpc() {
   ipcMain.handle('scriptmanager:runtime:create-notification-channel', async (_event, payload: { name: string; kind: string; config?: unknown }) => {
     const actor = await createDesktopActorContext(prisma)
     if (!['desktop', 'webhook', 'slack', 'smtp', 'teams'].includes(payload.kind)) throw new Error('Invalid channel')
+    if (!payload.name?.trim()) throw new Error('Name is required')
     const id = crypto.randomUUID()
     const config = await vaultNotificationConfig(prisma, id, payload.config, { workspaceId: actor.workspaceId, actorId: actor.actorId })
     return prisma.notificationChannel.create({ data: { id, workspaceId: actor.workspaceId, name: payload.name.trim(), kind: payload.kind, configJson: JSON.stringify(config) } })
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-notification-rules', async () => {
+    const actor = await createDesktopActorContext(prisma)
+    return prisma.notificationRule.findMany({ where: { workspaceId: actor.workspaceId }, include: { channel: { select: { id: true, name: true, kind: true } } }, orderBy: { createdAt: 'desc' } })
+  })
+
+  ipcMain.handle('scriptmanager:runtime:create-notification-rule', async (_event, payload: { channelId: string; name: string; eventTypes: string; filter?: unknown; template?: unknown; throttleSeconds?: number }) => {
+    const actor = await createDesktopActorContext(prisma)
+    const channel = await prisma.notificationChannel.findFirst({ where: { id: payload.channelId, workspaceId: actor.workspaceId }, select: { id: true } })
+    if (!channel) throw new Error('Notification channel not found')
+    if (!payload.name?.trim() || !payload.eventTypes?.trim()) throw new Error('name and eventTypes are required')
+    return prisma.notificationRule.create({
+      data: {
+        channelId: channel.id,
+        workspaceId: actor.workspaceId,
+        name: payload.name.trim(),
+        eventTypes: payload.eventTypes.trim(),
+        filterJson: JSON.stringify(payload.filter ?? {}),
+        templateJson: JSON.stringify(payload.template ?? {}),
+        throttleSeconds: Math.max(0, Math.min(payload.throttleSeconds ?? 0, 86400)),
+      },
+    })
+  })
+
+  ipcMain.handle('scriptmanager:runtime:list-notification-deliveries', async () => {
+    const actor = await createDesktopActorContext(prisma)
+    return prisma.notificationDelivery.findMany({ where: { workspaceId: actor.workspaceId }, include: { channel: { select: { id: true, name: true, kind: true } }, rule: { select: { id: true, name: true } } }, orderBy: { createdAt: 'desc' }, take: 100 })
   })
 
   ipcMain.handle('scriptmanager:runtime:list-plugins', async () => {
