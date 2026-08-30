@@ -21,6 +21,8 @@ export type StorageProviderRecord = {
 
 export type SaveStorageProviderPayload = {
   id?: string
+  workspaceId?: string
+  actorId?: string
   name: string
   type: ProviderType
   config: Record<string, unknown>
@@ -52,15 +54,16 @@ function toRecord(row: { id: string; name: string; type: string; configJson: str
   }
 }
 
-export async function listStorageProviders(prisma: PrismaClient): Promise<StorageProviderRecord[]> {
-  const rows = await prisma.storageProvider.findMany({ orderBy: { name: 'asc' } })
+export async function listStorageProviders(prisma: PrismaClient, workspaceId = 'default'): Promise<StorageProviderRecord[]> {
+  const rows = await prisma.storageProvider.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } })
   return rows.map(toRecord)
 }
 
 export async function saveStorageProvider(
   prisma: PrismaClient,
   payload: SaveStorageProviderPayload,
-  vault?: SecretVaultService
+  vault?: SecretVaultService,
+  context: { workspaceId?: string; actorId?: string } = {},
 ): Promise<StorageProviderRecord> {
   if (!payload.name) {
     throw new Error('Name is required')
@@ -71,9 +74,11 @@ export async function saveStorageProvider(
 
   const incoming = { ...(payload.config ?? {}) }
 
+  const workspaceId = context.workspaceId ?? payload.workspaceId ?? 'default'
   const existing = payload.id
-    ? await prisma.storageProvider.findUnique({ where: { id: payload.id } })
+    ? await prisma.storageProvider.findFirst({ where: { id: payload.id, workspaceId } })
     : null
+  if (payload.id && !existing) throw new Error('Storage provider not found')
 
   // Merge masked secret fields from the existing record so edits without
   // re-entering secrets don't overwrite them with bullet characters.
@@ -94,7 +99,7 @@ export async function saveStorageProvider(
   const providerId = existing?.id ?? randomUUID()
   for (const [key, value] of Object.entries(incoming)) {
     if (!SECRET_FIELDS.has(key) || typeof value !== 'string' || value.length === 0 || value === SECRET_MASK || value.startsWith('secretref:')) continue
-    incoming[key] = await storeResourceSecret(prisma, { resourceType: 'storage-provider', resourceId: providerId, field: key, name: `storage:${providerId}:${key}` }, value, 'current-user', vault)
+    incoming[key] = await storeResourceSecret(prisma, { resourceType: 'storage-provider', resourceId: providerId, field: key, name: `storage:${providerId}:${key}`, workspaceId }, value, context.actorId ?? payload.actorId ?? 'current-user', vault)
   }
 
   const configJson = serializeProviderConfig(incoming)
@@ -105,15 +110,17 @@ export async function saveStorageProvider(
         data: { name: payload.name, type: payload.type, configJson },
       })
     : await prisma.storageProvider.create({
-        data: { id: providerId, name: payload.name, type: payload.type, configJson },
+        data: { id: providerId, workspaceId, name: payload.name, type: payload.type, configJson },
       })
 
   return toRecord(row)
 }
 
-export async function deleteStorageProvider(prisma: PrismaClient, id: string): Promise<{ id: string }> {
+export async function deleteStorageProvider(prisma: PrismaClient, id: string, workspaceId = 'default'): Promise<{ id: string }> {
+  const existing = await prisma.storageProvider.findFirst({ where: { id, workspaceId }, select: { id: true } })
+  if (!existing) throw new Error('Storage provider not found')
   await prisma.collection.updateMany({
-    where: { storageProviderId: id },
+    where: { storageProviderId: id, workspaceId },
     data: { storageProviderId: null, remotePrefix: null },
   })
   await prisma.storageProvider.delete({ where: { id } })
@@ -123,14 +130,15 @@ export async function deleteStorageProvider(prisma: PrismaClient, id: string): P
 export async function getDecryptedStorageProvider(
   prisma: PrismaClient,
   id: string,
-  vault?: SecretVaultService
+  vault?: SecretVaultService,
+  workspaceId = 'default',
 ): Promise<{ id: string; name: string; type: ProviderType; config: Record<string, unknown> } | null> {
-  const row = await prisma.storageProvider.findUnique({ where: { id } })
+  const row = await prisma.storageProvider.findFirst({ where: { id, workspaceId } })
   if (!row) return null
   const config = deserializeProviderConfig(row.configJson)
   for (const [key, value] of Object.entries(config)) {
     if (SECRET_FIELDS.has(key) && typeof value === 'string' && value.startsWith('secretref:')) {
-      config[key] = await resolveResourceSecret(prisma, value, { resourceType: 'storage-provider', resourceId: row.id, field: key }, 'storage-runtime', vault)
+      config[key] = await resolveResourceSecret(prisma, value, { resourceType: 'storage-provider', resourceId: row.id, field: key, workspaceId }, 'storage-runtime', vault)
     }
   }
   return {
@@ -144,9 +152,10 @@ export async function getDecryptedStorageProvider(
 export async function testStorageProvider(
   prisma: PrismaClient,
   id: string,
-  vault?: SecretVaultService
+  vault?: SecretVaultService,
+  workspaceId = 'default',
 ): Promise<{ ok: boolean; error?: string; latencyMs?: number }> {
-  const provider = await getDecryptedStorageProvider(prisma, id, vault)
+  const provider = await getDecryptedStorageProvider(prisma, id, vault, workspaceId)
   if (!provider) {
     return { ok: false, error: 'Storage provider not found' }
   }

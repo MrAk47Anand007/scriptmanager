@@ -139,15 +139,17 @@ model Collection {
 }
 
 model StorageProvider {
-  id         String   @id @default(uuid())
-  name       String
-  type       String
-  configJson String   @map("config_json")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id          String   @id @default(uuid())
+  workspaceId String   @default("default") @map("workspace_id")
+  name        String
+  type        String
+  configJson  String   @map("config_json")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   collections Collection[]
 
+  @@index([workspaceId, name])
   @@map("storage_providers")
 }
 
@@ -457,22 +459,25 @@ model WorkflowTrigger {
 }
 
 model NotificationChannel {
-  id         String                 @id @default(uuid())
-  name       String
-  kind       String
-  enabled    Boolean                @default(true)
-  configJson String                 @default("{}") @map("config_json")
-  createdAt  DateTime               @default(now()) @map("created_at")
-  updatedAt  DateTime               @updatedAt @map("updated_at")
+  id          String                 @id @default(uuid())
+  workspaceId String                 @default("default") @map("workspace_id")
+  name        String
+  kind        String
+  enabled     Boolean                @default(true)
+  configJson  String                 @default("{}") @map("config_json")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
   rules      NotificationRule[]
   deliveries NotificationDelivery[]
 
+  @@index([workspaceId, name])
   @@map("notification_channels")
 }
 
 model NotificationRule {
   id              String                 @id @default(uuid())
   channelId       String                 @map("channel_id")
+  workspaceId     String                 @default("default") @map("workspace_id")
   name            String
   enabled         Boolean                @default(true)
   eventTypes      String                 @map("event_types")
@@ -484,7 +489,7 @@ model NotificationRule {
   channel         NotificationChannel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
   deliveries      NotificationDelivery[]
 
-  @@index([enabled, channelId])
+  @@index([workspaceId, enabled, channelId])
   @@map("notification_rules")
 }
 
@@ -492,6 +497,7 @@ model NotificationDelivery {
   id            String              @id @default(uuid())
   channelId     String              @map("channel_id")
   ruleId        String?             @map("rule_id")
+  workspaceId   String              @default("default") @map("workspace_id")
   eventId       String?             @map("event_id")
   dedupeKey     String              @unique @map("dedupe_key")
   status        String              @default("pending")
@@ -505,7 +511,7 @@ model NotificationDelivery {
   channel       NotificationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
   rule          NotificationRule?   @relation(fields: [ruleId], references: [id], onDelete: SetNull)
 
-  @@index([status, nextAttemptAt])
+  @@index([workspaceId, status, nextAttemptAt])
   @@map("notification_deliveries")
 }
 

@@ -32,7 +32,7 @@ export async function PUT(
   }
 
   if (storage_provider_id) {
-    const provider = await prisma.storageProvider.findUnique({ where: { id: storage_provider_id } })
+    const provider = await prisma.storageProvider.findFirst({ where: { id: storage_provider_id, workspaceId: authorization.context.workspaceId } })
     if (!provider) {
       return NextResponse.json({ error: 'Storage provider not found' }, { status: 400 })
     }

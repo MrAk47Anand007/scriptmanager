@@ -52,6 +52,7 @@ function buildRemotePath(prefix: string | null | undefined, filename: string): s
 
 type BoundCollection = {
   id: string
+  workspaceId: string
   folderPath: string | null
   storageProviderId: string | null
   remotePrefix: string | null
@@ -63,7 +64,7 @@ async function createClientForCollection(
   vault?: SecretVaultService
 ): Promise<StorageProviderClient | null> {
   if (!collection.storageProviderId) return null
-  const provider = await getDecryptedStorageProvider(prisma, collection.storageProviderId, vault)
+  const provider = await getDecryptedStorageProvider(prisma, collection.storageProviderId, vault, collection.workspaceId)
   if (!provider) return null
   return createProviderClient(provider.type, provider.config)
 }

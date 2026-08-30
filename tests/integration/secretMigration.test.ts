@@ -121,7 +121,7 @@ describe('secret integration migration', () => {
   })
 
   it('stores notification transport credentials as vault references', async () => {
-    const response = await createNotificationChannel(new Request('http://localhost/api/notifications/channels', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Vault Slack', kind: 'slack', config: { url: 'https://hooks.example.test/notification-secret' } }) }))
+    const response = await createNotificationChannel(new Request('http://localhost/api/notifications/channels', { method: 'POST', headers: { cookie: sessionCookie, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Vault Slack', kind: 'slack', config: { url: 'https://hooks.example.test/notification-secret' } }) }))
     expect(response.status).toBe(201)
     const channel = await prisma.notificationChannel.findFirstOrThrow({ where: { name: 'Vault Slack' } })
     expect(JSON.parse(channel.configJson).url).toMatch(/^secretref:/)
