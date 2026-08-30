@@ -14,6 +14,7 @@ import { createTeamAdminService } from '../src/lib/rbac/adminService'
 import { createGithubGistCredentialService } from '../src/lib/gistCredentials'
 import { createGistService } from '../src/lib/gistService'
 import { createDesktopActorContext } from '../src/lib/runtime/trustedContext'
+import { createDesktopCollectionRepository } from '../src/lib/runtime/desktopCollectionRepository'
 import { vaultNotificationConfig } from '../src/lib/secrets/notificationConfig'
 import { resolveScriptEnvironment } from '../src/lib/secrets/runtime'
 import { createSecretVaultService } from '../src/lib/secrets/service'
@@ -295,11 +296,12 @@ type CollectionRecord = {
 let canonicalFolderWatcher: ReturnType<typeof createCanonicalFolderWatcher> | null = null
 
 async function forwardCanonicalFolderChange(change: CanonicalFolderChange) {
+  const actor = await createDesktopActorContext(prisma)
   const previousScript = await prisma.script.findFirst({
-    where: { collectionId: change.collectionId, sourcePath: change.sourcePath },
+    where: { workspaceId: actor.workspaceId, collectionId: change.collectionId, sourcePath: change.sourcePath },
     select: { id: true },
   })
-  const collection = await prisma.collection.findUnique({ where: { id: change.collectionId } })
+  const collection = await prisma.collection.findFirst({ where: { id: change.collectionId, workspaceId: actor.workspaceId } })
   if (collection?.folderPath && !collection.isTemporary) {
     await openLocalFolder({
       folderPath: collection.folderPath,
@@ -310,7 +312,7 @@ async function forwardCanonicalFolderChange(change: CanonicalFolderChange) {
     }).catch(() => undefined)
   }
   const currentScript = await prisma.script.findFirst({
-    where: { collectionId: change.collectionId, sourcePath: change.sourcePath },
+    where: { workspaceId: actor.workspaceId, collectionId: change.collectionId, sourcePath: change.sourcePath },
     select: { id: true },
   })
   const payload = { ...change, scriptId: currentScript?.id ?? previousScript?.id }
@@ -727,46 +729,13 @@ function buildCollectionFolderPath(basePath: string, name: string, currentPath?:
 }
 
 async function getCollectionSubtree(rootCollectionId: string): Promise<CollectionRecord[]> {
-  const collections = await prisma.collection.findMany({
-    orderBy: [{ parentId: 'asc' }, { name: 'asc' }],
-    include: { _count: { select: { scripts: true } } },
-  })
-
-  const root = collections.find((collection) => collection.id === rootCollectionId)
-  if (!root) {
-    throw new Error('Collection not found')
-  }
-
-  const childrenByParentId = new Map<string | null, CollectionRecord[]>()
-  for (const collection of collections) {
-    const siblings = childrenByParentId.get(collection.parentId ?? null) ?? []
-    siblings.push(collection)
-    childrenByParentId.set(collection.parentId ?? null, siblings)
-  }
-
-  const subtree: CollectionRecord[] = []
-  const stack: CollectionRecord[] = [root]
-  while (stack.length > 0) {
-    const current = stack.pop()!
-    subtree.push(current)
-    const children = childrenByParentId.get(current.id) ?? []
-    for (let index = children.length - 1; index >= 0; index -= 1) {
-      stack.push(children[index]!)
-    }
-  }
-
-  return subtree
+  const actor = await createDesktopActorContext(prisma)
+  return createDesktopCollectionRepository(prisma, actor.workspaceId).getSubtree(rootCollectionId)
 }
 
 async function getCollectionParentRecord(parentId: string | null | undefined): Promise<CollectionRecord | null> {
-  if (!parentId) {
-    return null
-  }
-
-  return prisma.collection.findUnique({
-    where: { id: parentId },
-    include: { _count: { select: { scripts: true } } },
-  })
+  const actor = await createDesktopActorContext(prisma)
+  return createDesktopCollectionRepository(prisma, actor.workspaceId).getParent(parentId)
 }
 
 function toAbsolutePath(targetPath: string): string {
@@ -1110,10 +1079,8 @@ async function getCanonicalSourceFingerprint(sourcePath: string): Promise<string
 }
 
 async function getCollectionRecord(collectionId: string) {
-  return prisma.collection.findUnique({
-    where: { id: collectionId },
-    include: { _count: { select: { scripts: true } } },
-  })
+  const actor = await createDesktopActorContext(prisma)
+  return createDesktopCollectionRepository(prisma, actor.workspaceId).get(collectionId)
 }
 
 async function hydrateCollectionPythonMetadata(collection: CollectionRecord): Promise<CollectionRecord> {
@@ -1301,10 +1268,8 @@ async function getConfiguredWorkspaceRootValue() {
 }
 
 async function listCollections(): Promise<CollectionDto[]> {
-  const collections = await prisma.collection.findMany({
-    orderBy: { name: 'asc' },
-    include: { _count: { select: { scripts: true } } },
-  })
+  const actor = await createDesktopActorContext(prisma)
+  const collections = await createDesktopCollectionRepository(prisma, actor.workspaceId).list()
 
   await Promise.all(collections.map(async (collection) => {
     if (!collection.folderPath) return
@@ -1326,18 +1291,22 @@ async function listCollections(): Promise<CollectionDto[]> {
 }
 
 async function listScripts(): Promise<ScriptDto[]> {
+  const actor = await createDesktopActorContext(prisma)
   const scripts = await prisma.script.findMany({
+    where: { workspaceId: actor.workspaceId },
     orderBy: { name: 'asc' },
-    include: { collection: true, tags: { include: { tag: true } } },
+    include: { collection: true, tags: { where: { tag: { workspaceId: actor.workspaceId } }, include: { tag: true } } },
   })
 
   return scripts.map(serializeScriptRecord)
 }
 
 async function exportLocalScripts(): Promise<ScriptExportBundle & { _export_version: 1; exported_at: string; scripts: ScriptExportItem[] }> {
+  const actor = await createDesktopActorContext(prisma)
   const scripts = await prisma.script.findMany({
+    where: { workspaceId: actor.workspaceId },
     orderBy: { name: 'asc' },
-    include: { tags: { include: { tag: true } }, collection: true },
+    include: { tags: { where: { tag: { workspaceId: actor.workspaceId } }, include: { tag: true } }, collection: true },
   })
   const exported = await Promise.all(scripts.map(async (script) => {
     let content = ''
@@ -1367,11 +1336,7 @@ async function exportLocalScripts(): Promise<ScriptExportBundle & { _export_vers
 }
 
 async function exportLocalScript(scriptId: string) {
-  const script = await prisma.script.findUnique({
-    where: { id: scriptId },
-    include: { tags: { include: { tag: true } }, collection: true },
-  })
-  if (!script) throw new Error('Script not found')
+  const { script } = await getAuthorizedDesktopScript(scriptId)
 
   let content = ''
   try {
@@ -1411,7 +1376,7 @@ async function importLocalScripts(payload: ScriptExportBundle): Promise<{ messag
   for (const item of toImport) {
     if (!item || typeof item.name !== 'string' || !item.name.trim()) continue
     const name = item.name.trim()
-    const existing = await prisma.script.findFirst({ where: { name } })
+    const existing = await prisma.script.findFirst({ where: { workspaceId: actor.workspaceId, name } })
     if (existing) {
       results.push({ name, id: existing.id, status: 'skipped' })
       continue
@@ -1667,6 +1632,8 @@ async function readScript(scriptId: string): Promise<ScriptContentDto> {
 }
 
 async function createLocalCollection(payload: CreateCollectionPayload): Promise<CollectionDto> {
+  const actor = await createDesktopActorContext(prisma)
+  const collectionRepository = createDesktopCollectionRepository(prisma, actor.workspaceId)
   const name = payload.name.trim()
   if (!name) {
     throw new Error('Name is required')
@@ -1678,6 +1645,11 @@ async function createLocalCollection(payload: CreateCollectionPayload): Promise<
   const parentCollection = await getCollectionParentRecord(payload.parentId)
   if (payload.parentId && !parentCollection) {
     throw new Error('Parent collection not found')
+  }
+  const requestedProjectId = payload.projectId !== undefined ? payload.projectId : parentCollection?.projectId
+  if (requestedProjectId) {
+    const project = await prisma.project.findFirst({ where: { id: requestedProjectId, workspaceId: actor.workspaceId } })
+    if (!project) throw new Error('Project not found')
   }
 
   const baseFolderPath = parentCollection?.folderPath
@@ -1692,36 +1664,40 @@ async function createLocalCollection(payload: CreateCollectionPayload): Promise<
     pythonInspection = await createPythonVenv(folderPath)
   }
 
-  const collection = await prisma.collection.create({
-    data: {
-      name,
-      description: '',
-      projectId: payload.projectId !== undefined ? payload.projectId : (parentCollection?.projectId ?? null),
-      parentId: payload.parentId ?? null,
-      folderPath,
-      isTemporary: false,
-      runtimePreset: payload.runtimePreset ?? 'general',
-      pythonToolchainEnabled,
-      pythonVenvPath: pythonInspection.venvPath,
-      pythonInterpreterPath: pythonInspection.interpreterPath,
-    },
-    include: { _count: { select: { scripts: true } } },
+  const collection = await collectionRepository.create({
+    name,
+    description: '',
+    projectId: payload.projectId !== undefined ? payload.projectId : (parentCollection?.projectId ?? null),
+    parentId: payload.parentId ?? null,
+    folderPath,
+    isTemporary: false,
+    runtimePreset: payload.runtimePreset ?? 'general',
+    pythonToolchainEnabled,
+    pythonVenvPath: pythonInspection.venvPath,
+    pythonInterpreterPath: pythonInspection.interpreterPath,
   })
 
   return serializeCollectionRecord(collection)
 }
 
 async function updateLocalCollection(payload: UpdateCollectionPayload): Promise<{ updatedCollections: CollectionDto[] }> {
+  const actor = await createDesktopActorContext(prisma)
   const collection = await getCollectionRecord(payload.id)
   if (!collection) {
     throw new Error('Collection not found')
   }
 
   if (payload.storageProviderId) {
-    const provider = await prisma.storageProvider.findUnique({ where: { id: payload.storageProviderId } })
+    const provider = await prisma.storageProvider.findFirst({ where: { id: payload.storageProviderId, workspaceId: actor.workspaceId } })
     if (!provider) {
       throw new Error('Storage provider not found')
     }
+  }
+
+  const requestedProjectId = payload.projectId !== undefined ? payload.projectId : collection.projectId
+  if (requestedProjectId) {
+    const project = await prisma.project.findFirst({ where: { id: requestedProjectId, workspaceId: actor.workspaceId } })
+    if (!project) throw new Error('Project not found')
   }
 
   const subtree = await getCollectionSubtree(collection.id)
@@ -1767,6 +1743,7 @@ async function updateLocalCollection(payload: UpdateCollectionPayload): Promise<
   const scriptsWithSourcePaths = oldRootFolderPath
     ? await prisma.script.findMany({
       where: {
+        workspaceId: actor.workspaceId,
         collectionId: { in: subtreeCollectionIds },
         sourcePath: { not: null },
       },
@@ -1836,11 +1813,12 @@ async function deleteLocalCollection(payload: DeleteCollectionPayload): Promise<
   deletedScriptIds: string[]
   deletedFolderPath: string | null
 }> {
+  const actor = await createDesktopActorContext(prisma)
   const subtree = await getCollectionSubtree(payload.id)
   const collection = subtree[0]
   const subtreeCollectionIds = subtree.map((entry) => entry.id)
   const deletedScripts = await prisma.script.findMany({
-    where: { collectionId: { in: subtreeCollectionIds } },
+    where: { workspaceId: actor.workspaceId, collectionId: { in: subtreeCollectionIds } },
     select: { id: true },
   })
   const deletedScriptIds = deletedScripts.map((script) => script.id)
@@ -1860,12 +1838,12 @@ async function deleteLocalCollection(payload: DeleteCollectionPayload): Promise<
     await prisma.$transaction(async (tx) => {
       if (deletedScriptIds.length > 0) {
         await tx.script.deleteMany({
-          where: { collectionId: { in: subtreeCollectionIds } },
+          where: { workspaceId: actor.workspaceId, collectionId: { in: subtreeCollectionIds } },
         })
       }
 
       await tx.collection.deleteMany({
-        where: { id: { in: subtreeCollectionIds } },
+        where: { workspaceId: actor.workspaceId, id: { in: subtreeCollectionIds } },
       })
     })
 
@@ -1889,12 +1867,12 @@ async function deleteLocalCollection(payload: DeleteCollectionPayload): Promise<
 
   await prisma.$transaction(async (tx) => {
     await tx.script.updateMany({
-      where: { collectionId: { in: subtreeCollectionIds } },
+      where: { workspaceId: actor.workspaceId, collectionId: { in: subtreeCollectionIds } },
       data: { collectionId: null },
     })
 
     await tx.collection.deleteMany({
-      where: { id: { in: subtreeCollectionIds } },
+      where: { workspaceId: actor.workspaceId, id: { in: subtreeCollectionIds } },
     })
   })
 
@@ -1932,6 +1910,8 @@ async function createVersionSnapshot(scriptId: string, content: string) {
 }
 
 async function createLocalScript(payload: CreateScriptPayload): Promise<ScriptDto> {
+  const actor = await createDesktopActorContext(prisma)
+  const collectionRepository = createDesktopCollectionRepository(prisma, actor.workspaceId)
   const name = payload.name.trim()
   if (!name) {
     throw new Error('Name is required')
@@ -1940,8 +1920,11 @@ async function createLocalScript(payload: CreateScriptPayload): Promise<ScriptDt
   await ensureScriptsDirExists()
 
   const collection = payload.collectionId
-    ? await prisma.collection.findUnique({ where: { id: payload.collectionId } })
+    ? await collectionRepository.get(payload.collectionId)
     : null
+  if (payload.collectionId && !collection) {
+    throw new Error('Collection not found')
+  }
   const runtimePreset = collection?.runtimePreset ?? 'general'
   const defaultExtension = runtimePreset === 'node' ? '.js' : runtimePreset === 'shell' || runtimePreset === 'powershell' ? '.sh' : '.py'
   const filename = sanitizeScriptFilename(name, defaultExtension)
@@ -1974,6 +1957,7 @@ async function createLocalScript(payload: CreateScriptPayload): Promise<ScriptDt
       syncToGist: payload.syncToGist ?? defaultSyncToGist,
       parameters: JSON.stringify(Array.isArray(payload.parameters) ? payload.parameters : []),
       webhookToken: crypto.randomUUID().replace(/-/g, ''),
+      workspaceId: actor.workspaceId,
       collectionId: collection?.id ?? null,
       sourcePath: collection?.folderPath && !isManagedCollection ? filePath : null,
     },
@@ -1984,13 +1968,11 @@ async function createLocalScript(payload: CreateScriptPayload): Promise<ScriptDt
 }
 
 async function saveLocalScript(payload: SaveScriptPayload): Promise<ScriptDto> {
-  const script = await prisma.script.findUnique({
-    where: { id: payload.id },
-    include: { collection: true, tags: { include: { tag: true } } },
-  })
+  const { actor, script } = await getAuthorizedDesktopScript(payload.id)
 
-  if (!script) {
-    throw new Error('Script not found')
+  if (payload.collection_id) {
+    const collection = await createDesktopCollectionRepository(prisma, actor.workspaceId).get(payload.collection_id)
+    if (!collection) throw new Error('Collection not found')
   }
 
   if (script.sourcePath && !script.sourceAvailable) {
@@ -2037,8 +2019,8 @@ async function saveLocalScript(payload: SaveScriptPayload): Promise<ScriptDto> {
 
 async function syncLocalScriptToGist(scriptId: string) {
   const actor = await createDesktopActorContext(prisma)
-  const script = await prisma.script.findUnique({ where: { id: scriptId }, include: { collection: true } })
-  if (!script || script.workspaceId !== actor.workspaceId) throw new Error('Script not found')
+  const script = await prisma.script.findFirst({ where: { id: scriptId, workspaceId: actor.workspaceId }, include: { collection: true } })
+  if (!script) throw new Error('Script not found')
   if (script.sourcePath && !script.sourceAvailable) throw new Error('Canonical script source is unavailable')
 
   const filePath = await resolveScriptPath(script)
@@ -2053,8 +2035,8 @@ async function syncLocalScriptToGist(scriptId: string) {
 
 async function deleteLocalGist(scriptId: string) {
   const actor = await createDesktopActorContext(prisma)
-  const script = await prisma.script.findUnique({ where: { id: scriptId } })
-  if (!script || script.workspaceId !== actor.workspaceId) throw new Error('Script not found')
+  const script = await prisma.script.findFirst({ where: { id: scriptId, workspaceId: actor.workspaceId } })
+  if (!script) throw new Error('Script not found')
   if (script.gistId) {
     await createGistService(prisma, {
       vault: getDesktopSecretVaultService(),
@@ -2071,8 +2053,8 @@ async function deleteLocalGist(scriptId: string) {
 
 async function listLocalBuilds(scriptId: string) {
   const actor = await createDesktopActorContext(prisma)
-  const script = await prisma.script.findUnique({ where: { id: scriptId }, select: { id: true, workspaceId: true } })
-  if (!script || script.workspaceId !== actor.workspaceId) throw new Error('Script not found')
+  const script = await prisma.script.findFirst({ where: { id: scriptId, workspaceId: actor.workspaceId }, select: { id: true } })
+  if (!script) throw new Error('Script not found')
   const builds = await prisma.build.findMany({ where: { scriptId }, orderBy: { createdAt: 'desc' }, take: 50 })
   return builds.map((build) => ({
     id: build.id,
@@ -2087,8 +2069,8 @@ async function listLocalBuilds(scriptId: string) {
 
 async function readLocalBuildOutput(payload: { scriptId: string; buildId: string }) {
   const actor = await createDesktopActorContext(prisma)
-  const script = await prisma.script.findUnique({ where: { id: payload.scriptId }, select: { id: true, workspaceId: true } })
-  if (!script || script.workspaceId !== actor.workspaceId) throw new Error('Script not found')
+  const script = await prisma.script.findFirst({ where: { id: payload.scriptId, workspaceId: actor.workspaceId }, select: { id: true } })
+  if (!script) throw new Error('Script not found')
   const build = await prisma.build.findFirst({ where: { id: payload.buildId, scriptId: payload.scriptId } })
   if (!build) throw new Error('Build not found')
   if (!build.logFile || !fs.existsSync(build.logFile)) return ''
@@ -2101,8 +2083,11 @@ async function readLocalBuildOutput(payload: { scriptId: string; buildId: string
 
 async function getAuthorizedDesktopScript(scriptId: string) {
   const actor = await createDesktopActorContext(prisma)
-  const script = await prisma.script.findUnique({ where: { id: scriptId }, include: { collection: true } })
-  if (!script || script.workspaceId !== actor.workspaceId) throw new Error('Script not found')
+  const script = await prisma.script.findFirst({
+    where: { id: scriptId, workspaceId: actor.workspaceId },
+    include: { collection: true, tags: { include: { tag: true } } },
+  })
+  if (!script) throw new Error('Script not found')
   return { actor, script }
 }
 
@@ -2299,7 +2284,7 @@ async function regenerateLocalWebhook(scriptId: string) {
 
 async function writeDesktopWebhookSecret(scriptId: string, actorId: string, workspaceId: string) {
   const secret = crypto.randomBytes(32).toString('hex')
-  const existing = await prisma.script.findUnique({ where: { id: scriptId }, select: { webhookSecret: true } })
+  const existing = await prisma.script.findFirst({ where: { id: scriptId, workspaceId }, select: { webhookSecret: true } })
   const vault = getDesktopSecretVaultService()
   let secretId: string
   if (existing?.webhookSecret?.startsWith('secretref:')) {
@@ -2330,13 +2315,13 @@ async function toggleLocalWebhookSignature(payload: { scriptId: string; requireS
 }
 
 async function moveLocalScript(payload: { scriptId: string; collectionId: string | null }) {
-  const script = await prisma.script.findUnique({ where: { id: payload.scriptId } })
-  if (!script) throw new Error('Script not found')
+  const { actor, script } = await getAuthorizedDesktopScript(payload.scriptId)
   if (script.sourcePath) {
     throw new Error('Canonical scripts must be moved on disk, then the folder rescanned')
   }
+  const collectionRepository = createDesktopCollectionRepository(prisma, actor.workspaceId)
   const collection = payload.collectionId
-    ? await prisma.collection.findUnique({ where: { id: payload.collectionId } })
+    ? await collectionRepository.get(payload.collectionId)
     : null
   if (payload.collectionId && !collection) throw new Error('Collection not found')
   const updated = await prisma.script.update({
@@ -2347,10 +2332,7 @@ async function moveLocalScript(payload: { scriptId: string; collectionId: string
 }
 
 async function deleteLocalScript(payload: DeleteScriptPayload): Promise<string> {
-  const script = await prisma.script.findUnique({ where: { id: payload.id }, include: { collection: true } })
-  if (!script) {
-    throw new Error('Script not found')
-  }
+  const { script } = await getAuthorizedDesktopScript(payload.id)
 
   const filePath = await resolveScriptPath(script)
   const shouldDeleteFile = !script.sourcePath || await isManagedCollectionWorkspace(script.collection?.folderPath)
@@ -2363,14 +2345,7 @@ async function deleteLocalScript(payload: DeleteScriptPayload): Promise<string> 
 }
 
 async function duplicateLocalScript(scriptId: string): Promise<ScriptDto> {
-  const original = await prisma.script.findUnique({
-    where: { id: scriptId },
-    include: { tags: { include: { tag: true } }, collection: true },
-  })
-
-  if (!original) {
-    throw new Error('Script not found')
-  }
+  const { actor, script: original } = await getAuthorizedDesktopScript(scriptId)
 
   await ensureScriptsDirExists()
 
@@ -2383,7 +2358,7 @@ async function duplicateLocalScript(scriptId: string): Promise<ScriptDto> {
   const baseName = `${original.name} (copy)`
   let newName = baseName
   let counter = 2
-  while (await prisma.script.findFirst({ where: { name: newName } })) {
+  while (await prisma.script.findFirst({ where: { workspaceId: actor.workspaceId, name: newName } })) {
     newName = `${baseName} ${counter++}`
   }
 
@@ -2410,6 +2385,7 @@ async function duplicateLocalScript(scriptId: string): Promise<ScriptDto> {
       collectionId: original.collectionId,
       sourcePath: original.collection?.folderPath && !isManagedCollection ? newPath : null,
       timeoutMs: original.timeoutMs,
+      workspaceId: actor.workspaceId,
       webhookToken: crypto.randomUUID().replace(/-/g, ''),
     },
     include: { tags: { include: { tag: true } } },
@@ -2421,8 +2397,8 @@ async function duplicateLocalScript(scriptId: string): Promise<ScriptDto> {
     })
   }
 
-  const hydratedCopy = await prisma.script.findUnique({
-    where: { id: copy.id },
+  const hydratedCopy = await prisma.script.findFirst({
+    where: { id: copy.id, workspaceId: actor.workspaceId },
     include: { tags: { include: { tag: true } } },
   })
 
@@ -2433,12 +2409,12 @@ async function duplicateLocalScript(scriptId: string): Promise<ScriptDto> {
   return serializeScriptRecord(hydratedCopy)
 }
 
-async function buildUniqueScriptName(baseName: string, currentSourcePath: string): Promise<string> {
+async function buildUniqueScriptName(baseName: string, currentSourcePath: string, workspaceId: string): Promise<string> {
   let candidate = baseName
   let suffix = 2
 
   while (true) {
-    const existing = await prisma.script.findFirst({ where: { name: candidate } })
+    const existing = await prisma.script.findFirst({ where: { workspaceId, name: candidate } })
     if (!existing || existing.sourcePath === currentSourcePath) {
       return candidate
     }
@@ -2447,6 +2423,8 @@ async function buildUniqueScriptName(baseName: string, currentSourcePath: string
 }
 
 async function openLocalFolder(payload: OpenFolderPayload) {
+  const actor = await createDesktopActorContext(prisma)
+  const collectionRepository = createDesktopCollectionRepository(prisma, actor.workspaceId)
   const folderPath = payload.folderPath.trim()
   if (!folderPath) {
     throw new Error('Folder path is required')
@@ -2464,37 +2442,34 @@ async function openLocalFolder(payload: OpenFolderPayload) {
 
   if (payload.mode === 'temporary') {
     const tempCollections = await prisma.collection.findMany({
-      where: { isTemporary: true, folderPath: { not: null } },
+      where: { workspaceId: actor.workspaceId, isTemporary: true, folderPath: { not: null } },
       select: { id: true },
     })
 
     if (tempCollections.length > 0) {
       const tempIds = tempCollections.map((collection) => collection.id)
-      await prisma.script.deleteMany({ where: { collectionId: { in: tempIds } } })
-      await prisma.collection.deleteMany({ where: { id: { in: tempIds } } })
+      await prisma.script.deleteMany({ where: { workspaceId: actor.workspaceId, collectionId: { in: tempIds } } })
+      await prisma.collection.deleteMany({ where: { workspaceId: actor.workspaceId, id: { in: tempIds } } })
     }
   }
 
   const requestedPythonTools = payload.runtimePreset === 'python' ? true : Boolean(payload.pythonToolchainEnabled)
   let inspection = inspectFolderState(resolvedFolderPath)
   let collection = payload.mode === 'collection'
-    ? await prisma.collection.findFirst({ where: { folderPath: resolvedFolderPath } })
+    ? await collectionRepository.findByFolder(resolvedFolderPath)
     : null
 
   if (!collection) {
-    collection = await prisma.collection.create({
-      data: {
-        name: (payload.collectionName?.trim() || getFolderDisplayName(resolvedFolderPath)) + (payload.mode === 'temporary' ? ' (Temporary)' : ''),
-        folderPath: resolvedFolderPath,
-        folderAvailable: true,
-        folderLastScannedAt: new Date(),
-        isTemporary: payload.mode === 'temporary',
-        runtimePreset: payload.runtimePreset ?? 'general',
-        pythonToolchainEnabled: inspection.hasVenv || requestedPythonTools,
-        pythonVenvPath: inspection.venvPath,
-        pythonInterpreterPath: inspection.interpreterPath,
-      },
-      include: { _count: { select: { scripts: true } } },
+    collection = await collectionRepository.create({
+      name: (payload.collectionName?.trim() || getFolderDisplayName(resolvedFolderPath)) + (payload.mode === 'temporary' ? ' (Temporary)' : ''),
+      folderPath: resolvedFolderPath,
+      folderAvailable: true,
+      folderLastScannedAt: new Date(),
+      isTemporary: payload.mode === 'temporary',
+      runtimePreset: payload.runtimePreset ?? 'general',
+      pythonToolchainEnabled: inspection.hasVenv || requestedPythonTools,
+      pythonVenvPath: inspection.venvPath,
+      pythonInterpreterPath: inspection.interpreterPath,
     })
   } else {
     if (!inspection.hasVenv && requestedPythonTools && payload.createVenvIfMissing) {
@@ -2530,7 +2505,7 @@ async function openLocalFolder(payload: OpenFolderPayload) {
   }
 
   const existingScripts = await prisma.script.findMany({
-    where: { collectionId: collection.id, sourcePath: { not: null } },
+    where: { workspaceId: actor.workspaceId, collectionId: collection.id, sourcePath: { not: null } },
     select: { id: true, sourcePath: true, sourceFingerprint: true },
   })
   const existingBySourcePath = new Map(
@@ -2546,7 +2521,7 @@ async function openLocalFolder(payload: OpenFolderPayload) {
   for (const filePath of files) {
     activeSourcePaths.add(filePath)
     const baseName = buildLinkedScriptName(resolvedFolderPath, filePath)
-    const uniqueName = await buildUniqueScriptName(`${getFolderDisplayName(resolvedFolderPath)}/${baseName}`, filePath)
+    const uniqueName = await buildUniqueScriptName(`${getFolderDisplayName(resolvedFolderPath)}/${baseName}`, filePath, actor.workspaceId)
     const filename = path.basename(filePath)
     const language = inferScriptLanguage(filePath)
     const fingerprint = await getCanonicalSourceFingerprint(filePath)
@@ -2582,6 +2557,7 @@ async function openLocalFolder(payload: OpenFolderPayload) {
         sourcePath: filePath,
         sourceFingerprint: fingerprint,
         language,
+        workspaceId: actor.workspaceId,
         collectionId: collection.id,
         webhookToken: crypto.randomUUID().replace(/-/g, ''),
       },
@@ -2594,7 +2570,7 @@ async function openLocalFolder(payload: OpenFolderPayload) {
     .map((script) => script.id)
 
   if (staleScriptIds.length > 0) {
-    await prisma.script.updateMany({ where: { id: { in: staleScriptIds } }, data: { sourceAvailable: false } })
+    await prisma.script.updateMany({ where: { workspaceId: actor.workspaceId, id: { in: staleScriptIds } }, data: { sourceAvailable: false } })
   }
 
   return {
@@ -2650,24 +2626,23 @@ function scannedScriptGroupName(filePath: string, rootForGrouping?: string): str
 }
 
 /** Find-or-create a plain DB collection (no folderPath) by name. */
-async function findOrCreatePlainCollection(name: string, cache: Map<string, string>): Promise<string> {
+async function findOrCreatePlainCollection(name: string, cache: Map<string, string>, workspaceId: string): Promise<string> {
   const cached = cache.get(name)
   if (cached) {
     return cached
   }
 
-  const existing = await prisma.collection.findFirst({ where: { name } })
+  const repository = createDesktopCollectionRepository(prisma, workspaceId)
+  const existing = await repository.findByName(name)
   if (existing) {
     cache.set(name, existing.id)
     return existing.id
   }
 
-  const created = await prisma.collection.create({
-    data: {
-      name,
-      description: '',
-      isTemporary: false,
-    },
+  const created = await repository.create({
+    name,
+    description: '',
+    isTemporary: false,
   })
   cache.set(name, created.id)
   return created.id
@@ -2686,9 +2661,10 @@ async function importScannedScripts(payload: ImportScannedScriptsPayload): Promi
     return { imported: 0, skipped: 0, collections: [] }
   }
 
+  const actor = await createDesktopActorContext(prisma)
   // Skip files already linked (compare sourcePath case-insensitively on Windows).
   const existingScripts = await prisma.script.findMany({
-    where: { sourcePath: { not: null } },
+    where: { workspaceId: actor.workspaceId, sourcePath: { not: null } },
     select: { sourcePath: true },
   })
   const existingSourceKeys = new Set(
@@ -2720,7 +2696,7 @@ async function importScannedScripts(payload: ImportScannedScriptsPayload): Promi
     const collectionName = payload.mode === 'by-folder'
       ? scannedScriptGroupName(absolutePath, payload.rootForGrouping)
       : 'Miscellaneous'
-    const collectionId = await findOrCreatePlainCollection(collectionName, collectionCache)
+    const collectionId = await findOrCreatePlainCollection(collectionName, collectionCache, actor.workspaceId)
     usedCollectionNames.add(collectionName)
 
     const filename = path.basename(absolutePath)
@@ -2729,7 +2705,7 @@ async function importScannedScripts(payload: ImportScannedScriptsPayload): Promi
     // Dedupe the display name with a numeric suffix, mirroring duplicateScript.
     let name = baseName
     let counter = 2
-    while (await prisma.script.findFirst({ where: { name } })) {
+    while (await prisma.script.findFirst({ where: { workspaceId: actor.workspaceId, name } })) {
       name = `${baseName} ${counter++}`
     }
 
@@ -2741,6 +2717,7 @@ async function importScannedScripts(payload: ImportScannedScriptsPayload): Promi
         language: inferScriptLanguage(absolutePath),
         parameters: '[]',
         webhookToken: crypto.randomUUID().replace(/-/g, ''),
+        workspaceId: actor.workspaceId,
         collectionId,
       },
     })
@@ -3557,7 +3534,8 @@ export function initDesktopRuntimeIpc() {
   })
 
   ipcMain.handle('scriptmanager:runtime:rescan-canonical-folder', async (_event, collectionId: string) => {
-    const collection = await prisma.collection.findUniqueOrThrow({ where: { id: collectionId } })
+    const collection = await getCollectionRecord(collectionId)
+    if (!collection) throw new Error('Collection not found')
     if (!collection.folderPath || collection.isTemporary) throw new Error('Collection is not a persistent canonical folder')
     return openLocalFolder({ folderPath: collection.folderPath, mode: 'collection', collectionName: collection.name, runtimePreset: normalizeRuntimePreset(collection.runtimePreset), pythonToolchainEnabled: collection.pythonToolchainEnabled })
   })
