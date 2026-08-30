@@ -18,6 +18,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Terminal, Wifi, Upload, Play, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getOperationError } from '@/lib/operationError'
+import { toast } from '@/components/ui/toast'
 import { ApprovalGateDialog } from './ApprovalGateDialog'
 import {
     Select,
@@ -131,36 +133,53 @@ export function RemoteExecutionPanel() {
 
     const permissions = chmodPreset === 'custom' ? customChmod : chmodPreset
 
-    const handleTestConnection = () => {
+    const handleTestConnection = async () => {
         if (!selectedProfileId) return
-        dispatch(testConnection(selectedProfileId))
+        try {
+            const result = await dispatch(testConnection(selectedProfileId)).unwrap()
+            if (!result.success) {
+                toast.error(result.error ?? 'Connection failed')
+            }
+        } catch (error) {
+            toast.error(getOperationError(error, 'Connection test failed'))
+        }
     }
 
     const handleTransfer = async () => {
         if (!selectedProfileId || !activeScriptId) return
-        const result = await dispatch(transferScript({
-            profileId: selectedProfileId,
-            scriptId: activeScriptId,
-            remotePath,
-            permissions,
-        }))
-        if (transferScript.fulfilled.match(result)) {
-            if (result.payload.success) {
-                dispatch(appendRemoteExecOutput(`[Transfer] Script uploaded to ${result.payload.remote_path}\n`))
+        try {
+            const result = await dispatch(transferScript({
+                profileId: selectedProfileId,
+                scriptId: activeScriptId,
+                remotePath,
+                permissions,
+            })).unwrap()
+            if (result.success) {
+                dispatch(appendRemoteExecOutput(`[Transfer] Script uploaded to ${result.remote_path}\n`))
             } else {
-                dispatch(appendRemoteExecOutput(`[Transfer Error] ${result.payload.error}\n`))
+                const message = result.error ?? 'Transfer failed'
+                dispatch(appendRemoteExecOutput(`[Transfer Error] ${message}\n`))
+                toast.error(message)
             }
+        } catch (error) {
+            const message = getOperationError(error, 'Script transfer failed')
+            dispatch(appendRemoteExecOutput(`[Transfer Error] ${message}\n`))
+            toast.error(message)
         }
     }
 
     const handleRun = async () => {
         if (!selectedProfileId || !activeScriptId) return
         dispatch(clearRemoteExecOutput())
-        await dispatch(startRemoteExec({
-            profileId: selectedProfileId,
-            scriptId: activeScriptId,
-            remotePath,
-        }))
+        try {
+            await dispatch(startRemoteExec({
+                profileId: selectedProfileId,
+                scriptId: activeScriptId,
+                remotePath,
+            })).unwrap()
+        } catch (error) {
+            toast.error(getOperationError(error, 'Remote execution failed to start'))
+        }
     }
 
     const isRunning = remoteExecStatus === 'running' || remoteExecStatus === 'connecting'
