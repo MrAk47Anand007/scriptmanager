@@ -9,6 +9,7 @@ import { GET as listProviders } from '@/app/api/agents/providers/route'
 import { GET as listRuns, POST as createRun } from '@/app/api/agents/runs/route'
 import { GET as readRun } from '@/app/api/agents/runs/[id]/route'
 import { POST as interruptRun } from '@/app/api/agents/runs/[id]/interrupt/route'
+import { POST as resumeRun } from '@/app/api/agents/runs/[id]/resume/route'
 import { POST as appendMessage } from '@/app/api/agents/runs/[id]/messages/route'
 
 let sessionId = ''
@@ -67,24 +68,26 @@ describe('agent route authorization', () => {
     const readResponse = await readRun(new Request(`http://localhost/api/agents/runs/${foreignRunId}`, { headers }), { params: Promise.resolve({ id: foreignRunId }) })
     expect(readResponse.status).toBe(404)
 
-    const interruptResponse = await interruptRun(new Request(`http://localhost/api/agents/runs/${foreignRunId}/interrupt`, { headers }), { params: Promise.resolve({ id: foreignRunId }) })
-    expect(interruptResponse.status).toBe(404)
+    const interruptResponse = await interruptRun(new Request(`http://localhost/api/agents/runs/${foreignRunId}/interrupt`, { headers }))
+    expect(interruptResponse.status).toBe(409)
 
-    const messageResponse = await appendMessage(new Request(`http://localhost/api/agents/runs/${foreignRunId}/messages`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ role: 'user', content: 'tamper' }) }), { params: Promise.resolve({ id: foreignRunId }) })
-    expect(messageResponse.status).toBe(404)
+    const resumeResponse = await resumeRun(new Request(`http://localhost/api/agents/runs/${foreignRunId}/resume`, { headers }))
+    expect(resumeResponse.status).toBe(409)
+
+    const messageResponse = await appendMessage(new Request(`http://localhost/api/agents/runs/${foreignRunId}/messages`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ role: 'user', content: 'tamper' }) }))
+    expect(messageResponse.status).toBe(409)
     expect(await prisma.agentMessage.count({ where: { runId: foreignRunId } })).toBe(0)
   })
 
-  it('creates runs under the trusted workspace and actor', async () => {
+  it('refuses browser-side agent launch even when a desktop marker is forged', async () => {
     const response = await createRun(new Request('http://localhost/api/agents/runs', {
       method: 'POST',
       headers: { cookie: sessionCookie, 'content-type': 'application/json', 'x-scriptmanager-desktop': '1', 'x-scriptmanager-workspace-id': 'foreign-workspace', 'x-scriptmanager-user-id': 'attacker' },
       body: JSON.stringify({ profileId: localProfileId, prompt: 'inspect', cwd: '/tmp' }),
     }))
-    expect(response.status).toBe(201)
-    const created = await response.json() as { id: string; workspaceId: string; initiatedBy: string }
-    expect(created.workspaceId).toBe('default')
-    expect(created.initiatedBy).toBe('local-admin')
+    expect(response.status).toBe(409)
+    expect((await response.json()).desktopHostRequired).toBe(true)
+    expect(await prisma.agentRun.count({ where: { profileId: localProfileId } })).toBe(0)
   })
 
   it('requires authorization when creating a profile', async () => {

@@ -97,7 +97,7 @@ export async function createAgentRunRuntime(payload: AgentRunPayload): Promise<A
   }
   const response = await fetch('/api/agents/runs', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-scriptmanager-desktop': '1' },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
   })
   return readJsonResponse(response) as Promise<AgentRunRuntime>
@@ -123,7 +123,6 @@ export async function updateAgentRunRuntime(id: string, status: 'interrupted' | 
   const path = status === 'interrupted' ? 'interrupt' : 'resume'
   const response = await fetch(`/api/agents/runs/${encodeURIComponent(id)}/${path}`, {
     method: 'POST',
-    headers: { 'x-scriptmanager-desktop': '1' },
   })
   return readJsonResponse(response)
 }
