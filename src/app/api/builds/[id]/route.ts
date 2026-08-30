@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 // GET /api/builds/[id] — list all builds for a script (id = scriptId)
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'read')
+  if (authorization.response) return authorization.response
   const { id: scriptId } = await params
 
   const builds = await prisma.build.findMany({
-    where: { scriptId },
+    where: { scriptId, script: { workspaceId: authorization.context.workspaceId } },
     orderBy: { createdAt: 'desc' },
     take: 50,
   })

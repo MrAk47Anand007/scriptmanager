@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import fs from 'fs'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 // GET /api/builds/output/[scriptId]/[buildId] — get full log output of a build
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ scriptId: string; buildId: string }> }
 ) {
-  const { buildId } = await params
+  const authorization = await authorizeRequest(req, 'script', 'read')
+  if (authorization.response) return authorization.response
+  const { scriptId, buildId } = await params
 
-  const build = await prisma.build.findUnique({ where: { id: buildId } })
+  const build = await prisma.build.findFirst({ where: { id: buildId, scriptId, script: { workspaceId: authorization.context.workspaceId } } })
   if (!build) {
     return NextResponse.json({ error: 'Build not found' }, { status: 404 })
   }

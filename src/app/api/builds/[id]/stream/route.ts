@@ -1,5 +1,6 @@
 import { getBuildEmitter } from '@/lib/scriptRunner'
 import { prisma } from '@/lib/db'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 function encodeSseData(payload: string): Uint8Array {
   const encoder = new TextEncoder()
@@ -15,7 +16,11 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'read')
+  if (authorization.response) return authorization.response
   const { id: buildId } = await params
+  const build = await prisma.build.findFirst({ where: { id: buildId, script: { workspaceId: authorization.context.workspaceId } }, select: { id: true } })
+  if (!build) return new Response(JSON.stringify({ error: 'Build not found' }), { status: 404, headers: { 'content-type': 'application/json' } })
 
   const stream = new ReadableStream({
     start(controller) {
