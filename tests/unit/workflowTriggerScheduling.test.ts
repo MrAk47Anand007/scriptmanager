@@ -39,6 +39,13 @@ describe('workflow cron trigger scheduling', () => {
     removeSchedule('script-1')
   })
 
+  it('skips workflow triggers with malformed persisted configuration', async () => {
+    prismaMock.workflowTrigger.findMany.mockResolvedValue([{ id: 'broken-trigger', workflowId: 'workflow-1', configJson: 'not-json' }] as never)
+
+    await expect(initScheduler({ includeScripts: false })).resolves.toBeUndefined()
+    expect(isWorkflowCronScheduled('broken-trigger')).toBe(false)
+  })
+
   it('registers and unregisters a live cron job', () => {
     expect(isWorkflowCronScheduled('t1')).toBe(false)
     registerWorkflowCronTrigger({ id: 't1', workflowId: 'wf1', cron: '*/5 * * * *' })

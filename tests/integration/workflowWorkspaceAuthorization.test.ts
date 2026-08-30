@@ -88,4 +88,16 @@ describe('workflow route workspace authorization', () => {
     }), { params: Promise.resolve({ id: foreignWorkflowId }) })
     expect(triggerResponse.status).toBe(404)
   })
+
+  it('returns an empty trigger config when persisted trigger JSON is malformed', async () => {
+    const workflow = await prisma.workflow.create({
+      data: { workspaceId: 'default', name: 'Trigger config workflow', draftDefinition: JSON.stringify(definition) },
+    })
+    await prisma.workflowTrigger.create({ data: { workflowId: workflow.id, type: 'webhook', configJson: 'not-json' } })
+
+    const response = await listTriggers(new Request('http://localhost/api/triggers', { headers: { cookie: sessionCookie } }), { params: Promise.resolve({ id: workflow.id }) })
+
+    expect(response.status).toBe(200)
+    expect((await response.json() as Array<{ config: unknown }>)[0].config).toEqual({})
+  })
 })

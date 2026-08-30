@@ -45,9 +45,12 @@ export async function initScheduler(options: { includeScripts?: boolean; include
     ? await prisma.workflowTrigger.findMany({ where: { type: 'cron', enabled: true }, select: { id: true, workflowId: true, configJson: true } })
     : []
   for (const trigger of workflowTriggers) {
-    const config = JSON.parse(trigger.configJson) as { cron?: string }
-    if (!config.cron) continue
     try {
+      const parsed = JSON.parse(trigger.configJson)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || typeof parsed.cron !== 'string' || !parsed.cron.trim()) {
+        throw new Error('Workflow cron configuration is invalid')
+      }
+      const config = parsed as { cron: string }
       registerWorkflowCronTrigger({ id: trigger.id, workflowId: trigger.workflowId, cron: config.cron })
     } catch (err) {
       console.error(`[Scheduler] Failed to register workflow cron ${trigger.id}:`, err)

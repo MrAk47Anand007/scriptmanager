@@ -5,13 +5,22 @@ import { getNextRunTime, registerWorkflowCronTrigger } from '@/lib/schedulerServ
 import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 import { workflowRepository } from '@/lib/workflows/api'
 
+function parseTriggerConfig(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const authorization = await authorizeRequest(request, 'workflow', 'read')
   if (authorization.response) return authorization.response
   const workflowId = (await params).id
   if (!await workflowRepository.getWorkflow(workflowId, authorization.context.workspaceId)) return Response.json({ error: 'Workflow not found' }, { status: 404 })
   const triggers = await prisma.workflowTrigger.findMany({ where: { workflowId, workflow: { workspaceId: authorization.context.workspaceId } }, orderBy: { createdAt: 'desc' }, select: { id: true, type: true, enabled: true, configJson: true, webhookToken: true, createdAt: true, updatedAt: true } })
-  return Response.json(triggers.map((item) => ({ ...item, config: JSON.parse(item.configJson), configJson: undefined })))
+  return Response.json(triggers.map((item) => ({ ...item, config: parseTriggerConfig(item.configJson), configJson: undefined })))
 }
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const authorization = await authorizeRequest(request, 'workflow', 'update')
