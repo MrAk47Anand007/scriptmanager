@@ -22,7 +22,7 @@ import { createProductionWorkflowAdapters } from '../src/lib/workflows/runtimeAd
 import { startWorkflowWorker } from '../src/lib/workflows/workerLoop'
 import { getPackagedServerLaunch } from './serverLaunch'
 import { createDesktopActorContext } from '../src/lib/runtime/trustedContext'
-import { isTrustedAppUrl } from './windowSecurity'
+import { isSafeExternalUrl, isTrustedAppUrl } from './windowSecurity'
 import { initScheduler } from '../src/lib/schedulerService'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
@@ -678,7 +678,7 @@ async function createWindow() {
     setTimeout(revealMainWindow, 120)
   })
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (!isTrustedAppUrl(url, PORT)) {
+    if (!isTrustedAppUrl(url, PORT) && isSafeExternalUrl(url)) {
       void shell.openExternal(url).catch((error) => console.warn('[Electron] Failed to open external URL:', error))
     }
     return { action: 'deny' }

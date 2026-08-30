@@ -3,6 +3,24 @@ import { prisma } from '@/lib/db'
 import { createAgentService } from '@/lib/agents/service'
 import { FakeAcpProviderAdapter } from '@/lib/agents/provider'
 import { createApprovalService } from '@/lib/approvals/service'
+import type { AcpEvent, AcpProviderAdapter, AcpSession } from '@/lib/agents/types'
+
+function controllableSession(id: string) {
+  let listener: ((event: AcpEvent) => void) | undefined
+  const session: AcpSession & { emit(event: AcpEvent): Promise<void>; sent: string[] } = {
+    id,
+    provider: 'codex',
+    state: 'running',
+    sent: [],
+    async input(message) { session.sent.push(message.content) },
+    async decidePermission(requestId, allowed) { session.sent.push(JSON.stringify({ requestId, allowed })) },
+    async interrupt() {},
+    async terminate() {},
+    onEvent(next) { listener = next; return () => { listener = undefined } },
+    async emit(event) { await listener?.(event) },
+  }
+  return session
+}
 
 beforeEach(async () => { await prisma.agentArtifact.deleteMany(); await prisma.agentMessage.deleteMany(); await prisma.permissionGrant.deleteMany(); await prisma.agentRun.deleteMany(); await prisma.agentProfile.deleteMany(); await prisma.agentProviderConfig.deleteMany() })
 
@@ -54,6 +72,25 @@ describe('agent service', () => {
     await expect(service.launch({ profileId: profile.id, prompt: 'inspect', cwd: '.', desktopHost: false })).rejects.toThrow('desktop host')
   })
 
+  it('marks the durable run failed when the provider cannot launch', async () => {
+    let runId = ''
+    const adapter: AcpProviderAdapter = {
+      provider: 'codex',
+      discover: vi.fn().mockResolvedValue({ provider: 'codex', available: false }),
+      launch: vi.fn().mockImplementation(async (options) => {
+        runId = options.sessionId
+        throw new Error('ACP provider is unavailable')
+      }),
+      reconnect: vi.fn(),
+    }
+    const service = createAgentService(prisma, { codex: adapter, claude: new FakeAcpProviderAdapter('claude') })
+    const config = await service.createProviderConfig({ provider: 'codex', name: 'Codex', executable: 'codex' })
+    const profile = await service.createProfile({ name: 'Dev', provider: 'codex', providerConfigId: config.id, accessLevel: 'develop', workspaceId: 'default' })
+
+    await expect(service.launch({ profileId: profile.id, prompt: 'inspect', cwd: '.', desktopHost: true })).rejects.toThrow('ACP provider is unavailable')
+    await expect(prisma.agentRun.findUnique({ where: { id: runId } })).resolves.toMatchObject({ status: 'failed', errorJson: expect.stringContaining('ACP provider is unavailable') })
+  })
+
   it('waits for a local ACP session to reach a terminal state', async () => {
     const codex = new FakeAcpProviderAdapter('codex')
     const service = createAgentService(prisma, { codex, claude: new FakeAcpProviderAdapter('claude') })
@@ -99,5 +136,30 @@ describe('agent service', () => {
 
     await expect(completion).resolves.toMatchObject({ id: run.id, status: 'terminated' })
     expect((await prisma.permissionGrant.findFirstOrThrow({ where: { runId: run.id } })).decision).toBe('approved')
+  })
+
+  it('restores permission handling after reconnecting a terminated run', async () => {
+    const initialSession = controllableSession('initial-session')
+    const reconnectedSession = controllableSession('reconnected-session')
+    const adapter: AcpProviderAdapter = {
+      provider: 'codex',
+      discover: vi.fn().mockResolvedValue({ provider: 'codex', available: true }),
+      launch: vi.fn().mockResolvedValue(initialSession),
+      reconnect: vi.fn().mockResolvedValue(reconnectedSession),
+    }
+    const service = createAgentService(prisma, { codex: adapter, claude: new FakeAcpProviderAdapter('claude') })
+    const config = await service.createProviderConfig({ provider: 'codex', name: 'Codex', executable: 'codex' })
+    const profile = await service.createProfile({ name: 'Dev', provider: 'codex', providerConfigId: config.id, accessLevel: 'develop', workspaceId: 'default' })
+    const run = await service.launch({ profileId: profile.id, prompt: 'write a file', cwd: '.', desktopHost: true })
+
+    await service.terminate(run.id, 'default')
+    await service.resume(run.id, 'continue', 'default')
+    await reconnectedSession.emit({ type: 'permission_request', request: { id: 'reconnected-request', capability: 'file.write', operation: 'write file', resource: 'README.md', protectedAction: false } })
+
+    await expect(prisma.approvalRequest.findFirst({ where: { runId: run.id, status: 'pending' } })).resolves.toMatchObject({
+      runId: run.id,
+      capability: 'file.write',
+      resource: 'README.md',
+    })
   })
 })

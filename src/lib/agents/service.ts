@@ -45,6 +45,16 @@ export function createAgentService(database: PrismaClient, adapters: Record<AcpP
     }
   }
 
+  function subscribeToEvents(runId: string, session: AcpSession, profile: { id: string; accessLevel: string; workspaceId: string }, replay = false) {
+    session.onEvent((event) => handleEvent(runId, event, profile, session).catch((error) =>
+      repository.updateRun(runId, {
+          status: 'failed',
+          error: { message: error instanceof Error ? error.message : 'Agent event handling failed' },
+          finishedAt: new Date(),
+        }).catch(() => {})
+    ), replay ? { replay: true } : undefined)
+  }
+
   async function settlePendingPermissions(runId: string, session: AcpSession) {
     const grants = await database.permissionGrant.findMany({ where: { runId, decision: 'pending' } })
     for (const grant of grants) {
@@ -101,13 +111,25 @@ export function createAgentService(database: PrismaClient, adapters: Record<AcpP
       if (!profile) throw new Error('Agent profile not found')
       const provider = profile.provider as AcpProvider
       const run = await repository.createRun({ profileId: profile.id, provider, correlationId: input.correlationId ?? randomUUID(), workspaceId: profile.workspaceId, input: input.input ?? { prompt: input.prompt } })
-      const session = await adapters[provider].launch({ sessionId: run.id, cwd: input.cwd, profileId: profile.id, model: profile.model ?? undefined })
-      sessions.set(run.id, session)
-      session.onEvent((event) => handleEvent(run.id, event, profile, session), { replay: true })
-      await repository.updateRun(run.id, { status: 'running', providerSessionId: session.id, startedAt: new Date() })
-      await repository.appendMessage(run.id, { role: 'user', content: input.prompt })
-      await session.input({ role: 'user', content: input.prompt })
-      return (await repository.getRun(run.id))!
+      let session: AcpSession | undefined
+      try {
+        session = await adapters[provider].launch({ sessionId: run.id, cwd: input.cwd, profileId: profile.id, model: profile.model ?? undefined })
+        sessions.set(run.id, session)
+        subscribeToEvents(run.id, session, profile, true)
+        await repository.updateRun(run.id, { status: 'running', providerSessionId: session.id, startedAt: new Date() })
+        await repository.appendMessage(run.id, { role: 'user', content: input.prompt })
+        await session.input({ role: 'user', content: input.prompt })
+        return (await repository.getRun(run.id))!
+      } catch (error) {
+        sessions.delete(run.id)
+        await session?.terminate().catch(() => {})
+        await repository.updateRun(run.id, {
+          status: 'failed',
+          error: { message: error instanceof Error ? error.message : 'Agent launch failed' },
+          finishedAt: new Date(),
+        }).catch(() => {})
+        throw error
+      }
     },
     async interrupt(runId: string, workspaceId: string) {
       await getRunInWorkspace(runId, workspaceId)
@@ -125,7 +147,13 @@ export function createAgentService(database: PrismaClient, adapters: Record<AcpP
     async resume(runId: string, prompt: string, workspaceId: string) {
       const run = await getRunInWorkspace(runId, workspaceId)
       let session = sessions.get(runId)
-      if (!session) { session = await adapters[run.provider as AcpProvider].reconnect(run.providerSessionId ?? run.id); sessions.set(runId, session); session.onEvent((event) => handleEvent(runId, event)) }
+      if (!session) {
+        const profile = await database.agentProfile.findFirst({ where: { id: run.profileId, workspaceId: run.workspaceId } })
+        if (!profile) throw new Error('Agent profile not found')
+        session = await adapters[run.provider as AcpProvider].reconnect(run.providerSessionId ?? run.id)
+        sessions.set(runId, session)
+        subscribeToEvents(runId, session, profile)
+      }
       await repository.appendMessage(runId, { role: 'user', content: prompt }); await session.input({ role: 'user', content: prompt }); return repository.updateRun(runId, { status: 'running', finishedAt: null })
     },
     waitForCompletion,
