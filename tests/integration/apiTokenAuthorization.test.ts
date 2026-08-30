@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server'
 import { hashApiToken } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { ensureDefaultWorkspace } from '@/lib/rbac/bootstrap'
-import { middleware } from '@/middleware'
+import { proxy } from '@/proxy'
 
 beforeEach(async () => {
   await ensureDefaultWorkspace(prisma)
@@ -24,7 +24,7 @@ describe('bearer token authorization', () => {
       headers: { authorization: 'Bearer valid-test-token' },
     })
 
-    const response = await middleware(request)
+    const response = await proxy(request)
 
     expect(response.status).toBe(403)
     await expect(response.json()).resolves.toMatchObject({
