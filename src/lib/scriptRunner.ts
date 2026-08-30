@@ -21,6 +21,7 @@ let cachedDefaultTimeoutMs: { value: number; expiresAt: number } | null = null
 
 interface ScriptInfo {
   id: string
+  workspaceId?: string | null
   filename: string
   sourcePath?: string | null
   language: string
@@ -166,7 +167,7 @@ export async function executeScriptAsync(
     }
 
     // Load per-script env vars from DB
-    const scriptEnv = await resolveScriptEnvironment(prisma, script.id, scriptEnvVarsFromDB)
+    const scriptEnv = await resolveScriptEnvironment(prisma, script.id, scriptEnvVarsFromDB, undefined, script.workspaceId ?? 'default')
 
     // Determine timeout: per-script override → global setting → hardcoded default
     const timeoutMs = script.timeoutMs ?? defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS

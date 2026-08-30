@@ -1030,6 +1030,7 @@ async function getScriptRecord(scriptId: string) {
     where: { id: scriptId, workspaceId: actor.workspaceId },
     select: {
       id: true,
+      workspaceId: true,
       name: true,
       filename: true,
       sourcePath: true,
@@ -2892,7 +2893,7 @@ async function startLocalRun(window: BrowserWindow, payload: RunScriptPayload) {
     scriptPath,
   )
   const runtime = getRuntime(window.id)
-  const scriptEnv = await resolveScriptEnvironment(prisma, script.id, envVars, getDesktopSecretVaultService())
+  const scriptEnv = await resolveScriptEnvironment(prisma, script.id, envVars, getDesktopSecretVaultService(), script.workspaceId ?? 'default')
 
   const paramEnv: Record<string, string> = {}
   if (parsedPayload.paramValues) {
