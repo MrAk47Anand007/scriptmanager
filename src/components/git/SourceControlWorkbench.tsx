@@ -5,23 +5,55 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchProjects, updateProject } from '@/features/ops/opsSlice'
 import { runGitAction, selectDiffPath, selectGitProject } from '@/features/git/gitSlice'
 import type { GitAction } from '@/lib/git/types'
+import { getOperationError } from '@/lib/operationError'
+import { toast } from '@/components/ui/toast'
 
 export function SourceControlWorkbench() {
   const dispatch = useAppDispatch(); const projects = useAppSelector(s => s.ops.projects); const git = useAppSelector(s => s.git)
   const [message, setMessage] = useState(''); const [repositoryRoot, setRepositoryRoot] = useState('')
   useEffect(() => { void dispatch(fetchProjects()) }, [dispatch])
-  const run = (action: GitAction) => git.projectId && dispatch(runGitAction({ projectId: git.projectId, action }))
+  const run = async (action: GitAction) => {
+    if (!git.projectId) return null
+    try {
+      return await dispatch(runGitAction({ projectId: git.projectId, action })).unwrap()
+    } catch (error) {
+      toast.error(getOperationError(error, `Git ${action.action} failed`))
+      return null
+    }
+  }
   useEffect(() => { if (git.projectId && projects.find(project => project.id === git.projectId)?.repository_root) { void run({ action: 'status' }); void run({ action: 'branches' }) } }, [git.projectId, projects.length]) // eslint-disable-line react-hooks/exhaustive-deps
   const selected = useMemo(() => git.diff.find(file => file.path === git.selectedPath), [git.diff, git.selectedPath]); const selectedProject = projects.find(project => project.id === git.projectId)
   const selectFile = (path: string) => { dispatch(selectDiffPath(path)); void run({ action: 'diff', path }) }
+  const connectRepository = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const projectId = git.projectId
+    const root = repositoryRoot.trim()
+    if (!projectId || !root) return
+    try {
+      await dispatch(updateProject({ id: projectId, repository_root: root })).unwrap()
+      await dispatch(fetchProjects()).unwrap()
+      dispatch(selectGitProject(projectId))
+      setRepositoryRoot('')
+    } catch (error) {
+      toast.error(getOperationError(error, 'Repository could not be connected'))
+    }
+  }
+  const commitChanges = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!message.trim()) return
+    const result = await run({ action: 'commit', message })
+    if (!result) return
+    setMessage('')
+    await run({ action: 'status' })
+  }
   return <div className="flex h-full bg-background text-foreground">
     <aside className="flex w-72 shrink-0 flex-col border-r border-wb-border bg-wb-sidepanel">
       <div className="border-b border-wb-border p-3"><div className="mb-2 text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Repository</div><select aria-label="Repository project" value={git.projectId ?? ''} onChange={e => dispatch(selectGitProject(e.target.value || null))} className="h-8 w-full rounded border border-wb-border bg-background px-2 text-xs"><option value="">Select project…</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-      {git.projectId && !selectedProject?.repository_root && <form className="space-y-2 border-b border-wb-border p-3" onSubmit={async e=>{e.preventDefault();const projectId=git.projectId;if(!projectId||!repositoryRoot.trim())return;await dispatch(updateProject({id:projectId,repository_root:repositoryRoot.trim()})).unwrap();await dispatch(fetchProjects()).unwrap();dispatch(selectGitProject(projectId));setRepositoryRoot('')}}><p className="text-xs text-muted-foreground">Connect this project to a local Git repository.</p><input aria-label="Repository root" value={repositoryRoot} onChange={e=>setRepositoryRoot(e.target.value)} placeholder="C:\\path\\to\\repository" className="h-8 w-full rounded border border-wb-border bg-background px-2 text-xs"/><button className="h-8 w-full rounded bg-accent-brand text-xs text-white">Connect repository</button></form>}
+      {git.projectId && !selectedProject?.repository_root && <form className="space-y-2 border-b border-wb-border p-3" onSubmit={connectRepository}><p className="text-xs text-muted-foreground">Connect this project to a local Git repository.</p><input aria-label="Repository root" value={repositoryRoot} onChange={e=>setRepositoryRoot(e.target.value)} placeholder="C:\\path\\to\\repository" className="h-8 w-full rounded border border-wb-border bg-background px-2 text-xs"/><button className="h-8 w-full rounded bg-accent-brand text-xs text-white">Connect repository</button></form>}
       {git.projectId && selectedProject?.repository_root && <><div className="flex h-10 items-center gap-2 border-b border-wb-border px-3 text-xs"><GitBranch className="h-4 w-4 text-accent-brand"/><span className="font-medium">{git.status?.branch ?? 'Loading…'}</span><span className="ml-auto text-muted-foreground">↑{git.status?.ahead ?? 0} ↓{git.status?.behind ?? 0}</span><button aria-label="Refresh Git status" onClick={() => void run({action:'status'})}><RefreshCw className={`h-3.5 w-3.5 ${git.pending ? 'animate-spin':''}`}/></button></div>
       {git.status?.files.some(f => f.state === 'conflicted') && <div className="flex gap-2 border-b border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600"><AlertTriangle className="h-4 w-4 shrink-0"/>Resolve conflicts before committing.</div>}
       <div className="flex-1 overflow-y-auto py-2">{git.status?.files.map(file => <button key={file.path} onClick={() => selectFile(file.path)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-muted"><span className={`w-4 font-mono ${file.state==='conflicted'?'text-amber-500':'text-accent-brand'}`}>{file.state[0].toUpperCase()}</span><span className="truncate">{file.path}</span><ChevronRight className="ml-auto h-3 w-3 opacity-40"/></button>)}{git.status?.clean && <div className="flex items-center gap-2 px-3 py-8 text-xs text-muted-foreground"><Check className="h-4 w-4 text-emerald-500"/>Working tree clean</div>}</div>
-      <form className="border-t border-wb-border p-3" onSubmit={async e => { e.preventDefault(); if(!message.trim())return; await run({action:'commit',message}); setMessage(''); await run({action:'status'}) }}><textarea aria-label="Commit message" value={message} onChange={e=>setMessage(e.target.value)} placeholder="Commit message" className="h-16 w-full resize-none rounded border border-wb-border bg-background p-2 text-xs outline-none focus:border-accent-brand"/><button disabled={!message.trim()||Boolean(git.pending)} className="mt-2 flex h-8 w-full items-center justify-center gap-2 rounded bg-accent-brand text-xs font-medium text-white disabled:opacity-40"><GitCommit className="h-3.5 w-3.5"/>Commit changes</button></form></>}
+      <form className="border-t border-wb-border p-3" onSubmit={commitChanges}><textarea aria-label="Commit message" value={message} onChange={e=>setMessage(e.target.value)} placeholder="Commit message" className="h-16 w-full resize-none rounded border border-wb-border bg-background p-2 text-xs outline-none focus:border-accent-brand"/><button disabled={!message.trim()||Boolean(git.pending)} className="mt-2 flex h-8 w-full items-center justify-center gap-2 rounded bg-accent-brand text-xs font-medium text-white disabled:opacity-40"><GitCommit className="h-3.5 w-3.5"/>Commit changes</button></form></>}
     </aside>
     <section className="flex min-w-0 flex-1 flex-col"><header className="flex h-11 items-center border-b border-wb-border px-4"><div className="min-w-0 truncate text-xs font-medium">{selected?.path ?? 'Source Control'}</div><div className="ml-auto flex gap-2"><button onClick={() => void run({action:'fetch'})} className="rounded px-2 py-1 text-xs hover:bg-muted">Fetch</button><button onClick={() => void run({action:'pull',branch:git.status?.branch})} className="rounded px-2 py-1 text-xs hover:bg-muted">Pull</button><button onClick={() => void run({action:'push',branch:git.status?.branch})} className="flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-muted"><Upload className="h-3.5 w-3.5"/>Push</button></div></header>
       {git.error && <div className="border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-500">{git.error}</div>}{git.approvalId && <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-600">Push paused for approval · {git.approvalId}</div>}
