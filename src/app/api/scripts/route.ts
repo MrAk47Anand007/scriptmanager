@@ -9,9 +9,12 @@ import { v4 as uuidv4 } from 'uuid'
 
 import { cache } from '@/lib/cache'
 import { sanitizeScriptFilename } from '@/lib/executionSafety'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function GET(req: Request) {
-  const workspaceId = (req as Request | undefined)?.headers.get('x-scriptmanager-workspace-id') ?? 'default'
+  const authorization = await authorizeRequest(req, 'script', 'read')
+  if (authorization.response) return authorization.response
+  const workspaceId = authorization.context.workspaceId
   const cacheKey = `all_scripts:${workspaceId}`
   const cachedScripts = await cache.get(cacheKey)
   if (cachedScripts) {
@@ -56,8 +59,12 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const workspaceId = req.headers.get('x-scriptmanager-workspace-id') ?? 'default'
+  const authenticated = await authorizeRequest(req, 'script', 'read')
+  if (authenticated.response) return authenticated.response
   const data = await req.json()
+  const authorization = await authorizeRequest(req, 'script', data.id ? 'update' : 'create')
+  if (authorization.response) return authorization.response
+  const workspaceId = authorization.context.workspaceId
   // Invalidate cache on create/update
   await cache.del(`all_scripts:${workspaceId}`)
 
@@ -76,6 +83,12 @@ export async function POST(req: Request) {
   await ensureScriptsDirExists()
 
   let script = id ? await prisma.script.findFirst({ where: { id, workspaceId }, include: { collection: true } }) : null
+  if (id && !script) return NextResponse.json({ error: 'Script not found' }, { status: 404 })
+
+  if (collection_id) {
+    const collection = await prisma.collection.findFirst({ where: { id: collection_id, workspaceId } })
+    if (!collection) return NextResponse.json({ error: 'Collection not found' }, { status: 404 })
+  }
 
   if (script) {
     // Update existing script
@@ -134,7 +147,7 @@ export async function POST(req: Request) {
     // Create new script
     // Check if name already taken
     const collection = collection_id
-      ? await prisma.collection.findUnique({ where: { id: collection_id } })
+      ? await prisma.collection.findFirst({ where: { id: collection_id, workspaceId } })
       : null
 
     const filename = sanitizeScriptFilename(name, '.py')
@@ -165,6 +178,7 @@ export async function POST(req: Request) {
 
     script = await prisma.script.create({
       data: {
+        workspaceId,
         name,
         description,
         filename,
@@ -184,7 +198,7 @@ export async function POST(req: Request) {
   if (script.syncToGist && content !== undefined && !data.skipGist) {
     try {
       await syncScriptToGist(script, content ?? '')
-      script = await prisma.script.findUnique({ where: { id: script.id }, include: { collection: true } }) ?? script
+      script = await prisma.script.findFirst({ where: { id: script.id, workspaceId }, include: { collection: true } }) ?? script
     } catch (err) {
       // Non-fatal - log and continue
       console.error('[Gist] Sync failed:', err)

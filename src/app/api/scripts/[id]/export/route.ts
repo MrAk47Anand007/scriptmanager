@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getScriptResolvedFilePath } from '@/lib/scriptRunner'
 import fs from 'fs'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 type Params = Promise<{ id: string }>
 
@@ -9,10 +10,12 @@ export async function GET(
   _req: Request,
   { params }: { params: Params }
 ) {
+  const authorization = await authorizeRequest(_req, 'script', 'read')
+  if (authorization.response) return authorization.response
   const { id } = await params
 
-  const script = await prisma.script.findUnique({
-    where: { id },
+  const script = await prisma.script.findFirst({
+    where: { id, workspaceId: authorization.context.workspaceId },
     include: { tags: { include: { tag: true } } },
   })
 

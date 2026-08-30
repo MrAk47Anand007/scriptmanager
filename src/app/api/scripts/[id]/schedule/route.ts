@@ -1,14 +1,17 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { registerSchedule, removeSchedule, getNextRunTime } from '@/lib/schedulerService'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'read')
+  if (authorization.response) return authorization.response
   const { id } = await params
 
-  const script = await prisma.script.findUnique({ where: { id } })
+  const script = await prisma.script.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
   if (!script) {
     return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   }
@@ -28,10 +31,12 @@ export async function PUT(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'update')
+  if (authorization.response) return authorization.response
   const { id } = await params
   const { cron, enabled } = await req.json()
 
-  const script = await prisma.script.findUnique({ where: { id } })
+  const script = await prisma.script.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
   if (!script) {
     return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   }
@@ -74,9 +79,11 @@ export async function DELETE(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'update')
+  if (authorization.response) return authorization.response
   const { id } = await params
 
-  const script = await prisma.script.findUnique({ where: { id } })
+  const script = await prisma.script.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
   if (!script) {
     return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   }

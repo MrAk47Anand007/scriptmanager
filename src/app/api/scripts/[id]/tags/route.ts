@@ -1,14 +1,19 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 type Params = Promise<{ id: string }>
 
 // GET /api/scripts/[id]/tags — list tags for a script
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Params }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'read')
+  if (authorization.response) return authorization.response
   const { id } = await params
+  const script = await prisma.script.findFirst({ where: { id, workspaceId: authorization.context.workspaceId }, select: { id: true } })
+  if (!script) return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   const scriptTags = await prisma.scriptTag.findMany({
     where: { scriptId: id },
     include: { tag: true },
@@ -28,6 +33,8 @@ export async function POST(
   req: Request,
   { params }: { params: Params }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'update')
+  if (authorization.response) return authorization.response
   const { id: scriptId } = await params
   const body = await req.json()
   const tagName = (body.name ?? '').trim().toLowerCase()
@@ -37,7 +44,7 @@ export async function POST(
     return NextResponse.json({ error: 'Tag name is required' }, { status: 400 })
   }
 
-  const script = await prisma.script.findUnique({ where: { id: scriptId } })
+  const script = await prisma.script.findFirst({ where: { id: scriptId, workspaceId: authorization.context.workspaceId } })
   if (!script) {
     return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   }
@@ -64,6 +71,8 @@ export async function DELETE(
   req: Request,
   { params }: { params: Params }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'update')
+  if (authorization.response) return authorization.response
   const { id: scriptId } = await params
   const { searchParams } = new URL(req.url)
   const tagId = searchParams.get('tagId')
@@ -72,6 +81,8 @@ export async function DELETE(
     return NextResponse.json({ error: 'tagId query param required' }, { status: 400 })
   }
 
+  const script = await prisma.script.findFirst({ where: { id: scriptId, workspaceId: authorization.context.workspaceId }, select: { id: true } })
+  if (!script) return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   await prisma.scriptTag.deleteMany({ where: { scriptId, tagId } })
   return NextResponse.json({ message: 'Tag removed' })
 }

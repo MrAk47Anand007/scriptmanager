@@ -2,13 +2,16 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getScriptResolvedFilePath } from '@/lib/scriptRunner'
 import fs from 'fs'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'read')
+  if (authorization.response) return authorization.response
   const { id } = await params
-  const script = await prisma.script.findUnique({ where: { id } })
+  const script = await prisma.script.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
 
   if (!script) {
     return NextResponse.json({ error: 'Script not found' }, { status: 404 })
@@ -38,12 +41,14 @@ export async function DELETE(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'delete')
+  if (authorization.response) return authorization.response
   const { id } = await params
   const { searchParams } = new URL(req.url)
   const deleteGist = searchParams.get('deleteGist') === 'true'
 
   try {
-    const script = await prisma.script.findUnique({ where: { id } })
+    const script = await prisma.script.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
     if (!script) {
       return NextResponse.json({ error: 'Script not found' }, { status: 404 })
     }
@@ -72,7 +77,7 @@ export async function DELETE(
 
     // Invalidate script list cache
     const { cache } = await import('@/lib/cache')
-    await cache.del('all_scripts')
+    await cache.del(`all_scripts:${authorization.context.workspaceId}`)
 
     return NextResponse.json({ message: 'Script deleted successfully', id })
   } catch (error: any) {

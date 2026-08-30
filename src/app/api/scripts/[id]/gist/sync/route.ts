@@ -3,15 +3,18 @@ import { prisma } from '@/lib/db'
 import { syncScriptToGist } from '@/lib/gistService'
 import { getScriptResolvedFilePath } from '@/lib/scriptRunner'
 import fs from 'fs'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'run')
+  if (authorization.response) return authorization.response
   const { id } = await params
 
-  const script = await prisma.script.findUnique({
-    where: { id },
+  const script = await prisma.script.findFirst({
+    where: { id, workspaceId: authorization.context.workspaceId },
     include: { collection: true }
   })
 

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { ensureScriptsDirExists, getScriptFilePath } from '@/lib/scriptRunner'
 import fs from 'fs'
 import { v4 as uuidv4 } from 'uuid'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 interface ScriptImportItem {
   name: string
@@ -25,6 +26,9 @@ interface ImportPayload {
 
 // POST /api/scripts/import — import one or more scripts from JSON
 export async function POST(req: Request) {
+  const authorization = await authorizeRequest(req, 'script', 'create')
+  if (authorization.response) return authorization.response
+  const workspaceId = authorization.context.workspaceId
   let body: ImportPayload
   try {
     body = await req.json()
@@ -50,7 +54,7 @@ export async function POST(req: Request) {
     if (!item.name?.trim()) continue
 
     // Deduplicate: if a script with this name already exists, skip it
-    const existing = await prisma.script.findFirst({ where: { name: item.name.trim() } })
+    const existing = await prisma.script.findFirst({ where: { name: item.name.trim(), workspaceId } })
     if (existing) {
       results.push({ name: item.name.trim(), id: existing.id, status: 'skipped' })
       continue
@@ -72,6 +76,7 @@ export async function POST(req: Request) {
 
     const script = await prisma.script.create({
       data: {
+        workspaceId,
         name: item.name.trim(),
         filename,
         description: item.description ?? '',

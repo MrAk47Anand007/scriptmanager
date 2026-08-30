@@ -7,17 +7,18 @@ import { cache } from '@/lib/cache'
 import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 type FolderImportFile = {
   relativePath: string
   content: string
 }
 
-async function buildUniqueScriptName(baseName: string): Promise<string> {
+async function buildUniqueScriptName(baseName: string, workspaceId: string): Promise<string> {
   let candidate = baseName
   let suffix = 2
 
-  while (await prisma.script.findFirst({ where: { name: candidate } })) {
+  while (await prisma.script.findFirst({ where: { name: candidate, workspaceId } })) {
     candidate = `${baseName} (${suffix++})`
   }
 
@@ -25,6 +26,9 @@ async function buildUniqueScriptName(baseName: string): Promise<string> {
 }
 
 export async function POST(req: Request) {
+  const authorization = await authorizeRequest(req, 'script', 'create')
+  if (authorization.response) return authorization.response
+  const workspaceId = authorization.context.workspaceId
   let body: {
     mode?: 'temporary' | 'collection'
     collectionName?: string
@@ -46,11 +50,11 @@ export async function POST(req: Request) {
   }
 
   await ensureScriptsDirExists()
-  await cache.del('all_scripts')
+  await cache.del(`all_scripts:${workspaceId}`)
 
   if ((body.mode ?? 'temporary') === 'temporary') {
     const tempCollections = await prisma.collection.findMany({
-      where: { isTemporary: true },
+      where: { isTemporary: true, workspaceId },
       select: { id: true },
     })
 
@@ -64,6 +68,7 @@ export async function POST(req: Request) {
   const folderName = body.folderName?.trim() || 'Imported Folder'
   const collection = await prisma.collection.create({
     data: {
+      workspaceId,
       name: (body.collectionName?.trim() || folderName) + ((body.mode ?? 'temporary') === 'temporary' ? ' (Temporary)' : ''),
       isTemporary: (body.mode ?? 'temporary') === 'temporary',
     },
@@ -73,7 +78,7 @@ export async function POST(req: Request) {
 
   for (const file of validFiles) {
     const baseName = `${folderName}/${file.relativePath.replace(/\\/g, '/')}`
-    const name = await buildUniqueScriptName(baseName)
+    const name = await buildUniqueScriptName(baseName, workspaceId)
     const ext = path.extname(file.relativePath) || '.txt'
     const filename = sanitizeScriptFilename(name, ext)
     const filePath = await getScriptFilePath(filename)
@@ -81,6 +86,7 @@ export async function POST(req: Request) {
 
     const script = await prisma.script.create({
       data: {
+        workspaceId,
         name,
         filename,
         language: inferScriptLanguage(file.relativePath),

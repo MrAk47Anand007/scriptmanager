@@ -2,18 +2,22 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { ensureBuildEmitter, executeScriptAsync } from '@/lib/scriptRunner'
 import { executionTelemetry } from '@/lib/execution'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'run')
+  if (authorization.response) return authorization.response
   const { id } = await params
   const correlationId = executionTelemetry.correlationId(req)
 
-  const script = await prisma.script.findUnique({
-    where: { id },
+  const script = await prisma.script.findFirst({
+    where: { id, workspaceId: authorization.context.workspaceId },
     select: {
       id: true,
+      workspaceId: true,
       filename: true,
       sourcePath: true,
       language: true,
@@ -53,7 +57,7 @@ export async function POST(
 
   // Fire-and-forget - don't await
   executeScriptAsync(build.id, script, paramValues, {
-    correlationId, actor: { type: 'user', id: 'session-user' }, trigger: 'manual',
+    correlationId, actor: { type: 'user', id: authorization.context.userId }, trigger: 'manual',
   }).catch(err => {
     console.error('[Run] Script execution error:', err)
   })

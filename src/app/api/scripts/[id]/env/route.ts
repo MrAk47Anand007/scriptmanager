@@ -2,17 +2,20 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { defaultSecretVaultService } from '@/lib/secrets/defaultService'
 import { parseSecretReference, serializeSecretReference } from '@/lib/secrets/references'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 type Params = Promise<{ id: string }>
 
 // GET /api/scripts/[id]/env — list env vars (values masked for secrets)
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Params }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'read')
+  if (authorization.response) return authorization.response
   const { id: scriptId } = await params
 
-  const script = await prisma.script.findUnique({ where: { id: scriptId } })
+  const script = await prisma.script.findFirst({ where: { id: scriptId, workspaceId: authorization.context.workspaceId } })
   if (!script) return NextResponse.json({ error: 'Script not found' }, { status: 404 })
 
   const envVars = await prisma.scriptEnvVar.findMany({
@@ -35,6 +38,8 @@ export async function POST(
   req: Request,
   { params }: { params: Params }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'update')
+  if (authorization.response) return authorization.response
   const { id: scriptId } = await params
   const body = await req.json()
   const key = (body.key ?? '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
@@ -43,23 +48,23 @@ export async function POST(
 
   if (!key) return NextResponse.json({ error: 'key is required' }, { status: 400 })
 
-  const script = await prisma.script.findUnique({ where: { id: scriptId } })
+  const script = await prisma.script.findFirst({ where: { id: scriptId, workspaceId: authorization.context.workspaceId } })
   if (!script) return NextResponse.json({ error: 'Script not found' }, { status: 404 })
 
   const existing = await prisma.scriptEnvVar.findUnique({ where: { scriptId_key: { scriptId, key } } })
   let persistedValue = value
   if (isSecret) {
     const service = defaultSecretVaultService()
-    const access = { actorType: 'user' as const, actorId: 'current-user', workspaceId: 'default', capability: 'secret:write', resource: `script:${scriptId}`, reason: 'script environment update' }
+    const access = { actorType: 'user' as const, actorId: authorization.context.userId, workspaceId: authorization.context.workspaceId, capability: 'secret:write', resource: `script:${scriptId}`, reason: 'script environment update' }
     let secretId: string
     if (existing?.isSecret && existing.value.startsWith('secretref:')) {
       secretId = parseSecretReference(existing.value)
       await service.rotateSecret(secretId, value, access)
     } else {
-      const secret = await service.createSecret({ name: `script:${scriptId}:${key}`, plaintext: value, description: `Environment variable ${key}`, scope: 'resource', workspaceId: 'default', createdBy: access.actorId })
+      const secret = await service.createSecret({ name: `script:${scriptId}:${key}`, plaintext: value, description: `Environment variable ${key}`, scope: 'resource', workspaceId: authorization.context.workspaceId, createdBy: access.actorId })
       secretId = secret.id
     }
-    await service.bindSecret(secretId, { resourceType: 'script', resourceId: scriptId, field: key, workspaceId: 'default', createdBy: access.actorId })
+    await service.bindSecret(secretId, { resourceType: 'script', resourceId: scriptId, field: key, workspaceId: authorization.context.workspaceId, createdBy: access.actorId })
     persistedValue = serializeSecretReference(secretId)
   }
 
@@ -82,12 +87,16 @@ export async function DELETE(
   req: Request,
   { params }: { params: Params }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'update')
+  if (authorization.response) return authorization.response
   const { id: scriptId } = await params
   const { searchParams } = new URL(req.url)
   const key = searchParams.get('key')
 
   if (!key) return NextResponse.json({ error: 'key query param required' }, { status: 400 })
 
+  const script = await prisma.script.findFirst({ where: { id: scriptId, workspaceId: authorization.context.workspaceId }, select: { id: true } })
+  if (!script) return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   await prisma.scriptEnvVar.deleteMany({ where: { scriptId, key } })
   return NextResponse.json({ message: 'Env var deleted' })
 }

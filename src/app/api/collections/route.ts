@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
-export async function GET() {
+export async function GET(req: Request) {
+  const authorization = await authorizeRequest(req, 'script', 'read')
+  if (authorization.response) return authorization.response
   const collections = await prisma.collection.findMany({
+    where: { workspaceId: authorization.context.workspaceId },
     orderBy: { name: 'asc' },
     include: { _count: { select: { scripts: true } } }
   })
@@ -27,6 +31,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const authorization = await authorizeRequest(req, 'script', 'create')
+  if (authorization.response) return authorization.response
   const {
     name,
     description,
@@ -44,8 +50,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
 
+  const workspaceId = authorization.context.workspaceId
+  if (project_id) {
+    const project = await prisma.project.findFirst({ where: { id: project_id, workspaceId } })
+    if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+  }
+  if (parent_id) {
+    const parent = await prisma.collection.findFirst({ where: { id: parent_id, workspaceId } })
+    if (!parent) return NextResponse.json({ error: 'Parent collection not found' }, { status: 404 })
+  }
+
   const collection = await prisma.collection.create({
     data: {
+      workspaceId,
       name: name.trim(),
       description: description ?? '',
       projectId: project_id ?? null,
@@ -61,6 +78,7 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     id: collection.id,
+    workspaceId: collection.workspaceId,
     name: collection.name,
     description: collection.description,
     script_count: 0,
@@ -75,5 +93,5 @@ export async function POST(req: Request) {
     storage_provider_id: collection.storageProviderId,
     remote_prefix: collection.remotePrefix,
     created_at: collection.createdAt.toISOString()
-  })
+  }, { status: 201 })
 }

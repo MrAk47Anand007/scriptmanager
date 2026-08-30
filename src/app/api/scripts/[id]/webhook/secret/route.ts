@@ -2,22 +2,25 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import crypto from 'crypto'
 import { storeResourceSecret } from '@/lib/secrets/migration'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 // POST /api/scripts/[id]/webhook/secret — regenerate webhook HMAC secret
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'update')
+  if (authorization.response) return authorization.response
   const { id } = await params
 
-  const script = await prisma.script.findUnique({ where: { id } })
+  const script = await prisma.script.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
   if (!script) {
     return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   }
 
   // Generate a 32-byte random hex secret
   const newSecret = crypto.randomBytes(32).toString('hex')
-  const secretReference = await storeResourceSecret(prisma, { resourceType: 'script', resourceId: id, field: 'webhook-signing', name: `script:${id}:webhook-signing` }, newSecret)
+  const secretReference = await storeResourceSecret(prisma, { resourceType: 'script', resourceId: id, field: 'webhook-signing', name: `script:${id}:webhook-signing`, workspaceId: authorization.context.workspaceId }, newSecret, authorization.context.userId)
 
   await prisma.script.update({
     where: { id },
@@ -33,10 +36,12 @@ export async function PUT(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'update')
+  if (authorization.response) return authorization.response
   const { id } = await params
   const { require_signature } = await req.json()
 
-  const script = await prisma.script.findUnique({ where: { id } })
+  const script = await prisma.script.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
   if (!script) {
     return NextResponse.json({ error: 'Script not found' }, { status: 404 })
   }
@@ -46,9 +51,9 @@ export async function PUT(
   let revealedSecret: string | null = null
   if (require_signature && !script.webhookSecret) {
     revealedSecret = crypto.randomBytes(32).toString('hex')
-    newSecret = await storeResourceSecret(prisma, { resourceType: 'script', resourceId: id, field: 'webhook-signing', name: `script:${id}:webhook-signing` }, revealedSecret)
+    newSecret = await storeResourceSecret(prisma, { resourceType: 'script', resourceId: id, field: 'webhook-signing', name: `script:${id}:webhook-signing`, workspaceId: authorization.context.workspaceId }, revealedSecret, authorization.context.userId)
   } else if (require_signature && script.webhookSecret && !script.webhookSecret.startsWith('secretref:')) {
-    newSecret = await storeResourceSecret(prisma, { resourceType: 'script', resourceId: id, field: 'webhook-signing', name: `script:${id}:webhook-signing` }, script.webhookSecret)
+    newSecret = await storeResourceSecret(prisma, { resourceType: 'script', resourceId: id, field: 'webhook-signing', name: `script:${id}:webhook-signing`, workspaceId: authorization.context.workspaceId }, script.webhookSecret, authorization.context.userId)
   }
 
   const updated = await prisma.script.update({

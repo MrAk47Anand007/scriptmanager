@@ -5,16 +5,19 @@ import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import { sanitizeScriptFilename } from '@/lib/executionSafety'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 // POST /api/scripts/[id]/duplicate — create a copy of a script
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'create')
+  if (authorization.response) return authorization.response
   const { id } = await params
 
-  const original = await prisma.script.findUnique({
-    where: { id },
+  const original = await prisma.script.findFirst({
+    where: { id, workspaceId: authorization.context.workspaceId },
     include: { tags: { include: { tag: true } }, collection: true }
   })
 
@@ -39,7 +42,7 @@ export async function POST(
   const baseName = `${original.name} (copy)`
   let newName = baseName
   let counter = 2
-  while (await prisma.script.findFirst({ where: { name: newName } })) {
+  while (await prisma.script.findFirst({ where: { name: newName, workspaceId: authorization.context.workspaceId } })) {
     newName = `${baseName} ${counter++}`
   }
 
@@ -61,6 +64,7 @@ export async function POST(
 
   const copy = await prisma.script.create({
     data: {
+      workspaceId: authorization.context.workspaceId,
       name: newName,
       filename: newFilename,
       description: original.description,

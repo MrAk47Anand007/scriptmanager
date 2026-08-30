@@ -5,13 +5,14 @@ import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import { buildLinkedScriptName, getFolderDisplayName, inferScriptLanguage, listScriptFiles } from '@/lib/linkedFolders'
 import { cache } from '@/lib/cache'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
-async function buildUniqueScriptName(baseName: string, currentSourcePath: string): Promise<string> {
+async function buildUniqueScriptName(baseName: string, currentSourcePath: string, workspaceId: string): Promise<string> {
   let candidate = baseName
   let suffix = 2
 
   while (true) {
-    const existing = await prisma.script.findFirst({ where: { name: candidate } })
+    const existing = await prisma.script.findFirst({ where: { name: candidate, workspaceId } })
     if (!existing || existing.sourcePath === currentSourcePath) {
       return candidate
     }
@@ -21,6 +22,9 @@ async function buildUniqueScriptName(baseName: string, currentSourcePath: string
 }
 
 export async function POST(req: Request) {
+  const authorization = await authorizeRequest(req, 'script', 'create')
+  if (authorization.response) return authorization.response
+  const workspaceId = authorization.context.workspaceId
   let body: {
     folderPath?: string
     mode?: 'temporary' | 'collection'
@@ -53,11 +57,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'No supported script files found in that folder' }, { status: 400 })
   }
 
-  await cache.del('all_scripts')
+  await cache.del(`all_scripts:${workspaceId}`)
 
   if (mode === 'temporary') {
     const tempCollections = await prisma.collection.findMany({
-      where: { isTemporary: true, folderPath: { not: null } },
+      where: { isTemporary: true, folderPath: { not: null }, workspaceId },
       select: { id: true },
     })
 
@@ -69,12 +73,13 @@ export async function POST(req: Request) {
   }
 
   let collection = mode === 'collection'
-    ? await prisma.collection.findFirst({ where: { folderPath: resolvedFolderPath } })
+    ? await prisma.collection.findFirst({ where: { folderPath: resolvedFolderPath, workspaceId } })
     : null
 
   if (!collection) {
     collection = await prisma.collection.create({
       data: {
+        workspaceId,
         name: (body.collectionName?.trim() || getFolderDisplayName(resolvedFolderPath)) + (mode === 'temporary' ? ' (Temporary)' : ''),
         folderPath: resolvedFolderPath,
         isTemporary: mode === 'temporary',
@@ -117,7 +122,8 @@ export async function POST(req: Request) {
     const baseName = buildLinkedScriptName(resolvedFolderPath, filePath)
     const uniqueName = await buildUniqueScriptName(
       `${getFolderDisplayName(resolvedFolderPath)}/${baseName}`,
-      filePath
+      filePath,
+      workspaceId
     )
     const filename = path.basename(filePath)
     const language = inferScriptLanguage(filePath)
@@ -140,6 +146,7 @@ export async function POST(req: Request) {
 
     const created = await prisma.script.create({
       data: {
+        workspaceId,
         name: uniqueName,
         filename,
         sourcePath: filePath,

@@ -3,11 +3,14 @@ import { prisma } from '@/lib/db'
 import fs from 'fs'
 import { getScriptFilePath } from '@/lib/scriptRunner'
 import { cache } from '@/lib/cache'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function PUT(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'update')
+  if (authorization.response) return authorization.response
   const { id } = await params
   const {
     name,
@@ -23,7 +26,7 @@ export async function PUT(
     remote_prefix,
   } = await req.json()
 
-  const collection = await prisma.collection.findUnique({ where: { id } })
+  const collection = await prisma.collection.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
   if (!collection) {
     return NextResponse.json({ error: 'Collection not found' }, { status: 404 })
   }
@@ -33,6 +36,14 @@ export async function PUT(
     if (!provider) {
       return NextResponse.json({ error: 'Storage provider not found' }, { status: 400 })
     }
+  }
+  if (project_id) {
+    const project = await prisma.project.findFirst({ where: { id: project_id, workspaceId: authorization.context.workspaceId } })
+    if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+  }
+  if (parent_id) {
+    const parent = await prisma.collection.findFirst({ where: { id: parent_id, workspaceId: authorization.context.workspaceId } })
+    if (!parent) return NextResponse.json({ error: 'Parent collection not found' }, { status: 404 })
   }
 
   const updated = await prisma.collection.update({
@@ -74,11 +85,13 @@ export async function DELETE(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'delete')
+  if (authorization.response) return authorization.response
   const { id } = await params
   const { searchParams } = new URL(req.url)
   const hardDelete = searchParams.get('hardDelete') === 'true'
 
-  const collection = await prisma.collection.findUnique({ where: { id } })
+  const collection = await prisma.collection.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
   if (!collection) {
     return NextResponse.json({ error: 'Collection not found' }, { status: 404 })
   }

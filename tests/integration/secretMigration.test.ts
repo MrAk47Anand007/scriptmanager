@@ -42,7 +42,7 @@ describe('secret integration migration', () => {
   })
 
   it('stores secret script environment values as opaque vault references', async () => {
-    const response = await POST(new Request('http://localhost/api/scripts/x/env', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: 'DEPLOY_TOKEN', value: 'migration-plaintext', is_secret: true }) }), context)
+    const response = await POST(new Request('http://localhost/api/scripts/x/env', { method: 'POST', headers: { cookie: sessionCookie, 'content-type': 'application/json' }, body: JSON.stringify({ key: 'DEPLOY_TOKEN', value: 'migration-plaintext', is_secret: true }) }), context)
     expect(response.status).toBe(200)
     const env = await prisma.scriptEnvVar.findFirstOrThrow({ where: { scriptId: 'script_phase5_migration', key: 'DEPLOY_TOKEN' } })
     expect(env.value).toMatch(/^secretref:/)
@@ -105,7 +105,7 @@ describe('secret integration migration', () => {
   })
 
   it('stores script and workflow webhook secrets as vault references while revealing new values once', async () => {
-    const scriptResponse = await rotateScriptWebhook(new Request('http://localhost/api/scripts/x/webhook/secret', { method: 'POST' }), context)
+    const scriptResponse = await rotateScriptWebhook(new Request('http://localhost/api/scripts/x/webhook/secret', { method: 'POST', headers: { cookie: sessionCookie } }), context)
     const scriptBody = await scriptResponse.json()
     expect(scriptBody.webhook_secret).toBeTruthy()
     const script = await prisma.script.findUniqueOrThrow({ where: { id: 'script_phase5_migration' } })

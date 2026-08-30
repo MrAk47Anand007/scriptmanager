@@ -111,6 +111,7 @@ model Build {
 
 model Collection {
   id                     String   @id @default(uuid())
+  workspaceId            String   @default("default") @map("workspace_id")
   name                   String
   description            String   @default("")
   folderPath             String?  @map("folder_path")
@@ -133,6 +134,7 @@ model Collection {
   children        Collection[]     @relation("CollectionHierarchy")
   storageProvider StorageProvider? @relation(fields: [storageProviderId], references: [id], onDelete: SetNull)
 
+  @@index([workspaceId, name])
   @@map("collections")
 }
 

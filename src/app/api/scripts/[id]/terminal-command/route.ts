@@ -2,13 +2,16 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getScriptResolvedFilePath } from '@/lib/scriptRunner'
 import { buildLocalTerminalCommand } from '@/lib/executionSafety'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authorization = await authorizeRequest(req, 'script', 'read')
+  if (authorization.response) return authorization.response
   const { id } = await params
-  const script = await prisma.script.findUnique({ where: { id } })
+  const script = await prisma.script.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } })
 
   if (!script) {
     return NextResponse.json({ error: 'Script not found' }, { status: 404 })
