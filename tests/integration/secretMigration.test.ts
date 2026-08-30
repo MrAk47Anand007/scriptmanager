@@ -96,7 +96,7 @@ describe('secret integration migration', () => {
   })
 
   it('stores API authentication fields as vault references', async () => {
-    const response = await createApiRequest(new Request('http://localhost/api/api-requests', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Vault API', url: 'https://example.com', auth_type: 'bearer', auth_config: JSON.stringify({ token: 'api-migration-plaintext' }) }) }))
+    const response = await createApiRequest(new Request('http://localhost/api/api-requests', { method: 'POST', headers: { cookie: sessionCookie, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Vault API', url: 'https://example.com', auth_type: 'bearer', auth_config: JSON.stringify({ token: 'api-migration-plaintext' }) }) }))
     expect(response.status).toBe(200)
     const request = await prisma.apiRequest.findFirstOrThrow({ where: { name: 'Vault API' } })
     const auth = JSON.parse(request.authConfig)

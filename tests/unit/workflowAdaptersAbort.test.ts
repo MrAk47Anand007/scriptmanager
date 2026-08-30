@@ -5,10 +5,10 @@ const { prismaMock, emitters, ensureBuildEmitterMock, executeScriptAsyncMock, ki
   const emitters = new Map<string, EventEmitter>()
   return {
     prismaMock: {
-      script: { findUniqueOrThrow: vi.fn() },
+      script: { findFirst: vi.fn() },
       build: { create: vi.fn(), findUniqueOrThrow: vi.fn() },
-      apiRequest: { findUniqueOrThrow: vi.fn() },
-      serverProfile: { findUniqueOrThrow: vi.fn() },
+      apiRequest: { findFirst: vi.fn() },
+      serverProfile: { findFirst: vi.fn() },
       remoteExecution: { create: vi.fn(), update: vi.fn(async () => ({})), findUniqueOrThrow: vi.fn() },
     },
     emitters,
@@ -55,7 +55,7 @@ describe('production workflow adapters', () => {
   })
 
   it('waits for build completion and returns success payload', async () => {
-    prismaMock.script.findUniqueOrThrow.mockResolvedValue({ id: 's1', filename: 'a.py' })
+    prismaMock.script.findFirst.mockResolvedValue({ id: 's1', filename: 'a.py' })
     prismaMock.build.create.mockResolvedValue({ id: 'b1' })
     prismaMock.build.findUniqueOrThrow.mockResolvedValue({ id: 'b1', status: 'success', exitCode: 0 })
     let finish!: () => void
@@ -69,7 +69,7 @@ describe('production workflow adapters', () => {
   })
 
   it('kills the build and reports cancellation on abort mid-run', async () => {
-    prismaMock.script.findUniqueOrThrow.mockResolvedValue({ id: 's2', filename: 'b.sh' })
+    prismaMock.script.findFirst.mockResolvedValue({ id: 's2', filename: 'b.sh' })
     prismaMock.build.create.mockResolvedValue({ id: 'b2' })
     const controller = new AbortController()
     let release!: () => void
@@ -83,7 +83,7 @@ describe('production workflow adapters', () => {
   })
 
   it('throws when the finished build did not succeed', async () => {
-    prismaMock.script.findUniqueOrThrow.mockResolvedValue({ id: 's3', filename: 'c.py' })
+    prismaMock.script.findFirst.mockResolvedValue({ id: 's3', filename: 'c.py' })
     prismaMock.build.create.mockResolvedValue({ id: 'b3' })
     prismaMock.build.findUniqueOrThrow.mockResolvedValue({ id: 'b3', status: 'timeout', exitCode: 124 })
     let finish!: () => void
@@ -96,13 +96,13 @@ describe('production workflow adapters', () => {
 
   it('passes the signal through to API requests and remote executions', async () => {
     const signal = new AbortController().signal
-    prismaMock.apiRequest.findUniqueOrThrow.mockResolvedValue({ id: 'r1', collectionId: null, method: 'GET', url: 'https://example.com', headers: '[]', queryParams: '[]', variables: '[]', requestOptions: '{}', preRequestScript: null, testScript: null, responseMappings: '[]', bodyType: 'none', body: '', authType: 'none', authConfig: '{}' })
+    prismaMock.apiRequest.findFirst.mockResolvedValue({ id: 'r1', collectionId: null, method: 'GET', url: 'https://example.com', headers: '[]', queryParams: '[]', variables: '[]', requestOptions: '{}', preRequestScript: null, testScript: null, responseMappings: '[]', bodyType: 'none', body: '', authType: 'none', authConfig: '{}' })
     executeApiRequestMock.mockResolvedValue({ ok: true, status: 200 })
     await productionWorkflowAdapters.runApiRequest({ requestId: 'r1' }, {}, signal)
     expect(executeApiRequestMock).toHaveBeenCalledWith(expect.objectContaining({ signal }))
 
-    prismaMock.script.findUniqueOrThrow.mockResolvedValue({ id: 's4', filename: 'd.sh', name: 'd' })
-    prismaMock.serverProfile.findUniqueOrThrow.mockResolvedValue({ id: 'p1', host: 'h', name: 'p' })
+    prismaMock.script.findFirst.mockResolvedValue({ id: 's4', filename: 'd.sh', name: 'd' })
+    prismaMock.serverProfile.findFirst.mockResolvedValue({ id: 'p1', host: 'h', name: 'p' })
     prismaMock.remoteExecution.create.mockResolvedValue({ id: 're1' })
     prismaMock.remoteExecution.findUniqueOrThrow.mockResolvedValue({ id: 're1', status: 'success', exitCode: 0 })
     await productionWorkflowAdapters.runRemoteCommand({ scriptId: 's4', profileId: 'p1' }, {}, signal)

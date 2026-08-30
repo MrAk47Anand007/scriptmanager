@@ -23,6 +23,8 @@ import {
   writeJsonFile,
 } from '../src/lib/workspaceLayout'
 import { resolveApiAuthConfig, vaultApiAuthConfig } from '../src/lib/secrets/apiAuth'
+import { apiGlobalsSettingKey, LEGACY_API_GLOBALS_KEY } from '../src/lib/apiWorkspace'
+import { createDesktopActorContext } from '../src/lib/runtime/trustedContext'
 
 const prisma = new PrismaClient({
   log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
@@ -30,8 +32,7 @@ const prisma = new PrismaClient({
 
 const MAX_BODY_SIZE = 1024 * 1024
 const PRIVATE_HOST_ERROR = 'Requests to localhost or private network addresses are blocked by default'
-const COOKIE_JAR_KEY = 'api_cookie_jar'
-const API_GLOBALS_KEY = 'api_global_variables'
+const COOKIE_JAR_KEY_PREFIX = 'api_cookie_jar:'
 
 type ApiCollectionDto = {
   id: string
@@ -147,6 +148,7 @@ type BinaryBodyPayload = {
 type CookieJarStore = Record<string, Record<string, string>>
 
 export type DesktopApiRequestInput = {
+  workspaceId: string
   requestId?: string | null
   collectionId?: string | null
   environmentId?: string | null
@@ -329,8 +331,14 @@ async function validateProxyTarget(rawUrl: string): Promise<{ ok: true; url: URL
   return { ok: true, url: parsedUrl }
 }
 
-async function readCookieJar(): Promise<CookieJarStore> {
-  const setting = await prisma.setting.findUnique({ where: { key: COOKIE_JAR_KEY } })
+async function readApiGlobalsSetting(workspaceId: string) {
+  const scoped = await prisma.setting.findUnique({ where: { key: apiGlobalsSettingKey(workspaceId) } })
+  if (scoped || workspaceId !== 'default') return scoped
+  return prisma.setting.findUnique({ where: { key: LEGACY_API_GLOBALS_KEY } })
+}
+
+async function readCookieJar(workspaceId: string): Promise<CookieJarStore> {
+  const setting = await prisma.setting.findUnique({ where: { key: `${COOKIE_JAR_KEY_PREFIX}${workspaceId}` } })
   if (!setting?.value) return {}
   try {
     return JSON.parse(setting.value) as CookieJarStore
@@ -339,11 +347,11 @@ async function readCookieJar(): Promise<CookieJarStore> {
   }
 }
 
-async function writeCookieJar(jar: CookieJarStore) {
+async function writeCookieJar(workspaceId: string, jar: CookieJarStore) {
   await prisma.setting.upsert({
-    where: { key: COOKIE_JAR_KEY },
+    where: { key: `${COOKIE_JAR_KEY_PREFIX}${workspaceId}` },
     update: { value: JSON.stringify(jar) },
-    create: { key: COOKIE_JAR_KEY, value: JSON.stringify(jar) },
+    create: { key: `${COOKIE_JAR_KEY_PREFIX}${workspaceId}`, value: JSON.stringify(jar) },
   })
 }
 
@@ -384,11 +392,13 @@ function getValueAtPath(input: unknown, targetPath: string): unknown {
 
 async function applyResponseMappings({
   requestId,
+  workspaceId,
   environmentId,
   responseBody,
   responseMappings,
 }: {
   requestId?: string | null
+  workspaceId: string
   environmentId?: string | null
   responseBody: string
   responseMappings: ApiResponseMappingRow[]
@@ -410,9 +420,9 @@ async function applyResponseMappings({
   }
 
   const [requestRecord, environmentRecord, globalRecord] = await Promise.all([
-    requestId ? (prisma.apiRequest as any).findUnique({ where: { id: requestId } }) as Promise<any> : Promise.resolve(null),
-    environmentId ? prisma.apiEnvironment.findUnique({ where: { id: environmentId } }) : Promise.resolve(null),
-    prisma.setting.findUnique({ where: { key: API_GLOBALS_KEY } }),
+    requestId ? (prisma.apiRequest as any).findFirst({ where: { id: requestId, workspaceId } }) as Promise<any> : Promise.resolve(null),
+    environmentId ? prisma.apiEnvironment.findFirst({ where: { id: environmentId, workspaceId } }) : Promise.resolve(null),
+    readApiGlobalsSetting(workspaceId),
   ])
   const requestRows = requestRecord ? parseVariableRows(requestRecord.variables) : []
   const environmentRows = environmentRecord ? parseVariableRows(environmentRecord.variables) : []
@@ -477,13 +487,13 @@ async function applyResponseMappings({
       ? prisma.apiEnvironment.update({ where: { id: environmentRecord.id }, data: { variables: stringifyVariableRows(environmentRows) } })
       : Promise.resolve(),
     prisma.setting.upsert({
-      where: { key: API_GLOBALS_KEY },
+      where: { key: apiGlobalsSettingKey(workspaceId) },
       update: { value: stringifyVariableRows(globalRows) },
-      create: { key: API_GLOBALS_KEY, value: stringifyVariableRows(globalRows) },
+      create: { key: apiGlobalsSettingKey(workspaceId), value: stringifyVariableRows(globalRows) },
     }),
   ])
 
-  await syncApiWorkspaceToDisk()
+  await syncApiWorkspaceToDisk(workspaceId)
 
   return updates
 }
@@ -582,18 +592,20 @@ async function getApiWorkspaceLayout() {
   return layout
 }
 
-async function syncApiWorkspaceToDisk() {
+async function syncApiWorkspaceToDisk(workspaceId = 'default') {
   const layout = await getApiWorkspaceLayout()
   const [collections, requests, environments, globalSetting] = await Promise.all([
     prisma.apiCollection.findMany({
+      where: { workspaceId },
       orderBy: { name: 'asc' },
       include: { _count: { select: { requests: true } } },
     }),
     (prisma.apiRequest as any).findMany({
+      where: { workspaceId },
       orderBy: { updatedAt: 'desc' },
     }) as Promise<any[]>,
-    prisma.apiEnvironment.findMany({ orderBy: { name: 'asc' } }),
-    prisma.setting.findUnique({ where: { key: API_GLOBALS_KEY } }),
+    prisma.apiEnvironment.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } }),
+    readApiGlobalsSetting(workspaceId),
   ])
 
   clearDirectoryContents(layout.apiCollectionsRoot, [
@@ -641,17 +653,24 @@ async function syncApiWorkspaceToDisk() {
 }
 
 export async function listApiCollections(): Promise<ApiCollectionDto[]> {
+  const actor = await createDesktopActorContext(prisma)
   const collections = await prisma.apiCollection.findMany({
+    where: { workspaceId: actor.workspaceId },
     orderBy: { name: 'asc' },
     include: { _count: { select: { requests: true } } },
   })
-  await syncApiWorkspaceToDisk()
+  await syncApiWorkspaceToDisk(actor.workspaceId)
   return collections.map(serializeApiCollection)
 }
 
 export async function saveApiCollection(payload: { id?: string; name: string; description?: string; variables?: string }) {
+  const actor = await createDesktopActorContext(prisma)
   if (!payload.name?.trim()) {
     throw new Error('Name is required')
+  }
+  if (payload.id) {
+    const existing = await prisma.apiCollection.findFirst({ where: { id: payload.id, workspaceId: actor.workspaceId } })
+    if (!existing) throw new Error('Collection not found')
   }
   const record = payload.id
     ? await prisma.apiCollection.update({
@@ -660,39 +679,53 @@ export async function saveApiCollection(payload: { id?: string; name: string; de
       include: { _count: { select: { requests: true } } },
     })
     : await prisma.apiCollection.create({
-      data: { name: payload.name.trim(), description: payload.description ?? '', variables: payload.variables ?? '[]' },
+      data: { workspaceId: actor.workspaceId, name: payload.name.trim(), description: payload.description ?? '', variables: payload.variables ?? '[]' },
       include: { _count: { select: { requests: true } } },
     })
-  await syncApiWorkspaceToDisk()
+  await syncApiWorkspaceToDisk(actor.workspaceId)
   return serializeApiCollection(record)
 }
 
 export async function deleteApiCollection(id: string) {
-  await prisma.apiCollection.delete({ where: { id } })
-  await syncApiWorkspaceToDisk()
+  const actor = await createDesktopActorContext(prisma)
+  const deleted = await prisma.apiCollection.deleteMany({ where: { id, workspaceId: actor.workspaceId } })
+  if (deleted.count === 0) throw new Error('Collection not found')
+  await syncApiWorkspaceToDisk(actor.workspaceId)
   return id
 }
 
 export async function listApiRequests(collectionId?: string | null): Promise<ApiRequestDto[]> {
+  const actor = await createDesktopActorContext(prisma)
   const requests = await (prisma.apiRequest as any).findMany({
-    where: collectionId ? { collectionId } : undefined,
+    where: { workspaceId: actor.workspaceId, ...(collectionId ? { collectionId } : {}) },
     orderBy: { updatedAt: 'desc' },
   }) as any[]
-  await syncApiWorkspaceToDisk()
+  await syncApiWorkspaceToDisk(actor.workspaceId)
   return requests.map(serializeApiRequest)
 }
 
 export async function getApiRequest(id: string): Promise<ApiRequestDto | null> {
-  const request = await (prisma.apiRequest as any).findUnique({ where: { id } }) as any
+  const actor = await createDesktopActorContext(prisma)
+  const request = await (prisma.apiRequest as any).findFirst({ where: { id, workspaceId: actor.workspaceId } }) as any
   return request ? serializeApiRequest(request) : null
 }
 
 export async function saveApiRequest(payload: Record<string, any>): Promise<ApiRequestDto> {
+  const actor = await createDesktopActorContext(prisma)
   if (typeof payload.name !== 'string' || !payload.name.trim()) {
     throw new Error('Name is required')
   }
   const requestId = payload.id ?? randomUUID()
+  if (payload.id) {
+    const existing = await (prisma.apiRequest as any).findFirst({ where: { id: payload.id, workspaceId: actor.workspaceId } }) as any
+    if (!existing) throw new Error('Request not found')
+  }
+  if (payload.collection_id) {
+    const collection = await prisma.apiCollection.findFirst({ where: { id: payload.collection_id, workspaceId: actor.workspaceId } })
+    if (!collection) throw new Error('Collection not found')
+  }
   const data = {
+    workspaceId: actor.workspaceId,
     name: payload.name.trim(),
     method: payload.method ?? 'GET',
     url: payload.url ?? '',
@@ -706,31 +739,39 @@ export async function saveApiRequest(payload: Record<string, any>): Promise<ApiR
     bodyType: payload.body_type ?? 'none',
     body: payload.body ?? '',
     authType: payload.auth_type ?? 'none',
-    authConfig: await vaultApiAuthConfig(prisma, requestId, payload.auth_config ?? '{}'),
+    authConfig: await vaultApiAuthConfig(prisma, requestId, payload.auth_config ?? '{}', { workspaceId: actor.workspaceId, actorId: actor.actorId }),
     collectionId: payload.collection_id ?? null,
   }
   const request = payload.id
     ? await (prisma.apiRequest as any).update({ where: { id: payload.id }, data })
     : await (prisma.apiRequest as any).create({ data: { id: requestId, ...data } })
-  await syncApiWorkspaceToDisk()
+  await syncApiWorkspaceToDisk(actor.workspaceId)
   return serializeApiRequest(request)
 }
 
 export async function deleteApiRequest(id: string) {
-  await prisma.apiRequest.delete({ where: { id } })
-  await syncApiWorkspaceToDisk()
+  const actor = await createDesktopActorContext(prisma)
+  const deleted = await prisma.apiRequest.deleteMany({ where: { id, workspaceId: actor.workspaceId } })
+  if (deleted.count === 0) throw new Error('Request not found')
+  await syncApiWorkspaceToDisk(actor.workspaceId)
   return id
 }
 
 export async function listApiEnvironments(): Promise<ApiEnvironmentDto[]> {
-  const environments = await prisma.apiEnvironment.findMany({ orderBy: { name: 'asc' } })
-  await syncApiWorkspaceToDisk()
+  const actor = await createDesktopActorContext(prisma)
+  const environments = await prisma.apiEnvironment.findMany({ where: { workspaceId: actor.workspaceId }, orderBy: { name: 'asc' } })
+  await syncApiWorkspaceToDisk(actor.workspaceId)
   return environments.map(serializeApiEnvironment)
 }
 
 export async function saveApiEnvironment(payload: { id?: string; name: string; variables?: string }) {
+  const actor = await createDesktopActorContext(prisma)
   if (!payload.name?.trim()) {
     throw new Error('Name is required')
+  }
+  if (payload.id) {
+    const existing = await prisma.apiEnvironment.findFirst({ where: { id: payload.id, workspaceId: actor.workspaceId } })
+    if (!existing) throw new Error('Environment not found')
   }
   const environment = payload.id
     ? await prisma.apiEnvironment.update({
@@ -738,36 +779,43 @@ export async function saveApiEnvironment(payload: { id?: string; name: string; v
       data: { name: payload.name.trim(), variables: payload.variables ?? '[]' },
     })
     : await prisma.apiEnvironment.create({
-      data: { name: payload.name.trim(), variables: payload.variables ?? '[]' },
+      data: { workspaceId: actor.workspaceId, name: payload.name.trim(), variables: payload.variables ?? '[]' },
     })
-  await syncApiWorkspaceToDisk()
+  await syncApiWorkspaceToDisk(actor.workspaceId)
   return serializeApiEnvironment(environment)
 }
 
 export async function deleteApiEnvironment(id: string) {
-  await prisma.apiEnvironment.delete({ where: { id } })
-  await syncApiWorkspaceToDisk()
+  const actor = await createDesktopActorContext(prisma)
+  const deleted = await prisma.apiEnvironment.deleteMany({ where: { id, workspaceId: actor.workspaceId } })
+  if (deleted.count === 0) throw new Error('Environment not found')
+  await syncApiWorkspaceToDisk(actor.workspaceId)
   return id
 }
 
 export async function readApiGlobals() {
-  const setting = await prisma.setting.findUnique({ where: { key: API_GLOBALS_KEY } })
-  await syncApiWorkspaceToDisk()
+  const actor = await createDesktopActorContext(prisma)
+  const setting = await readApiGlobalsSetting(actor.workspaceId)
+  await syncApiWorkspaceToDisk(actor.workspaceId)
   return { variables: setting?.value ?? '[]' }
 }
 
 export async function saveApiGlobals(variables: string) {
+  const actor = await createDesktopActorContext(prisma)
+  const key = apiGlobalsSettingKey(actor.workspaceId)
   const setting = await prisma.setting.upsert({
-    where: { key: API_GLOBALS_KEY },
+    where: { key },
     update: { value: variables ?? '[]' },
-    create: { key: API_GLOBALS_KEY, value: variables ?? '[]' },
+    create: { key, value: variables ?? '[]' },
   })
-  await syncApiWorkspaceToDisk()
+  await syncApiWorkspaceToDisk(actor.workspaceId)
   return { variables: setting.value ?? '[]' }
 }
 
 export async function listApiHistory(): Promise<ApiHistoryDto[]> {
+  const actor = await createDesktopActorContext(prisma)
   const history = await (prisma.apiHistory as any).findMany({
+    where: { workspaceId: actor.workspaceId },
     orderBy: { createdAt: 'desc' },
     take: 100,
   }) as any[]
@@ -775,12 +823,15 @@ export async function listApiHistory(): Promise<ApiHistoryDto[]> {
 }
 
 export async function clearApiHistory() {
-  await prisma.apiHistory.deleteMany({})
+  const actor = await createDesktopActorContext(prisma)
+  await prisma.apiHistory.deleteMany({ where: { workspaceId: actor.workspaceId } })
   return { success: true }
 }
 
 export async function listApiCollectionRuns(): Promise<ApiCollectionRunDto[]> {
+  const actor = await createDesktopActorContext(prisma)
   const runs = await (prisma.apiCollectionRun as any).findMany({
+    where: { collection: { workspaceId: actor.workspaceId } },
     orderBy: { startedAt: 'desc' },
     take: 50,
   }) as any[]
@@ -789,13 +840,13 @@ export async function listApiCollectionRuns(): Promise<ApiCollectionRunDto[]> {
 
 async function executeDesktopApiRequest(input: DesktopApiRequestInput) {
   const [environment, collection, globalSetting] = await Promise.all([
-    input.environmentId ? prisma.apiEnvironment.findUnique({ where: { id: input.environmentId } }) : Promise.resolve(null),
-    input.collectionId ? prisma.apiCollection.findUnique({ where: { id: input.collectionId } }) : Promise.resolve(null),
-    prisma.setting.findUnique({ where: { key: API_GLOBALS_KEY } }),
+    input.environmentId ? prisma.apiEnvironment.findFirst({ where: { id: input.environmentId, workspaceId: input.workspaceId } }) : Promise.resolve(null),
+    input.collectionId ? prisma.apiCollection.findFirst({ where: { id: input.collectionId, workspaceId: input.workspaceId } }) : Promise.resolve(null),
+    readApiGlobalsSetting(input.workspaceId),
   ])
 
   const runtimeAuthConfig = input.requestId
-    ? await resolveApiAuthConfig(prisma, input.requestId, input.authConfig ?? {})
+    ? await resolveApiAuthConfig(prisma, input.requestId, input.authConfig ?? {}, { workspaceId: input.workspaceId, actorId: 'desktop-api-runtime' })
     : input.authConfig ?? {}
   const materialized = materializeApiRequest(
     {
@@ -859,7 +910,7 @@ async function executeDesktopApiRequest(input: DesktopApiRequestInput) {
 
   const finalHeaders: Record<string, string> = {}
   const useCookieJar = Boolean(runtimeRequest.requestOptions?.useCookieJar)
-  const cookieJar = useCookieJar ? await readCookieJar() : {}
+  const cookieJar = useCookieJar ? await readCookieJar(input.workspaceId) : {}
   runtimeRequest.headers.filter((header) => header.enabled && header.key).forEach((header) => {
     finalHeaders[header.key] = header.value
   })
@@ -974,7 +1025,7 @@ async function executeDesktopApiRequest(input: DesktopApiRequestInput) {
         if (pair) jarForHost[pair.name] = pair.value
       }
       cookieJar[target.url.hostname] = jarForHost
-      await writeCookieJar(cookieJar)
+      await writeCookieJar(input.workspaceId, cookieJar)
     }
   }
 
@@ -995,6 +1046,7 @@ async function executeDesktopApiRequest(input: DesktopApiRequestInput) {
   const testResults = testExecution.testResults
   const mappingResults = await applyResponseMappings({
     requestId: input.requestId ?? null,
+    workspaceId: input.workspaceId,
     environmentId: input.environmentId ?? null,
     responseBody: responseBodyText,
     responseMappings: input.responseMappings ?? [],
@@ -1002,6 +1054,7 @@ async function executeDesktopApiRequest(input: DesktopApiRequestInput) {
 
   await (prisma.apiHistory as any).create({
     data: {
+      workspaceId: input.workspaceId,
       requestId: input.requestId ?? null,
       method: runtimeRequest.method ?? 'GET',
       url: finalUrl,
@@ -1035,8 +1088,9 @@ async function executeDesktopApiRequest(input: DesktopApiRequestInput) {
   }
 }
 
-export async function sendApiRequest(payload: DesktopApiRequestInput) {
-  const result = await executeDesktopApiRequest(payload)
+export async function sendApiRequest(payload: Omit<DesktopApiRequestInput, 'workspaceId'>) {
+  const actor = await createDesktopActorContext(prisma)
+  const result = await executeDesktopApiRequest({ ...payload, workspaceId: actor.workspaceId })
   if (!result.ok) {
     return result
   }
@@ -1078,9 +1132,10 @@ export async function sendApiRequest(payload: DesktopApiRequestInput) {
 }
 
 export async function runApiCollection(payload: { collectionId: string; environmentId: string | null }) {
-  const collection = await prisma.apiCollection.findUnique({ where: { id: payload.collectionId } })
+  const actor = await createDesktopActorContext(prisma)
+  const collection = await prisma.apiCollection.findFirst({ where: { id: payload.collectionId, workspaceId: actor.workspaceId } })
   const environment = payload.environmentId
-    ? await prisma.apiEnvironment.findUnique({ where: { id: payload.environmentId } })
+    ? await prisma.apiEnvironment.findFirst({ where: { id: payload.environmentId, workspaceId: actor.workspaceId } })
     : null
 
   if (!collection) {
@@ -1088,7 +1143,7 @@ export async function runApiCollection(payload: { collectionId: string; environm
   }
 
   const requests = await (prisma.apiRequest as any).findMany({
-    where: { collectionId: payload.collectionId },
+    where: { collectionId: payload.collectionId, workspaceId: actor.workspaceId },
     orderBy: { createdAt: 'asc' },
   }) as any[]
 
@@ -1116,6 +1171,7 @@ export async function runApiCollection(payload: { collectionId: string; environm
   for (const request of requests) {
     try {
       const result = await executeDesktopApiRequest({
+        workspaceId: actor.workspaceId,
         requestId: request.id,
         collectionId: request.collectionId,
         environmentId: environment?.id ?? null,
@@ -1131,7 +1187,7 @@ export async function runApiCollection(payload: { collectionId: string; environm
         bodyType: request.bodyType,
         body: request.body,
         authType: request.authType,
-        authConfig: (() => { try { return JSON.parse(request.authConfig) } catch { return {} } })(),
+        authConfig: await resolveApiAuthConfig(prisma, request.id, (() => { try { return JSON.parse(request.authConfig) } catch { return {} } })(), { workspaceId: actor.workspaceId, actorId: actor.actorId }),
       })
 
       if (result.ok) {

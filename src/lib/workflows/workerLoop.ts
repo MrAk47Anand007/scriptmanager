@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/db'
 import { createWorkflowRepository, type WorkflowRepository } from './repository'
-import { productionWorkflowAdapters } from './runtimeAdapters'
+import { createProductionWorkflowAdapters } from './runtimeAdapters'
 import { runClaimedWorkflow } from './worker'
 
 const DEFAULT_POLL_INTERVAL_MS = 1_500
@@ -45,7 +45,7 @@ export function createWorkflowWorkerLoop(options: WorkflowWorkerLoopOptions = {}
     }
     if (!claimed) return null
     try {
-      await runClaimedWorkflow(claimed, repository, productionWorkflowAdapters)
+      await runClaimedWorkflow(claimed, repository, createProductionWorkflowAdapters(claimed.workflow.workspaceId))
     } catch (error) {
       logger.error(`[WorkflowWorker] Run ${claimed.id} crashed:`, error)
       try { await repository.setRunStatus(claimed.id, 'failed', undefined, { message: error instanceof Error ? error.message : String(error) }) } catch {}

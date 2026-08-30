@@ -26,10 +26,12 @@ async function waitForBuildDone(buildId: string, signal?: AbortSignal): Promise<
   })
 }
 
-export const productionWorkflowAdapters: WorkflowAdapters = {
+export function createProductionWorkflowAdapters(workspaceId = 'default'): WorkflowAdapters {
+  return {
   async runScript(config, input, signal) {
     throwIfAborted(signal)
-    const script = await prisma.script.findUniqueOrThrow({ where: { id: String(config.scriptId) } })
+    const script = await prisma.script.findFirst({ where: { id: String(config.scriptId), workspaceId } })
+    if (!script) throw new Error('Script not found')
     const build = await prisma.build.create({ data: { scriptId: script.id, status: 'pending', triggeredBy: 'workflow' } })
     const params = input && typeof input === 'object' ? input as Record<string, string> : undefined
     const done = waitForBuildDone(build.id, signal)
@@ -47,18 +49,21 @@ export const productionWorkflowAdapters: WorkflowAdapters = {
   },
   async runApiRequest(config, input, signal) {
     throwIfAborted(signal)
-    const request = await prisma.apiRequest.findUniqueOrThrow({ where: { id: String(config.requestId) } })
-    const result = await executeApiRequest({ workspaceId: 'default', requestId: request.id, collectionId: request.collectionId, method: request.method, url: request.url, headers: rows(request.headers), queryParams: rows(request.queryParams), variables: rows(request.variables), requestOptions: JSON.parse(request.requestOptions || '{}'), preRequestScript: request.preRequestScript, testScript: request.testScript, responseMappings: rows(request.responseMappings), bodyType: request.bodyType as 'none', body: request.body, authType: request.authType as 'none', authConfig: JSON.parse(request.authConfig || '{}'), signal })
+    const request = await prisma.apiRequest.findFirst({ where: { id: String(config.requestId), workspaceId } })
+    if (!request) throw new Error('API request not found')
+    const result = await executeApiRequest({ workspaceId, requestId: request.id, collectionId: request.collectionId, method: request.method, url: request.url, headers: rows(request.headers), queryParams: rows(request.queryParams), variables: rows(request.variables), requestOptions: JSON.parse(request.requestOptions || '{}'), preRequestScript: request.preRequestScript, testScript: request.testScript, responseMappings: rows(request.responseMappings), bodyType: request.bodyType as 'none', body: request.body, authType: request.authType as 'none', authConfig: JSON.parse(request.authConfig || '{}'), signal })
     if (!result.ok) throw new Error(result.error)
     return result
   },
   async runRemoteCommand(config, input, signal) {
     throwIfAborted(signal)
-    const script = await prisma.script.findUniqueOrThrow({ where: { id: String(config.scriptId) } })
-    const profile = await prisma.serverProfile.findUniqueOrThrow({ where: { id: String(config.profileId) } })
+    const script = await prisma.script.findFirst({ where: { id: String(config.scriptId), workspaceId } })
+    const profile = await prisma.serverProfile.findFirst({ where: { id: String(config.profileId), workspaceId } })
+    if (!script) throw new Error('Script not found')
+    if (!profile) throw new Error('Server profile not found')
     const record = await prisma.remoteExecution.create({ data: { scriptId: script.id, profileId: profile.id, scriptName: script.name, profileName: profile.name, serverHost: profile.host, status: 'approved', triggeredBy: 'workflow', paramValues: JSON.stringify(input ?? {}) } })
     try {
-      await execRemote({ profileId: profile.id, command: buildRemoteCommand(script.filename, typeof config.remotePath === 'string' ? config.remotePath : undefined, input as Record<string,string>), remoteExecId: record.id, signal })
+      await execRemote({ profileId: profile.id, command: buildRemoteCommand(script.filename, typeof config.remotePath === 'string' ? config.remotePath : undefined, input as Record<string,string>), remoteExecId: record.id, workspaceId, signal })
     } finally {
       if (signal?.aborted) await prisma.remoteExecution.update({ where: { id: record.id }, data: { status: 'cancelled', finishedAt: new Date() } }).catch(() => {})
     }
@@ -71,4 +76,7 @@ export const productionWorkflowAdapters: WorkflowAdapters = {
   async runAgent() {
     return { status: 'waiting_approval', output: { desktopHostRequired: true, message: 'Open ScriptManager Desktop to run this agent workflow node.' } }
   },
+  }
 }
+
+export const productionWorkflowAdapters: WorkflowAdapters = createProductionWorkflowAdapters()

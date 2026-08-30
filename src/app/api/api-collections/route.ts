@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
-export async function GET() {
+export async function GET(req: Request) {
+  const authorization = await authorizeRequest(req, 'api', 'read')
+  if (authorization.response) return authorization.response
   const collections = await prisma.apiCollection.findMany({
+    where: { workspaceId: authorization.context.workspaceId },
     orderBy: { name: 'asc' },
     include: { _count: { select: { requests: true } } }
   })
@@ -19,6 +23,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const authorization = await authorizeRequest(req, 'api', 'create')
+  if (authorization.response) return authorization.response
   const { name, description, variables } = await req.json()
 
   if (!name?.trim()) {
@@ -26,7 +32,7 @@ export async function POST(req: Request) {
   }
 
   const collection = await prisma.apiCollection.create({
-    data: { name: name.trim(), description: description ?? '', variables: variables ?? '[]' }
+    data: { workspaceId: authorization.context.workspaceId, name: name.trim(), description: description ?? '', variables: variables ?? '[]' }
   })
 
   return NextResponse.json({

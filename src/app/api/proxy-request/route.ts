@@ -60,7 +60,7 @@ export async function POST(req: Request) {
       bodyType: bodyType ?? 'none',
       body: body ?? '',
       authType: authType ?? 'none',
-      authConfig: requestId ? await resolveApiAuthConfig(prisma, requestId, authConfig ?? {}) : (authConfig ?? {}) as Record<string, string>,
+      authConfig: requestId ? await resolveApiAuthConfig(prisma, requestId, authConfig ?? {}, { workspaceId: actor.workspaceId, actorId: actor.actorId }) : (authConfig ?? {}) as Record<string, string>,
     })
 
     if (!result.ok) {

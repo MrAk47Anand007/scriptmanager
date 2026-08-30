@@ -3,12 +3,12 @@ import { createWorkflowWorkerLoop, type WorkflowWorkerLoopOptions } from '@/lib/
 import { runClaimedWorkflow } from '@/lib/workflows/worker'
 
 vi.mock('@/lib/db', () => ({ prisma: {} }))
-vi.mock('@/lib/workflows/runtimeAdapters', () => ({ productionWorkflowAdapters: {} }))
+vi.mock('@/lib/workflows/runtimeAdapters', () => ({ createProductionWorkflowAdapters: vi.fn(() => ({})) }))
 vi.mock('@/lib/workflows/worker', () => ({ runClaimedWorkflow: vi.fn() }))
 
 const mockedRun = vi.mocked(runClaimedWorkflow)
 
-type ClaimRecord = { id: string }
+type ClaimRecord = { id: string; workflow: { workspaceId: string } }
 
 function fakeRepository(claims: Array<ClaimRecord | null>) {
   const queue = [...claims]
@@ -34,7 +34,7 @@ afterEach(() => {
 
 describe('workflow worker loop', () => {
   it('drains every queued run until the queue is empty', async () => {
-    const repository = fakeRepository([{ id: 'run-1' }, { id: 'run-2' }, null])
+    const repository = fakeRepository([{ id: 'run-1', workflow: { workspaceId: 'default' } }, { id: 'run-2', workflow: { workspaceId: 'default' } }, null])
     const loop = buildLoop(repository)
     const processed = await loop.drain()
     expect(processed).toBe(2)
@@ -43,7 +43,7 @@ describe('workflow worker loop', () => {
   })
 
   it('marks a crashed run failed and keeps draining', async () => {
-    const repository = fakeRepository([{ id: 'run-1' }, { id: 'run-2' }, null])
+    const repository = fakeRepository([{ id: 'run-1', workflow: { workspaceId: 'default' } }, { id: 'run-2', workflow: { workspaceId: 'default' } }, null])
     mockedRun.mockRejectedValueOnce(new Error('boom'))
     const loop = buildLoop(repository)
     const processed = await loop.drain()

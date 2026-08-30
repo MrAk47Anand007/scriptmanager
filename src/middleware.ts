@@ -143,6 +143,7 @@ function apiRequirement(pathname: string, method: string): { resource: RbacResou
           : pathname.startsWith('/api/approvals') ? 'approval'
             : pathname.startsWith('/api/ops') ? 'ops'
               : pathname.includes('/git') ? 'git'
+                : pathname.startsWith('/api/api-') || pathname.startsWith('/api/proxy-request') ? 'api'
                   : pathname.startsWith('/api/workspaces/current/memberships') || pathname.startsWith('/api/workspaces/current/invitations') ? 'member'
                     : pathname.startsWith('/api/workspaces/current/roles') ? 'role'
                   : pathname.startsWith('/api/workspaces/current/sessions') || pathname.startsWith('/api/workspaces/current/grants') ? 'session'

@@ -26,7 +26,7 @@ export function createObservabilityRepository(database: PrismaClient) {
       all.push(...rows.map(row => ({ id: row.id, kind: 'script' as const, name: row.script.name, status: normalizeStatus(row.status), trigger: row.triggeredBy, startedAt: iso(row.startedAt ?? row.createdAt), finishedAt: iso(row.finishedAt), durationMs: duration(row.startedAt ?? row.createdAt, row.finishedAt), retryCount: 0 })))
     }
     if (!filters.kind || filters.kind === 'api') {
-      const rows = await database.apiCollectionRun.findMany({ where: { collectionId: filters.workflowId, startedAt: createdAt }, orderBy: { startedAt: 'desc' }, take: filters.limit })
+      const rows = await database.apiCollectionRun.findMany({ where: { collectionId: filters.workflowId, startedAt: createdAt, collection: filters.workspaceId ? { workspaceId: filters.workspaceId } : undefined }, orderBy: { startedAt: 'desc' }, take: filters.limit })
       all.push(...rows.map(row => ({ id: row.id, kind: 'api' as const, name: row.collectionName, status: normalizeStatus(row.status), trigger: 'manual', startedAt: iso(row.startedAt), finishedAt: iso(row.finishedAt), durationMs: row.durationMs ?? duration(row.startedAt, row.finishedAt), retryCount: 0 })))
     }
     if (!filters.kind || filters.kind === 'remote') {
@@ -66,7 +66,7 @@ export function createObservabilityRepository(database: PrismaClient) {
       return build ? { ...build, webhookPayload: parseRedacted(build.webhookPayload) } : null
     }
     if (kind === 'api') {
-      const apiRun = await database.apiCollectionRun.findUnique({ where: { id } })
+      const apiRun = await database.apiCollectionRun.findFirst({ where: { id, collection: workspaceId ? { workspaceId } : undefined } })
       return apiRun ? { ...apiRun, results: parseRedacted(apiRun.results) } : null
     }
     const remote = await database.remoteExecution.findFirst({ where: { id, profile: workspaceId ? { workspaceId } : undefined } })

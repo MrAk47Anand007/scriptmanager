@@ -4,15 +4,19 @@ import { executeApiRequest } from '@/lib/executeApiRequest'
 import { parseResponseMappingRows, parseVariableRows } from '@/lib/apiRequestMaterialization'
 import { requireTrustedContext } from '@/lib/runtime/trustedContext'
 import { resolveTrustedRequestContext } from '@/lib/rbac/requestContext'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
+import { resolveApiAuthConfig } from '@/lib/secrets/apiAuth'
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  const authorization = await authorizeRequest(req, 'api', 'run')
+  if (authorization.response) return authorization.response
   const actor = requireTrustedContext(await resolveTrustedRequestContext(req, prisma))
   const { environmentId } = await req.json().catch(() => ({ environmentId: null }))
 
   const [collection, environment] = await Promise.all([
-    prisma.apiCollection.findUnique({ where: { id } }),
-    environmentId ? prisma.apiEnvironment.findUnique({ where: { id: environmentId } }) : Promise.resolve(null),
+    prisma.apiCollection.findFirst({ where: { id, workspaceId: authorization.context.workspaceId } }),
+    environmentId ? prisma.apiEnvironment.findFirst({ where: { id: environmentId, workspaceId: authorization.context.workspaceId } }) : Promise.resolve(null),
   ])
 
   if (!collection) {
@@ -20,7 +24,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   const requests = await (prisma.apiRequest as any).findMany({
-    where: { collectionId: id },
+    where: { collectionId: id, workspaceId: authorization.context.workspaceId },
     orderBy: { createdAt: 'asc' },
   }) as Array<any>
 
@@ -64,7 +68,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         bodyType: request.bodyType,
         body: request.body,
         authType: request.authType,
-        authConfig: (() => { try { return JSON.parse(request.authConfig) } catch { return {} } })(),
+        authConfig: await resolveApiAuthConfig(prisma, request.id, (() => { try { return JSON.parse(request.authConfig) } catch { return {} } })(), { workspaceId: authorization.context.workspaceId, actorId: authorization.context.userId }),
       })
 
       if (result.ok) {

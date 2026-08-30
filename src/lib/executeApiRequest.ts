@@ -11,10 +11,17 @@ import {
   type MaterializableApiRequestDraft,
 } from '@/lib/apiRequestMaterialization'
 import { executeApiScripts } from '@/lib/apiScripting'
+import { apiGlobalsSettingKey, LEGACY_API_GLOBALS_KEY } from '@/lib/apiWorkspace'
 
 const MAX_BODY_SIZE = 1024 * 1024
 const PRIVATE_HOST_ERROR = 'Requests to localhost or private network addresses are blocked by default'
 const COOKIE_JAR_KEY_PREFIX = 'api_cookie_jar:'
+
+async function readApiGlobalsSetting(workspaceId: string) {
+  const scoped = await prisma.setting.findUnique({ where: { key: apiGlobalsSettingKey(workspaceId) } })
+  if (scoped || workspaceId !== 'default') return scoped
+  return prisma.setting.findUnique({ where: { key: LEGACY_API_GLOBALS_KEY } })
+}
 
 interface AuthConfig {
   token?: string
@@ -177,11 +184,13 @@ function getValueAtPath(input: unknown, path: string): unknown {
 
 async function applyResponseMappings({
   requestId,
+  workspaceId,
   environmentId,
   responseBody,
   responseMappings,
 }: {
   requestId?: string | null
+  workspaceId: string
   environmentId?: string | null
   responseBody: string
   responseMappings: ApiResponseMappingRow[]
@@ -203,9 +212,9 @@ async function applyResponseMappings({
   }
 
   const [requestRecord, environmentRecord, globalRecord] = await Promise.all([
-    requestId ? (prisma.apiRequest as any).findUnique({ where: { id: requestId } }) as Promise<any> : Promise.resolve(null),
-    environmentId ? prisma.apiEnvironment.findUnique({ where: { id: environmentId } }) : Promise.resolve(null),
-    prisma.setting.findUnique({ where: { key: 'api_global_variables' } }),
+    requestId ? (prisma.apiRequest as any).findFirst({ where: { id: requestId, workspaceId } }) as Promise<any> : Promise.resolve(null),
+    environmentId ? prisma.apiEnvironment.findFirst({ where: { id: environmentId, workspaceId } }) : Promise.resolve(null),
+    readApiGlobalsSetting(workspaceId),
   ])
   const requestRows = requestRecord ? parseVariableRows(requestRecord.variables) : []
   const environmentRows = environmentRecord ? parseVariableRows(environmentRecord.variables) : []
@@ -270,9 +279,9 @@ async function applyResponseMappings({
       ? prisma.apiEnvironment.update({ where: { id: environmentRecord.id }, data: { variables: stringifyVariableRows(environmentRows) } })
       : Promise.resolve(),
     prisma.setting.upsert({
-      where: { key: 'api_global_variables' },
+      where: { key: apiGlobalsSettingKey(workspaceId) },
       update: { value: stringifyVariableRows(globalRows) },
-      create: { key: 'api_global_variables', value: stringifyVariableRows(globalRows) },
+      create: { key: apiGlobalsSettingKey(workspaceId), value: stringifyVariableRows(globalRows) },
     }),
   ])
 
@@ -281,9 +290,9 @@ async function applyResponseMappings({
 
 export async function executeApiRequest(input: ExecuteApiRequestInput) {
   const [environment, collection, globalSetting] = await Promise.all([
-    input.environmentId ? prisma.apiEnvironment.findUnique({ where: { id: input.environmentId } }) : Promise.resolve(null),
-    input.collectionId ? prisma.apiCollection.findUnique({ where: { id: input.collectionId } }) : Promise.resolve(null),
-    prisma.setting.findUnique({ where: { key: 'api_global_variables' } }),
+    input.environmentId ? prisma.apiEnvironment.findFirst({ where: { id: input.environmentId, workspaceId: input.workspaceId } }) : Promise.resolve(null),
+    input.collectionId ? prisma.apiCollection.findFirst({ where: { id: input.collectionId, workspaceId: input.workspaceId } }) : Promise.resolve(null),
+    readApiGlobalsSetting(input.workspaceId),
   ])
 
   const materialized = materializeApiRequest(
@@ -485,6 +494,7 @@ export async function executeApiRequest(input: ExecuteApiRequestInput) {
   const testResults = testExecution.testResults
   const mappingResults = await applyResponseMappings({
     requestId: input.requestId ?? null,
+    workspaceId: input.workspaceId,
     environmentId: input.environmentId ?? null,
     responseBody: responseBodyText,
     responseMappings: input.responseMappings ?? [],
@@ -492,6 +502,7 @@ export async function executeApiRequest(input: ExecuteApiRequestInput) {
 
   await (prisma.apiHistory as any).create({
     data: {
+      workspaceId: input.workspaceId,
       requestId: input.requestId ?? null,
       method: runtimeRequest.method ?? 'GET',
       url: finalUrl,

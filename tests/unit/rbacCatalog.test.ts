@@ -8,5 +8,6 @@ describe('RBAC catalog', () => {
     expect(ROLE_PRESETS.viewer.permissions).toContain('script:read')
     expect(ROLE_PRESETS.viewer.permissions).not.toContain('secret:reveal')
     expect(permissionKey('workflow', 'run')).toBe('workflow:run')
+    expect(permissionKey('api', 'run')).toBe('api:run')
   })
 })

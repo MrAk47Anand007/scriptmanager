@@ -241,6 +241,7 @@ model ScriptTemplate {
 
 model ApiCollection {
   id          String             @id @default(cuid())
+  workspaceId String             @default("default") @map("workspace_id")
   name        String
   description String             @default("")
   variables   String             @default("[]")
@@ -249,11 +250,14 @@ model ApiCollection {
   requests    ApiRequest[]
   runs        ApiCollectionRun[]
 
+  @@index([workspaceId, name])
+
   @@map("api_collections")
 }
 
 model ApiRequest {
   id               String         @id @default(cuid())
+  workspaceId      String         @default("default") @map("workspace_id")
   name             String
   method           String         @default("GET")
   url              String         @default("")
@@ -272,6 +276,8 @@ model ApiRequest {
   collection       ApiCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
   createdAt        DateTime       @default(now()) @map("created_at")
   updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  @@index([workspaceId, updatedAt])
 
   @@map("api_requests")
 }
@@ -298,16 +304,20 @@ model ApiCollectionRun {
 
 model ApiEnvironment {
   id        String   @id @default(cuid())
+  workspaceId String  @default("default") @map("workspace_id")
   name      String
   variables String   @default("[]")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([workspaceId, name])
 
   @@map("api_environments")
 }
 
 model ApiHistory {
   id              String   @id @default(cuid())
+  workspaceId     String   @default("default") @map("workspace_id")
   requestId       String?  @map("request_id")
   method          String
   url             String
@@ -322,6 +332,8 @@ model ApiHistory {
   consoleLogs     String   @default("[]") @map("console_logs")
   testResults     String   @default("[]") @map("test_results")
   createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt])
 
   @@map("api_history")
 }

@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
-export async function GET() {
+export async function GET(req: Request) {
+  const authorization = await authorizeRequest(req, 'api', 'read')
+  if (authorization.response) return authorization.response
   const runs = await (prisma.apiCollectionRun as any).findMany({
+    where: { collection: { workspaceId: authorization.context.workspaceId } },
     orderBy: { startedAt: 'desc' },
     take: 50,
   }) as Array<any>

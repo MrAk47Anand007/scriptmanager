@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
-export async function GET() {
+export async function GET(req: Request) {
+  const authorization = await authorizeRequest(req, 'api', 'read')
+  if (authorization.response) return authorization.response
   const history = await (prisma.apiHistory as any).findMany({
+    where: { workspaceId: authorization.context.workspaceId },
     orderBy: { createdAt: 'desc' },
     take: 100
   }) as Array<any>
@@ -26,7 +30,9 @@ export async function GET() {
   })))
 }
 
-export async function DELETE() {
-  await prisma.apiHistory.deleteMany({})
+export async function DELETE(req: Request) {
+  const authorization = await authorizeRequest(req, 'api', 'delete')
+  if (authorization.response) return authorization.response
+  await prisma.apiHistory.deleteMany({ where: { workspaceId: authorization.context.workspaceId } })
   return NextResponse.json({ success: true })
 }
