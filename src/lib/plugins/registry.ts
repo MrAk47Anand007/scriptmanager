@@ -3,7 +3,36 @@ import { validatePluginManifest, validatePluginSettings } from './manifest'
 import { pluginSourceHash, verifyPluginSignature } from './signatures'
 
 type InstallInput = { workspaceId: string; actorId: string; manifest: unknown; source: string; allowUnsigned?: boolean; signature?: string; publicKey?: string }
-const view = (row: any) => ({ id: row.id, enabled: row.enabled, trusted: row.trusted, allowUnsigned: row.allowUnsigned, health: { status: row.healthStatus, message: row.healthMessage }, settings: JSON.parse(row.settingsJson), manifest: JSON.parse(row.package.manifestJson), signatureValid: row.package.signatureValid })
+
+function parsePersistedObject(value: unknown, label: string, fallback: Record<string, unknown>) {
+  try {
+    const parsed = JSON.parse(typeof value === 'string' ? value : '')
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error()
+    return { value: parsed as Record<string, unknown>, error: undefined }
+  } catch {
+    return { value: fallback, error: `Stored plugin ${label} is invalid` }
+  }
+}
+
+const view = (row: any) => {
+  const manifest = parsePersistedObject(row.package.manifestJson, 'manifest', {
+    id: row.package.pluginId,
+    name: 'Invalid plugin package',
+    version: row.package.version,
+    capabilities: [],
+  })
+  const settings = parsePersistedObject(row.settingsJson, 'settings', {})
+  return {
+    id: row.id,
+    enabled: row.enabled,
+    trusted: row.trusted,
+    allowUnsigned: row.allowUnsigned,
+    health: { status: row.healthStatus, message: row.healthMessage ?? manifest.error ?? settings.error },
+    settings: settings.value,
+    manifest: manifest.value,
+    signatureValid: row.package.signatureValid,
+  }
+}
 
 export function createPluginRegistry(database: PrismaClient) {
   const get = async (workspaceId: string, id: string) => {
@@ -27,6 +56,24 @@ export function createPluginRegistry(database: PrismaClient) {
     async disable(workspaceId: string, id: string) { await get(workspaceId, id); return view(await database.pluginInstallation.update({ where: { id }, data: { enabled: false }, include: { package: true } })) },
     async uninstall(workspaceId: string, id: string) { await get(workspaceId, id); await database.pluginInstallation.delete({ where: { id } }) },
     async updateSettings(workspaceId: string, id: string, settings: unknown) { const row = await get(workspaceId, id); const manifest = validatePluginManifest(JSON.parse(row.package.manifestJson)); const valid = validatePluginSettings(manifest, settings); return view(await database.pluginInstallation.update({ where: { id }, data: { settingsJson: JSON.stringify(valid) }, include: { package: true } })) },
+    async checkHealth(workspaceId: string, id: string) {
+      const row = await get(workspaceId, id)
+      let healthy = true
+      let message: string | undefined
+      try {
+        const manifest = validatePluginManifest(JSON.parse(row.package.manifestJson))
+        const settings = parsePersistedObject(row.settingsJson, 'settings', {})
+        if (settings.error) throw new Error(settings.error)
+        validatePluginSettings(manifest, settings.value)
+        if (!verifyPluginSignature(manifest, row.package.source, row.package.signature ?? undefined, row.package.publicKey ?? undefined) && !row.allowUnsigned) {
+          throw new Error('Plugin signature is invalid')
+        }
+      } catch (error) {
+        healthy = false
+        message = error instanceof Error ? error.message : 'Plugin health check failed'
+      }
+      return view(await database.pluginInstallation.update({ where: { id }, data: { healthStatus: healthy ? 'healthy' : 'unhealthy', healthMessage: message ?? null, lastCheckedAt: new Date() }, include: { package: true } }))
+    },
     async setHealth(workspaceId: string, id: string, healthy: boolean, message?: string) { await get(workspaceId, id); return view(await database.pluginInstallation.update({ where: { id }, data: { healthStatus: healthy ? 'healthy' : 'unhealthy', healthMessage: message, lastCheckedAt: new Date() }, include: { package: true } })) },
     get,
   }

@@ -25,4 +25,16 @@ describe('plugin registry', () => {
     await registry.uninstall('default', installed.id)
     expect(await registry.list('default')).toEqual([])
   })
+
+  it('checks plugin data integrity and reports corrupted settings without breaking the list', async () => {
+    const installed = await registry.install({ workspaceId: 'default', actorId: 'admin', manifest, source: 'local', allowUnsigned: true })
+    const healthy = await registry.checkHealth('default', installed.id)
+    expect(healthy.health).toMatchObject({ status: 'healthy' })
+
+    await prisma.pluginInstallation.update({ where: { id: installed.id }, data: { settingsJson: 'not-json' } })
+    const unhealthy = await registry.checkHealth('default', installed.id)
+    expect(unhealthy.health.status).toBe('unhealthy')
+    expect(unhealthy.health.message).toContain('settings')
+    expect(await registry.list('default')).toHaveLength(1)
+  })
 })

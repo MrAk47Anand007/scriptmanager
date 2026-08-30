@@ -3371,7 +3371,7 @@ export function initDesktopRuntimeIpc() {
     const result = payload.action === 'trust' ? await registry.trust(actor.workspaceId, payload.id)
       : payload.action === 'enable' ? await registry.enable(actor.workspaceId, payload.id)
         : payload.action === 'disable' ? await registry.disable(actor.workspaceId, payload.id)
-          : payload.action === 'health' ? await registry.setHealth(actor.workspaceId, payload.id, Boolean(payload.healthy), payload.message)
+          : payload.action === 'health' ? await registry.checkHealth(actor.workspaceId, payload.id)
             : payload.action === 'settings' ? await registry.updateSettings(actor.workspaceId, payload.id, payload.settings)
               : null
     if (!result) throw new Error('Unsupported plugin action')
