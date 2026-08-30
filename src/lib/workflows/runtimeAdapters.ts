@@ -3,6 +3,7 @@ import { executeApiRequest } from '@/lib/executeApiRequest'
 import { ensureBuildEmitter, executeScriptAsync, killRunningBuild } from '@/lib/scriptRunner'
 import { buildRemoteCommand } from '@/lib/executionSafety'
 import { execRemote } from '@/lib/sshService'
+import { dispatchNotificationToChannel } from '@/lib/notifications/dispatcher'
 import type { WorkflowAdapters } from './adapters'
 
 function rows(value: string) { try { return JSON.parse(value) } catch { return [] } }
@@ -72,7 +73,16 @@ export function createProductionWorkflowAdapters(workspaceId = 'default'): Workf
     if (completed.status !== 'success') throw new Error(`Remote execution failed: ${completed.status}`)
     return { remoteExecutionId: completed.id, exitCode: completed.exitCode }
   },
-  async sendNotification(config) { return { queued: true, channel: config.channel, message: config.message } },
+  async sendNotification(config) {
+    const title = typeof config.title === 'string' ? config.title : 'Workflow notification'
+    const body = typeof config.message === 'string' ? config.message : 'Workflow update'
+    return dispatchNotificationToChannel(prisma, {
+      workspaceId,
+      channelId: typeof config.channelId === 'string' && config.channelId.trim() ? config.channelId : undefined,
+      channelKind: typeof config.channel === 'string' ? config.channel : undefined,
+      message: { title, body, deepLink: typeof config.deepLink === 'string' ? config.deepLink : undefined },
+    })
+  },
   async runAgent() {
     return { status: 'waiting_approval', output: { desktopHostRequired: true, message: 'Open ScriptManager Desktop to run this agent workflow node.' } }
   },

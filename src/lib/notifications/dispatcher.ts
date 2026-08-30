@@ -1,9 +1,56 @@
+import crypto from 'node:crypto'
 import type { PrismaClient } from '@prisma/client'
 import type { ExecutionEvent } from '@/lib/execution/events'
 import { notificationAdapters, type NotificationAdapter } from './adapters'
 import { matchesNotificationRule } from './matcher'
 import { renderNotification } from './template'
 import { resolveNotificationConfig } from '@/lib/secrets/notificationConfig'
+
+type DirectNotificationOptions = {
+  workspaceId: string
+  channelId?: string
+  channelKind?: string
+  message: { title: string; body: string; deepLink?: string }
+  dedupeKey?: string
+}
+
+function boundedMessage(message: DirectNotificationOptions['message']) {
+  return {
+    title: String(message.title || 'ScriptManager event').slice(0, 200),
+    body: String(message.body || '').slice(0, 4000),
+    ...(message.deepLink ? { deepLink: String(message.deepLink).slice(0, 1000) } : {}),
+  }
+}
+
+export async function dispatchNotificationToChannel(
+  database: PrismaClient,
+  options: DirectNotificationOptions,
+  adapters: Record<string, NotificationAdapter> = notificationAdapters,
+) {
+  const channel = await database.notificationChannel.findFirst({
+    where: {
+      workspaceId: options.workspaceId,
+      enabled: true,
+      ...(options.channelId ? { id: options.channelId } : { kind: options.channelKind ?? 'desktop' }),
+    },
+  })
+  if (!channel) throw new Error('Notification channel not found')
+  const adapter = adapters[channel.kind]
+  if (!adapter) throw new Error(`Unsupported notification channel: ${channel.kind}`)
+  const message = boundedMessage(options.message)
+  const dedupeKey = options.dedupeKey ?? `direct:${options.workspaceId}:${channel.id}:${crypto.randomUUID()}`
+  const existing = await database.notificationDelivery.findUnique({ where: { dedupeKey } })
+  if (existing) return { status: existing.status, deliveryId: existing.id, channelId: channel.id }
+  const delivery = await database.notificationDelivery.create({ data: { workspaceId: options.workspaceId, channelId: channel.id, dedupeKey, payloadJson: JSON.stringify(message) } })
+  try {
+    await adapter.send(await resolveNotificationConfig(database, channel.id, channel.configJson, options.workspaceId), message)
+    await database.notificationDelivery.update({ where: { id: delivery.id }, data: { status: 'delivered', attemptCount: 1, deliveredAt: new Date() } })
+    return { status: 'delivered', deliveryId: delivery.id, channelId: channel.id }
+  } catch (error) {
+    await database.notificationDelivery.update({ where: { id: delivery.id }, data: { status: 'retrying', attemptCount: 1, lastError: error instanceof Error ? error.message : String(error), nextAttemptAt: new Date(Date.now() + 30_000) } })
+    return { status: 'retrying', deliveryId: delivery.id, channelId: channel.id }
+  }
+}
 
 async function resolveEventWorkspace(database: PrismaClient, event: ExecutionEvent): Promise<string> {
   if (event.executionKind === 'script') return (await database.script.findUnique({ where: { id: event.target.id }, select: { workspaceId: true } }))?.workspaceId ?? 'default'
