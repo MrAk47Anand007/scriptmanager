@@ -329,6 +329,24 @@ export const TerminalComponent = ({
 
         const fitAddon = new FitAddon();
         terminal.loadAddon(fitAddon);
+
+        // Dynamically enable WebGL hardware acceleration if supported
+        if (typeof window !== 'undefined') {
+            import('@xterm/addon-webgl')
+                .then(({ WebglAddon }) => {
+                    try {
+                        const webglAddon = new WebglAddon();
+                        webglAddon.onContextLoss(() => {
+                            webglAddon.dispose();
+                        });
+                        terminal.loadAddon(webglAddon);
+                    } catch {
+                        // Graceful fallback to standard canvas/DOM renderer
+                    }
+                })
+                .catch(() => undefined);
+        }
+
         terminal.open(container);
 
         terminal.attachCustomKeyEventHandler((event) => {

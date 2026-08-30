@@ -64,6 +64,12 @@ const DEFAULT_WINDOW_STATE: WindowState = {
   height: 900,
 }
 
+// Performance switches: enable GPU rasterization, zero-copy tile memory, and disable background timer throttling
+app.commandLine.appendSwitch('enable-gpu-rasterization')
+app.commandLine.appendSwitch('enable-zero-copy')
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+app.commandLine.appendSwitch('disable-background-timer-throttling')
+
 function ensureDesktopProcessEnv() {
   if (!process.env.DATABASE_URL) {
     process.env.DATABASE_URL = app.isPackaged
@@ -104,6 +110,8 @@ function readWindowState(): WindowState {
   }
 }
 
+let saveWindowStateTimer: NodeJS.Timeout | null = null
+
 function saveWindowState(window: BrowserWindow) {
   if (window.isDestroyed()) {
     return
@@ -123,6 +131,16 @@ function saveWindowState(window: BrowserWindow) {
   } catch (error) {
     console.warn('[Electron] Failed to save window state:', error)
   }
+}
+
+function scheduleSaveWindowState(window: BrowserWindow, delay = 300) {
+  if (saveWindowStateTimer) {
+    clearTimeout(saveWindowStateTimer)
+  }
+  saveWindowStateTimer = setTimeout(() => {
+    saveWindowState(window)
+    saveWindowStateTimer = null
+  }, delay)
 }
 
 function createSplashWindow() {
@@ -652,6 +670,8 @@ async function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
+      spellcheck: false,
     },
   })
 
@@ -688,10 +708,20 @@ async function createWindow() {
   }
   mainWindow.webContents.on('will-navigate', blockUntrustedNavigation)
   mainWindow.webContents.on('will-redirect', blockUntrustedNavigation)
-  mainWindow.on('resize', () => saveWindowState(mainWindow!))
-  mainWindow.on('move', () => saveWindowState(mainWindow!))
-  mainWindow.on('maximize', () => saveWindowState(mainWindow!))
-  mainWindow.on('unmaximize', () => saveWindowState(mainWindow!))
+  mainWindow.on('resize', () => scheduleSaveWindowState(mainWindow!))
+  mainWindow.on('move', () => scheduleSaveWindowState(mainWindow!))
+  mainWindow.on('maximize', () => scheduleSaveWindowState(mainWindow!))
+  mainWindow.on('unmaximize', () => scheduleSaveWindowState(mainWindow!))
+  mainWindow.on('blur', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      saveWindowState(mainWindow)
+    }
+  })
+  mainWindow.on('close', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      saveWindowState(mainWindow)
+    }
+  })
   if (process.env.SCRIPTMANAGER_SMOKE_TEST === '1') {
     mainWindow.webContents.once('did-navigate', (_event, url) => {
       const route = new URL(url).pathname
@@ -896,8 +926,22 @@ ipcMain.handle('scriptmanager:oauth-defaults', async () => ({
   onedrive: Boolean(getDefaultClientId('onedrive')),
 }))
 
+function terminateServerProcess() {
+  if (!serverProcess) return
+  try {
+    if (process.platform === 'win32' && serverProcess.pid) {
+      spawn('taskkill', ['/pid', String(serverProcess.pid), '/T', '/F'])
+    } else {
+      serverProcess.kill('SIGTERM')
+    }
+  } catch (error) {
+    console.warn('[Electron] Error stopping server process:', error)
+  }
+  serverProcess = null
+}
+
 app.on('window-all-closed', () => {
-  serverProcess?.kill()
+  terminateServerProcess()
   splashWindow?.close()
   if (process.platform !== 'darwin') {
     app.quit()
@@ -911,7 +955,7 @@ app.on('activate', () => {
 })
 
 app.on('before-quit', () => {
-  serverProcess?.kill()
+  terminateServerProcess()
   tray?.destroy()
   tray = null
 })

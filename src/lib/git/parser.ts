@@ -1,4 +1,4 @@
-import type { GitBranches, GitDiffFile, GitFileStatus, GitStatus } from './types'
+import type { GitBranches, GitCommitLog, GitDiffFile, GitFileStatus, GitStatus } from './types'
 
 function fileState(x: string, y: string): GitFileStatus['state'] {
   if (x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D')) return 'conflicted'
@@ -22,7 +22,9 @@ export function parseStatus(output: string): GitStatus {
     const filePath = rawPath.includes(' -> ') ? rawPath.split(' -> ')[1] : rawPath
     return { path: filePath, index, workingTree, state: fileState(index, workingTree) }
   })
-  return { branch, upstream, ahead, behind, files, clean: files.length === 0 }
+  const staged = files.filter(f => Boolean(f.index && f.index !== ' ' && f.index !== '?' && f.state !== 'conflicted'))
+  const unstaged = files.filter(f => Boolean((f.workingTree && f.workingTree !== ' ') || (f.index === '?' && f.workingTree === '?') || f.state === 'conflicted'))
+  return { branch, upstream, ahead, behind, files, staged, unstaged, clean: files.length === 0 }
 }
 
 export function parseBranches(output: string): GitBranches {
@@ -46,4 +48,18 @@ export function parseUnifiedDiff(output: string): GitDiffFile[] {
     const deletions = patch.split('\n').filter(line => line.startsWith('-') && !line.startsWith('---')).length
     return { path, additions, deletions, patch }
   })
+}
+
+export function parseLog(output: string): GitCommitLog[] {
+  const lines = output.replace(/\r/g, '').split('\n').filter(Boolean)
+  return lines.map(line => {
+    const parts = line.split('|')
+    return {
+      hash: parts[0] ?? '',
+      author: parts[1] ?? '',
+      email: parts[2] ?? '',
+      date: parts[3] ?? '',
+      message: parts.slice(4).join('|') ?? '',
+    }
+  }).filter(c => Boolean(c.hash))
 }

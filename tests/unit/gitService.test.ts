@@ -15,6 +15,31 @@ describe('git service', () => {
     expect(audit).toHaveBeenCalledWith(expect.objectContaining({ action: 'status', outcome: 'succeeded' }))
   })
 
+  it('handles add, reset, restore, branch_create, and log actions', async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: 'a1b2c3d|Dev|dev@example.com|2026-08-27|test commit\n', stderr: '', exitCode: 0 })
+    const audit = vi.fn()
+    const service = createGitService({ run, audit })
+
+    await service.execute(workspace, { action: 'add', path: 'src/file.ts' }, { type: 'user', id: 'admin' })
+    expect(run).toHaveBeenCalledWith(workspace.root, ['add', 'src/file.ts'])
+
+    await service.execute(workspace, { action: 'reset', path: 'src/file.ts' }, { type: 'user', id: 'admin' })
+    expect(run).toHaveBeenCalledWith(workspace.root, ['reset', 'HEAD', '--', 'src/file.ts'])
+
+    await service.execute(workspace, { action: 'restore', path: 'src/file.ts' }, { type: 'user', id: 'admin' })
+    expect(run).toHaveBeenCalledWith(workspace.root, ['checkout', '--', 'src/file.ts'])
+
+    await service.execute(workspace, { action: 'branch_create', branch: 'feat/new' }, { type: 'user', id: 'admin' })
+    expect(run).toHaveBeenCalledWith(workspace.root, ['checkout', '-b', 'feat/new'])
+
+    const logResult = await service.execute(workspace, { action: 'log' }, { type: 'user', id: 'admin' })
+    expect(run).toHaveBeenCalledWith(workspace.root, ['log', '-n', '50', '--pretty=format:%H|%an|%ae|%ad|%s', '--date=short'])
+    expect(logResult).toEqual({
+      kind: 'result',
+      data: [{ hash: 'a1b2c3d', author: 'Dev', email: 'dev@example.com', date: '2026-08-27', message: 'test commit' }],
+    })
+  })
+
   it('pauses push before spawning git', async () => {
     const run = vi.fn(), requestApproval = vi.fn().mockResolvedValue({ id: 'approval-1' })
     const service = createGitService({ run, audit: vi.fn(), requestApproval })

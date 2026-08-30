@@ -251,40 +251,45 @@ export default function Home() {
   }, [activeTab, dispatch, isOpsModeActive])
 
   const scriptsPanelClassName = useMemo(
-    () => activeTab === 'scripts'
-      ? 'absolute inset-0 opacity-100 z-10'
-      : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
+    () => (activeTab === 'scripts' ? 'h-full w-full' : 'hidden'),
     [activeTab]
   )
   const apiPanelClassName = useMemo(
-    () => activeTab === 'api'
-      ? 'absolute inset-0 opacity-100 z-10'
-      : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
+    () => (activeTab === 'api' ? 'h-full w-full' : 'hidden'),
     [activeTab]
   )
   const schedulesPanelClassName = useMemo(
-    () => activeTab === 'schedules'
-      ? 'absolute inset-0 opacity-100 z-10'
-      : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
+    () => (activeTab === 'schedules' ? 'h-full w-full' : 'hidden'),
     [activeTab]
   )
   const opsPanelClassName = useMemo(
-    () => activeTab === 'ops'
-      ? 'absolute inset-0 opacity-100 z-10'
-      : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
+    () => (activeTab === 'ops' ? 'h-full w-full' : 'hidden'),
     [activeTab]
   )
   const settingsPanelClassName = useMemo(
-    () => activeTab === 'settings'
-      ? 'absolute inset-0 overflow-y-auto bg-white dark:bg-slate-950 opacity-100 z-10'
-      : 'absolute inset-0 opacity-0 pointer-events-none -z-10',
+    () => (activeTab === 'settings' ? 'h-full w-full overflow-y-auto bg-white dark:bg-slate-950' : 'hidden'),
     [activeTab]
   )
-  const workflowsPanelClassName = useMemo(() => activeTab === 'workflows' ? 'absolute inset-0 opacity-100 z-10' : 'absolute inset-0 opacity-0 pointer-events-none -z-10', [activeTab])
-  const agentsPanelClassName = useMemo(() => activeTab === 'agents' ? 'absolute inset-0 opacity-100 z-10' : 'absolute inset-0 opacity-0 pointer-events-none -z-10', [activeTab])
-  const gitPanelClassName = useMemo(() => activeTab === 'git' ? 'absolute inset-0 opacity-100 z-10' : 'absolute inset-0 opacity-0 pointer-events-none -z-10', [activeTab])
-  const executionsPanelClassName = useMemo(() => activeTab === 'executions' ? 'absolute inset-0 opacity-100 z-10' : 'absolute inset-0 opacity-0 pointer-events-none -z-10', [activeTab])
-  const approvalsPanelClassName = useMemo(() => activeTab === 'approvals' ? 'absolute inset-0 opacity-100 z-10' : 'absolute inset-0 opacity-0 pointer-events-none -z-10', [activeTab])
+  const workflowsPanelClassName = useMemo(
+    () => (activeTab === 'workflows' ? 'h-full w-full' : 'hidden'),
+    [activeTab]
+  )
+  const agentsPanelClassName = useMemo(
+    () => (activeTab === 'agents' ? 'h-full w-full' : 'hidden'),
+    [activeTab]
+  )
+  const gitPanelClassName = useMemo(
+    () => (activeTab === 'git' ? 'h-full w-full' : 'hidden'),
+    [activeTab]
+  )
+  const executionsPanelClassName = useMemo(
+    () => (activeTab === 'executions' ? 'h-full w-full' : 'hidden'),
+    [activeTab]
+  )
+  const approvalsPanelClassName = useMemo(
+    () => (activeTab === 'approvals' ? 'h-full w-full' : 'hidden'),
+    [activeTab]
+  )
 
   return (
     <WorkbenchShell

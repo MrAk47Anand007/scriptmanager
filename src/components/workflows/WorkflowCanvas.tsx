@@ -64,8 +64,46 @@ function CanvasInner() {
     <button aria-label="Add node" onClick={()=>setLauncher({ open: true, x: 80, y: 80 })} className="absolute left-4 top-4 z-10 flex items-center gap-1.5 rounded-md border border-wb-border bg-background px-2.5 py-1.5 text-xs shadow-sm hover:bg-muted"><Plus className="h-3.5 w-3.5"/>Add node</button>
     {workflow.definition.nodes.length===0&&<div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"><div className="pointer-events-auto max-w-xs text-center"><div className="text-sm font-semibold">Start your workflow</div><p className="mt-1 text-xs text-muted-foreground">Add the first step, then drag from its output to keep building.</p><button aria-label="Add first node" onClick={()=>setLauncher({open:true,x:120,y:120})} className="mt-4 rounded-md bg-accent-brand px-3 py-2 text-xs text-white">Add first node</button></div></div>}
     <WorkflowNodeLauncher open={launcher.open} origin={{ x: launcher.x, y: launcher.y }} onClose={()=>setLauncher((value)=>({...value,open:false}))} onSelect={(spec, position)=>{const action=addNode({ type: spec.type, name: spec.label, config: spec.defaults, position });dispatch(action);if(launcher.connection?.source)dispatch(connectNodes({source:launcher.connection.source,target:action.payload.id,sourcePort:launcher.connection.sourceHandle as 'true'|'false'|undefined}))}}/>
-    <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={connect} onReconnect={reconnect} onNodeDoubleClick={(_,node)=>dispatch(selectNodes([node.id]))} onViewportChange={(next)=>dispatch(setViewport(next))} defaultViewport={viewport} fitView fitViewOptions={{maxZoom:1}} minZoom={0.2} maxZoom={2} deleteKeyCode={['Backspace','Delete']} multiSelectionKeyCode={['Control','Meta']} selectionKeyCode="Shift">
-      <Background variant={BackgroundVariant.Dots} gap={24} size={1}/><Controls showInteractive={false}/><MiniMap pannable zoomable aria-label="Workflow minimap" style={{ width: 112, height: 72 }}/>
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      nodeTypes={nodeTypes}
+      onNodesChange={onNodesChange}
+      onEdgesChange={onEdgesChange}
+      onConnect={connect}
+      onReconnect={reconnect}
+      onNodeDoubleClick={(_, node) => dispatch(selectNodes([node.id]))}
+      onMoveEnd={(_, next) => dispatch(setViewport(next))}
+      defaultViewport={viewport}
+      fitView
+      fitViewOptions={{ maxZoom: 1, padding: 0.2 }}
+      minZoom={0.2}
+      maxZoom={2}
+      snapToGrid={true}
+      snapGrid={[16, 16]}
+      onlyRenderVisibleElements={true}
+      elevateNodesOnSelect={false}
+      elevateEdgesOnSelect={false}
+      deleteKeyCode={['Backspace', 'Delete']}
+      multiSelectionKeyCode={['Control', 'Meta']}
+      selectionKeyCode="Shift"
+      defaultEdgeOptions={{
+        type: 'smoothstep',
+        animated: false,
+        style: { strokeWidth: 2.2 },
+      }}
+    >
+      <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="hsl(var(--muted-foreground) / 0.2)" />
+      <Controls showInteractive={false} />
+      <MiniMap
+        pannable
+        zoomable
+        aria-label="Workflow minimap"
+        style={{ width: 112, height: 72 }}
+        nodeStrokeWidth={3}
+        nodeColor="#3b82f6"
+        maskColor="rgba(0, 0, 0, 0.2)"
+      />
     </ReactFlow>
   </div>
 }

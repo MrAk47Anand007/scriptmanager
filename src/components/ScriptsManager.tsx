@@ -1463,7 +1463,17 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
                                             fontSize: 14,
                                             scrollBeyondLastLine: false,
                                             automaticLayout: true,
+                                            smoothScrolling: true,
+                                            cursorSmoothCaretAnimation: 'on',
+                                            cursorBlinking: 'smooth',
+                                            renderWhitespace: 'none',
+                                            roundedSelection: true,
                                             padding: { top: 16, bottom: 16 },
+                                            scrollbar: {
+                                                verticalScrollbarSize: 10,
+                                                horizontalScrollbarSize: 10,
+                                                useShadows: false,
+                                            },
                                             suggest: {
                                                 showWords: true,
                                                 showSnippets: true,

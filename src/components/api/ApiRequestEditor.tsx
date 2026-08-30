@@ -37,6 +37,24 @@ const MonacoEditor = dynamic(() => import('@monaco-editor/react').then(m => m.Ed
     loading: () => <EditorSkeleton />,
 })
 
+const MONACO_DEFAULT_OPTIONS = {
+  minimap: { enabled: false },
+  fontSize: 12,
+  lineNumbers: 'on' as const,
+  automaticLayout: true,
+  wordWrap: 'on' as const,
+  scrollBeyondLastLine: false,
+  tabSize: 2,
+  smoothScrolling: true,
+  cursorSmoothCaretAnimation: 'on' as const,
+  cursorBlinking: 'smooth' as const,
+  scrollbar: {
+    verticalScrollbarSize: 8,
+    horizontalScrollbarSize: 8,
+    useShadows: false,
+  },
+}
+
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
 
 const COMMON_HEADERS = [
@@ -694,10 +712,7 @@ export function ApiRequestEditor() {
                       value={draft.body}
                       onChange={(v) => update({ body: v ?? '' })}
                       theme={editorTheme}
-                      options={{
-                        minimap: { enabled: false }, fontSize: 12, lineNumbers: 'on',
-                        automaticLayout: true, wordWrap: 'on', scrollBeyondLastLine: false, tabSize: 2,
-                      }}
+                      options={MONACO_DEFAULT_OPTIONS}
                     />
                   )}
                   {draft.bodyType === 'form' && (
@@ -738,10 +753,7 @@ export function ApiRequestEditor() {
                           value={graphqlBody.query}
                           onChange={(value) => update({ body: stringifyGraphqlBody({ ...graphqlBody, query: value ?? '' }) })}
                           theme={editorTheme}
-                          options={{
-                            minimap: { enabled: false }, fontSize: 12, lineNumbers: 'on',
-                            automaticLayout: true, wordWrap: 'on', scrollBeyondLastLine: false, tabSize: 2,
-                          }}
+                          options={MONACO_DEFAULT_OPTIONS}
                         />
                       </div>
                       <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
@@ -754,10 +766,7 @@ export function ApiRequestEditor() {
                           value={graphqlBody.variables}
                           onChange={(value) => update({ body: stringifyGraphqlBody({ ...graphqlBody, variables: value ?? '{}' }) })}
                           theme={editorTheme}
-                          options={{
-                            minimap: { enabled: false }, fontSize: 12, lineNumbers: 'on',
-                            automaticLayout: true, wordWrap: 'on', scrollBeyondLastLine: false, tabSize: 2,
-                          }}
+                          options={MONACO_DEFAULT_OPTIONS}
                         />
                       </div>
                     </div>
@@ -1087,10 +1096,7 @@ export function ApiRequestEditor() {
                     value={draft.preRequestScript ?? ''}
                     onChange={(value) => update({ preRequestScript: value ?? '' })}
                     theme={editorTheme}
-                    options={{
-                      minimap: { enabled: false }, fontSize: 12, lineNumbers: 'on',
-                      automaticLayout: true, wordWrap: 'on', scrollBeyondLastLine: false, tabSize: 2,
-                    }}
+                    options={MONACO_DEFAULT_OPTIONS}
                   />
                 </div>
               </TabsContent>
@@ -1111,10 +1117,7 @@ export function ApiRequestEditor() {
                     value={draft.testScript ?? ''}
                     onChange={(value) => update({ testScript: value ?? '' })}
                     theme={editorTheme}
-                    options={{
-                      minimap: { enabled: false }, fontSize: 12, lineNumbers: 'on',
-                      automaticLayout: true, wordWrap: 'on', scrollBeyondLastLine: false, tabSize: 2,
-                    }}
+                    options={MONACO_DEFAULT_OPTIONS}
                   />
                 </div>
               </TabsContent>

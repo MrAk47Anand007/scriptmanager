@@ -1,5 +1,5 @@
 import { classifyGitAction, parseGitAction, resolveRepositoryPath } from './policy'
-import { parseBranches, parseStatus, parseUnifiedDiff } from './parser'
+import { parseBranches, parseLog, parseStatus, parseUnifiedDiff } from './parser'
 import type { GitProcessRunner } from './process'
 import type { GitAction, RepositoryWorkspace } from './types'
 
@@ -17,11 +17,16 @@ function actionArgs(action: GitAction): string[] {
     case 'diff': return ['diff', '--no-ext-diff', '--', action.path ?? '.']
     case 'branches': return ['branch', '--all', '--no-color']
     case 'checkout': return ['checkout', ...(action.force ? ['--force'] : []), action.branch ?? '']
+    case 'branch_create': return ['checkout', '-b', action.branch ?? '']
+    case 'add': return ['add', action.path ?? '.']
+    case 'reset': return action.path ? ['reset', 'HEAD', '--', action.path] : ['reset']
+    case 'restore': return ['checkout', '--', action.path ?? '.']
     case 'commit': return ['commit', '-m', action.message ?? '']
     case 'fetch': return ['fetch', action.remote ?? 'origin']
     case 'pull': return ['pull', '--ff-only', action.remote ?? 'origin', action.branch ?? '']
     case 'push': return ['push', ...(action.force ? ['--force-with-lease'] : []), action.remote ?? 'origin', action.branch ?? '']
     case 'clean': return ['clean', '-fd']
+    case 'log': return ['log', '-n', '50', '--pretty=format:%H|%an|%ae|%ad|%s', '--date=short']
   }
 }
 
@@ -49,6 +54,7 @@ export function createGitService(deps: GitServiceDeps) {
     if (parsedAction.action === 'status') data = parseStatus(processResult.stdout)
     if (parsedAction.action === 'branches') data = parseBranches(processResult.stdout)
     if (parsedAction.action === 'diff') data = parseUnifiedDiff(processResult.stdout)
+    if (parsedAction.action === 'log') data = parseLog(processResult.stdout)
     await deps.audit({ action: parsedAction.action, projectId: workspace.projectId, actor, outcome: 'succeeded' })
     return { kind: 'result' as const, data }
   } }

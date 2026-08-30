@@ -56,4 +56,5 @@ coverage/
 
 # Session artifacts and stray outputs
 .superpowers/
+.claude/
 tsc_output.txt

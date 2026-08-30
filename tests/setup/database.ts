@@ -10,5 +10,6 @@ export default async function setupDatabase() {
   execFileSync('npx', ['prisma', 'db', 'push', '--skip-generate'], {
     env: process.env,
     stdio: 'inherit',
+    shell: true,
   })
 }

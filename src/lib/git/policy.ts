@@ -19,7 +19,7 @@ export function parseWorkspacePolicy(value?: string | null): WorkspacePolicy {
   catch { return DEFAULT_WORKSPACE_POLICY }
 }
 
-const GIT_ACTION_NAMES = ['status', 'diff', 'branches', 'checkout', 'commit', 'fetch', 'pull', 'push', 'clean'] as const
+const GIT_ACTION_NAMES = ['status', 'diff', 'branches', 'checkout', 'commit', 'fetch', 'pull', 'push', 'clean', 'add', 'reset', 'restore', 'log', 'branch_create'] as const
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -61,6 +61,7 @@ export function parseGitAction(input: unknown): GitAction {
   if (input.force !== undefined) parsed.force = input.force
 
   if (action === 'checkout' && !branch) throw new Error('Git checkout branch is required')
+  if (action === 'branch_create' && !branch) throw new Error('Git branch_create branch is required')
   if (action === 'commit' && !message) throw new Error('Git commit message is required')
   return parsed
 }
