@@ -3,12 +3,15 @@ import { prisma } from '@/lib/db'
 import { resolveTrustedRequestContext } from '@/lib/rbac/requestContext'
 import { requireTrustedContext } from '@/lib/runtime/trustedContext'
 import { rejectRemoteExecution } from '@/lib/ops/remoteExecutionApprovalService'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function POST(
     req: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const authorization = await authorizeRequest(req, 'approval', 'approve')
+        if (authorization.response) return authorization.response
         const actor = requireTrustedContext(await resolveTrustedRequestContext(req, prisma))
         const { id } = await params
         const result = await rejectRemoteExecution(id, actor)

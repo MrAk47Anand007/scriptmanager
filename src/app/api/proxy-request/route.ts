@@ -6,11 +6,16 @@ import { prisma } from '@/lib/db'
 import { resolveApiAuthConfig } from '@/lib/secrets/apiAuth'
 import { resolveTrustedRequestContext } from '@/lib/rbac/requestContext'
 import { requireTrustedContext } from '@/lib/runtime/trustedContext'
+import { authorizeRequest } from '@/lib/rbac/routeAuthorization'
 
 export async function POST(req: Request) {
   const correlationId = executionTelemetry.correlationId(req)
   let targetId = 'draft'
+  let telemetryActorId = 'unknown'
   try {
+    const authorization = await authorizeRequest(req, 'api', 'run')
+    if (authorization.response) return authorization.response
+    telemetryActorId = authorization.context.userId
     const actor = requireTrustedContext(await resolveTrustedRequestContext(req, prisma))
     const {
       requestId,
@@ -38,7 +43,7 @@ export async function POST(req: Request) {
 
     await executionTelemetry.emit({
       type: 'execution.started', executionKind: 'api', correlationId,
-      actor: { type: 'user', id: 'session-user' },
+      actor: { type: 'user', id: actor.actorId },
       target: { type: 'api_request', id: targetId },
       data: { method: method ?? 'GET', trigger: 'manual' },
     })
@@ -66,7 +71,7 @@ export async function POST(req: Request) {
     if (!result.ok) {
       await executionTelemetry.emit({
         type: 'execution.failed', executionKind: 'api', correlationId,
-        actor: { type: 'user', id: 'session-user' }, target: { type: 'api_request', id: targetId },
+        actor: { type: 'user', id: actor.actorId }, target: { type: 'api_request', id: targetId },
         data: { status: result.status },
       })
       return NextResponse.json(result, { status: result.status })
@@ -74,7 +79,7 @@ export async function POST(req: Request) {
 
     await executionTelemetry.emit({
       type: 'execution.succeeded', executionKind: 'api', correlationId,
-      actor: { type: 'user', id: 'session-user' }, target: { type: 'api_request', id: targetId },
+      actor: { type: 'user', id: actor.actorId }, target: { type: 'api_request', id: targetId },
       data: { status: result.status },
     })
 
@@ -83,7 +88,7 @@ export async function POST(req: Request) {
     const message = err instanceof Error ? err.message : String(err)
     await executionTelemetry.emit({
       type: 'execution.failed', executionKind: 'api', correlationId,
-      actor: { type: 'user', id: 'session-user' }, target: { type: 'api_request', id: targetId },
+      actor: { type: 'user', id: telemetryActorId }, target: { type: 'api_request', id: targetId },
       data: { error: message },
     })
     return NextResponse.json({ error: message }, { status: 500 })

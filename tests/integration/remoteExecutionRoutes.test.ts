@@ -77,6 +77,31 @@ describe('remote execution approval routes', () => {
     expect(execRemoteMock).not.toHaveBeenCalled()
   })
 
+  it('requires approval permission for remote execution decisions', async () => {
+    const viewerRole = await prisma.role.findUniqueOrThrow({ where: { workspaceId_key: { workspaceId: 'default', key: 'viewer' } } })
+    await prisma.membership.updateMany({ where: { userId: 'local-admin', workspaceId: 'default' }, data: { roleId: viewerRole.id } })
+
+    const script = await prisma.script.create({ data: { id: 'script-viewer-approval', name: 'Deploy', filename: 'deploy.sh' } })
+    const profile = await prisma.serverProfile.create({ data: { id: 'profile-viewer-approval', name: 'SSH', host: 'example.test', username: 'deploy' } })
+    const execution = await prisma.remoteExecution.create({
+      data: { id: 'remote-viewer-approval', scriptId: script.id, profileId: profile.id, scriptName: script.name, profileName: profile.name, serverHost: profile.host, status: 'pending_approval' },
+    })
+
+    const approveResponse = await approve(new Request('http://localhost/api/ops/remote-exec/remote-viewer-approval/approve', {
+      method: 'POST',
+      headers: { cookie: sessionCookie },
+    }), { params: Promise.resolve({ id: execution.id }) })
+    const rejectResponse = await reject(new Request('http://localhost/api/ops/remote-exec/remote-viewer-approval/reject', {
+      method: 'POST',
+      headers: { cookie: sessionCookie },
+    }), { params: Promise.resolve({ id: execution.id }) })
+
+    expect(approveResponse.status).toBe(403)
+    expect(rejectResponse.status).toBe(403)
+    expect((await prisma.remoteExecution.findUniqueOrThrow({ where: { id: execution.id } })).status).toBe('pending_approval')
+    expect(execRemoteMock).not.toHaveBeenCalled()
+  })
+
   it('approves with the authenticated actor instead of a forged approver_name', async () => {
     const script = await prisma.script.create({
       data: {
