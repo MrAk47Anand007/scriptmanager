@@ -525,13 +525,30 @@ export function createDesktopAcpProviderAdapters(runtime: DesktopAgentRuntime): 
   })) as Record<AcpProvider, AcpProviderAdapter>
 }
 
-export function registerAgentRuntimeIpc(ipc: { handle(channel: string, listener: (_event: unknown, ...args: any[]) => unknown): unknown }, emit: (sessionId: string, event: unknown) => void) {
-  const runtime = createDesktopAgentRuntime(emit)
-  ipc.handle('scriptmanager:agents:discover', () => runtime.discover())
-  ipc.handle('scriptmanager:agents:launch', (_event, payload: DesktopAgentLaunch) => runtime.launch(payload))
-  ipc.handle('scriptmanager:agents:input', (_event, payload: { sessionId: string; message: unknown }) => runtime.input(payload.sessionId, payload.message))
-  ipc.handle('scriptmanager:agents:permission', (_event, payload: { sessionId: string; requestId: string; allowed: boolean }) => runtime.permissionDecision(payload.sessionId, payload.requestId, payload.allowed))
-  ipc.handle('scriptmanager:agents:interrupt', (_event, sessionId: string) => runtime.interrupt(sessionId))
-  ipc.handle('scriptmanager:agents:terminate', (_event, sessionId: string) => runtime.terminate(sessionId))
-  return runtime
+type DesktopAgentServiceController = {
+  launch(input: { profileId: string; prompt: string; cwd: string; desktopHost: boolean; workspaceId: string }): Promise<unknown>
+  interrupt(runId: string): Promise<unknown>
+  resume(runId: string, prompt: string): Promise<unknown>
+  terminate(runId: string): Promise<unknown>
+}
+
+function requiredAgentString(payload: unknown, key: string) {
+  if (!isRecord(payload) || typeof payload[key] !== 'string' || !payload[key].trim()) throw new Error(`${key} is required`)
+  return payload[key].trim()
+}
+
+export function registerAgentServiceIpc(
+  ipc: { handle(channel: string, listener: (_event: unknown, ...args: any[]) => unknown): unknown },
+  service: DesktopAgentServiceController,
+  getWorkspaceId: () => Promise<string>,
+) {
+  ipc.handle('scriptmanager:agents:run', async (_event, payload: unknown) => {
+    const profileId = requiredAgentString(payload, 'profileId')
+    const prompt = requiredAgentString(payload, 'prompt')
+    const cwd = requiredAgentString(payload, 'cwd')
+    return service.launch({ profileId, prompt, cwd, desktopHost: true, workspaceId: await getWorkspaceId() })
+  })
+  ipc.handle('scriptmanager:agents:run-interrupt', async (_event, runId: unknown) => service.interrupt(requiredAgentString({ runId }, 'runId')))
+  ipc.handle('scriptmanager:agents:run-resume', async (_event, payload: unknown) => service.resume(requiredAgentString(payload, 'runId'), requiredAgentString(payload, 'prompt')))
+  ipc.handle('scriptmanager:agents:run-terminate', async (_event, runId: unknown) => service.terminate(requiredAgentString({ runId }, 'runId')))
 }

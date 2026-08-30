@@ -1439,12 +1439,6 @@ type LocalAgentProfilePayload = {
   projectId?: string | null
 }
 
-type LocalAgentRunPayload = {
-  profileId: string
-  prompt: string
-  cwd: string
-}
-
 function serializeLocalAgentProfile(profile: { id: string; name: string; provider: string; accessLevel: string; projectId: string | null; model: string | null }) {
   return {
     id: profile.id,
@@ -1518,80 +1512,6 @@ async function readLocalAgentRun(id: string) {
     messages: run.messages.map((message) => ({ id: message.id, role: message.role, content: message.content })),
     artifacts: run.artifacts.map((artifact) => ({ id: artifact.id, kind: artifact.kind, name: artifact.name, content: artifact.content })),
     usageJson: run.usageJson,
-  }
-}
-
-async function createLocalAgentRun(payload: LocalAgentRunPayload) {
-  if (!payload || typeof payload !== 'object') throw new Error('Agent run payload is required')
-  const actor = await createDesktopActorContext(prisma)
-  const prompt = payload.prompt?.trim()
-  const cwd = payload.cwd?.trim()
-  if (!payload.profileId?.trim() || !prompt || !cwd) throw new Error('profileId, prompt, and cwd are required')
-  const profile = await prisma.agentProfile.findFirst({ where: { id: payload.profileId, workspaceId: actor.workspaceId } })
-  if (!profile) throw new Error('Agent profile not found')
-  const resolvedCwd = path.resolve(cwd)
-  if (!fs.existsSync(resolvedCwd) || !fs.statSync(resolvedCwd).isDirectory()) throw new Error('Agent workspace folder not found')
-
-  const run = await prisma.agentRun.create({
-    data: {
-      profileId: profile.id,
-      provider: profile.provider,
-      workspaceId: actor.workspaceId,
-      initiatedBy: actor.actorId,
-      correlationId: crypto.randomUUID(),
-      inputJson: JSON.stringify({ prompt, cwd: resolvedCwd }),
-      status: 'running',
-      startedAt: new Date(),
-    },
-  })
-  await prisma.agentMessage.create({ data: { runId: run.id, role: 'user', content: prompt } })
-  return serializeLocalAgentRun({ ...run, profile })
-}
-
-async function appendLocalAgentMessage(payload: { id: string; role: string; content: string }) {
-  if (!payload || typeof payload !== 'object' || !payload.id?.trim() || !payload.role?.trim() || typeof payload.content !== 'string') {
-    throw new Error('Agent message payload is invalid')
-  }
-  const actor = await createDesktopActorContext(prisma)
-  const run = await prisma.agentRun.findFirst({ where: { id: payload.id, workspaceId: actor.workspaceId } })
-  if (!run) throw new Error('Agent run not found')
-  return prisma.agentMessage.create({ data: { runId: run.id, role: payload.role, content: payload.content } })
-}
-
-async function updateLocalAgentRun(payload: { id: string; status: string }) {
-  if (!payload || typeof payload !== 'object' || !payload.id?.trim()) throw new Error('Agent run update payload is invalid')
-  if (!['failed', 'interrupted', 'running', 'terminated'].includes(payload.status)) throw new Error('Unsupported agent run status')
-  const actor = await createDesktopActorContext(prisma)
-  const run = await prisma.agentRun.findFirst({ where: { id: payload.id, workspaceId: actor.workspaceId } })
-  if (!run) throw new Error('Agent run not found')
-  const finished = ['failed', 'interrupted', 'terminated'].includes(payload.status)
-  return prisma.agentRun.update({ where: { id: run.id }, data: { status: payload.status, finishedAt: finished ? new Date() : null } })
-}
-
-export async function persistDesktopAgentEvent(sessionId: string, event: unknown) {
-  const run = await prisma.agentRun.findUnique({ where: { id: sessionId } })
-  if (!run || !event || typeof event !== 'object') return
-  const value = event as { type?: string; message?: { role?: string; content?: string }; artifact?: { kind?: string; name?: string; content?: string; path?: string }; usage?: unknown; error?: unknown; state?: string }
-  if (value.type === 'message' && value.message?.content) {
-    await prisma.agentMessage.create({ data: { runId: run.id, role: value.message.role ?? 'assistant', content: value.message.content } })
-    return
-  }
-  if (value.type === 'artifact' && value.artifact?.name) {
-    await prisma.agentArtifact.create({ data: { runId: run.id, kind: value.artifact.kind ?? 'artifact', name: value.artifact.name, content: value.artifact.content, path: value.artifact.path } })
-    return
-  }
-  if (value.type === 'usage') {
-    await prisma.agentRun.update({ where: { id: run.id }, data: { usageJson: JSON.stringify(value.usage ?? {}) } })
-    return
-  }
-  if (value.type === 'error') {
-    const recoverable = Boolean((value.error as { recoverable?: boolean } | undefined)?.recoverable)
-    await prisma.agentRun.update({ where: { id: run.id }, data: { status: recoverable ? 'interrupted' : 'failed', errorJson: JSON.stringify(value.error ?? {}), finishedAt: recoverable ? null : new Date() } })
-    return
-  }
-  if (value.type === 'state') {
-    const status = value.state === 'running' || value.state === 'starting' ? 'running' : value.state === 'interrupted' ? 'interrupted' : value.state === 'terminated' ? 'terminated' : 'failed'
-    await prisma.agentRun.update({ where: { id: run.id }, data: { status, finishedAt: status === 'running' ? null : new Date() } })
   }
 }
 
@@ -3477,9 +3397,6 @@ export function initDesktopRuntimeIpc() {
   ipcMain.handle('scriptmanager:runtime:create-agent-profile', async (_event, payload: LocalAgentProfilePayload) => createLocalAgentProfile(payload))
   ipcMain.handle('scriptmanager:runtime:list-agent-runs', async () => listLocalAgentRuns())
   ipcMain.handle('scriptmanager:runtime:read-agent-run', async (_event, id: string) => readLocalAgentRun(id))
-  ipcMain.handle('scriptmanager:runtime:create-agent-run', async (_event, payload: LocalAgentRunPayload) => createLocalAgentRun(payload))
-  ipcMain.handle('scriptmanager:runtime:append-agent-message', async (_event, payload: { id: string; role: string; content: string }) => appendLocalAgentMessage(payload))
-  ipcMain.handle('scriptmanager:runtime:update-agent-run', async (_event, payload: { id: string; status: string }) => updateLocalAgentRun(payload))
 
   ipcMain.handle('scriptmanager:runtime:create-script', async (_event, payload: CreateScriptPayload) => {
     return createLocalScript(payload)

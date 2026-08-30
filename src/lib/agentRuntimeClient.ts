@@ -38,6 +38,28 @@ type AgentRunPayload = {
   cwd: string
 }
 
+export async function launchAgentRuntime(payload: AgentRunPayload): Promise<AgentRunRuntime> {
+  if (window.scriptManagerDesktop?.agents?.run) {
+    return window.scriptManagerDesktop.agents.run(payload) as Promise<AgentRunRuntime>
+  }
+  const response = await fetch('/api/agents/runs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return readJsonResponse(response) as Promise<AgentRunRuntime>
+}
+
+export async function interruptAgentRuntime(id: string): Promise<unknown> {
+  if (window.scriptManagerDesktop?.agents?.interruptRun) return window.scriptManagerDesktop.agents.interruptRun(id)
+  return updateAgentRunRuntime(id, 'interrupted')
+}
+
+export async function resumeAgentRuntime(id: string, prompt: string): Promise<unknown> {
+  if (window.scriptManagerDesktop?.agents?.resumeRun) return window.scriptManagerDesktop.agents.resumeRun({ runId: id, prompt })
+  return updateAgentRunRuntime(id, 'running')
+}
+
 async function readJsonResponse(response: Response) {
   const data = await response.json().catch(() => ({})) as { error?: string }
   if (!response.ok) throw new Error(data.error ?? 'Agent request failed')
@@ -91,34 +113,7 @@ export async function readAgentRunRuntime(id: string): Promise<AgentRunDetailRun
   return readJsonResponse(response) as Promise<AgentRunDetailRuntime>
 }
 
-export async function createAgentRunRuntime(payload: AgentRunPayload): Promise<AgentRunRuntime> {
-  if (window.scriptManagerDesktop?.runtime?.createAgentRun) {
-    return window.scriptManagerDesktop.runtime.createAgentRun(payload) as Promise<AgentRunRuntime>
-  }
-  const response = await fetch('/api/agents/runs', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  return readJsonResponse(response) as Promise<AgentRunRuntime>
-}
-
-export async function appendAgentMessageRuntime(id: string, message: { role: string; content: string }) {
-  if (window.scriptManagerDesktop?.runtime?.appendAgentMessage) {
-    return window.scriptManagerDesktop.runtime.appendAgentMessage({ id, ...message })
-  }
-  const response = await fetch(`/api/agents/runs/${encodeURIComponent(id)}/messages`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(message),
-  })
-  return readJsonResponse(response)
-}
-
 export async function updateAgentRunRuntime(id: string, status: 'interrupted' | 'running' | 'failed') {
-  if (window.scriptManagerDesktop?.runtime?.updateAgentRun) {
-    return window.scriptManagerDesktop.runtime.updateAgentRun({ id, status })
-  }
   if (status === 'failed') throw new Error('Failed agent runs require the desktop runtime')
   const path = status === 'interrupted' ? 'interrupt' : 'resume'
   const response = await fetch(`/api/agents/runs/${encodeURIComponent(id)}/${path}`, {

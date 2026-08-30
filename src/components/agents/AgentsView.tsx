@@ -4,11 +4,12 @@ import { Bot, FolderOpen, Pause, Play, ShieldCheck } from 'lucide-react'
 import { listProjectsRuntime } from '@/lib/opsRuntimeClient'
 import {
   createAgentProfileRuntime,
-  createAgentRunRuntime,
+  launchAgentRuntime,
+  interruptAgentRuntime,
+  resumeAgentRuntime,
   listAgentProfilesRuntime,
   listAgentRunsRuntime,
   readAgentRunRuntime,
-  updateAgentRunRuntime,
 } from '@/lib/agentRuntimeClient'
 
 type Profile = { id: string; name: string; provider: 'codex' | 'claude'; accessLevel: 'observe' | 'develop' | 'full'; projectId?: string | null; model?: string | null }
@@ -64,20 +65,16 @@ export function AgentsView() {
     setError('')
     let run: Run | null = null
     try {
-      run = await createAgentRunRuntime({ profileId: profile.id, prompt, cwd: workspace })
-      await window.scriptManagerDesktop!.agents!.launch({ provider: profile.provider, sessionId: run.id, profileId: profile.id, cwd: workspace })
-      await window.scriptManagerDesktop!.agents!.input({ sessionId: run.id, message: { role: 'user', content: prompt } })
+      run = await launchAgentRuntime({ profileId: profile.id, prompt, cwd: workspace })
       await load()
       await selectRun(run.id)
     } catch (value) {
-      if (run) await updateAgentRunRuntime(run.id, 'failed').catch(() => undefined)
       setError(value instanceof Error ? value.message : 'Failed to launch agent')
     }
   }
   async function interrupt(run: Run) {
     try {
-      await window.scriptManagerDesktop?.agents?.interrupt(run.id)
-      await updateAgentRunRuntime(run.id, 'interrupted')
+      await interruptAgentRuntime(run.id)
       await load()
       await selectRun(run.id)
     } catch (value) {
@@ -86,8 +83,7 @@ export function AgentsView() {
   }
   async function resume(run: Run) {
     try {
-      await window.scriptManagerDesktop?.agents?.input({ sessionId: run.id, message: { role: 'user', content: prompt } })
-      await updateAgentRunRuntime(run.id, 'running')
+      await resumeAgentRuntime(run.id, prompt)
       await load()
       await selectRun(run.id)
     } catch (value) {

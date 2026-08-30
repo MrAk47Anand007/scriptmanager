@@ -39,12 +39,10 @@ declare global {
       }>
       oauthDefaults?: () => Promise<{ gdrive: boolean; onedrive: boolean }>
       agents?: {
-        discover: () => Promise<unknown[]>
-        launch: (payload: { provider: 'codex' | 'claude'; sessionId: string; profileId: string; cwd: string }) => Promise<unknown>
-        input: (payload: { sessionId: string; message: unknown }) => Promise<{ ok: boolean }>
-        permissionDecision: (payload: { sessionId: string; requestId: string; allowed: boolean }) => Promise<{ ok: boolean }>
-        interrupt: (sessionId: string) => Promise<{ ok: boolean }>
-        terminate: (sessionId: string) => Promise<{ ok: boolean }>
+        run: (payload: { profileId: string; prompt: string; cwd: string }) => Promise<unknown>
+        interruptRun: (runId: string) => Promise<unknown>
+        resumeRun: (payload: { runId: string; prompt: string }) => Promise<unknown>
+        terminateRun: (runId: string) => Promise<unknown>
         onEvent: (listener: (payload: { sessionId: string; event: unknown }) => void) => () => void
       }
       runtime?: {
@@ -97,9 +95,6 @@ declare global {
         createAgentProfile: (payload: unknown) => Promise<unknown>
         listAgentRuns: () => Promise<unknown[]>
         readAgentRun: (id: string) => Promise<unknown>
-        createAgentRun: (payload: unknown) => Promise<unknown>
-        appendAgentMessage: (payload: unknown) => Promise<unknown>
-        updateAgentRun: (payload: unknown) => Promise<unknown>
         createScript: (payload: unknown) => Promise<unknown>
         saveScript: (payload: unknown) => Promise<unknown>
         syncGist: (scriptId: string) => Promise<{ gist_id: string; gist_url: string; gist_filename: string }>

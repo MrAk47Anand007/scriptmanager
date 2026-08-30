@@ -28,12 +28,10 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
   oauthDefaults: () =>
     ipcRenderer.invoke('scriptmanager:oauth-defaults') as Promise<{ gdrive: boolean; onedrive: boolean }>,
   agents: {
-    discover: () => ipcRenderer.invoke('scriptmanager:agents:discover') as Promise<unknown[]>,
-    launch: (payload: { provider: 'codex' | 'claude'; sessionId: string; profileId: string; cwd: string }) => ipcRenderer.invoke('scriptmanager:agents:launch', payload) as Promise<unknown>,
-    input: (payload: { sessionId: string; message: unknown }) => ipcRenderer.invoke('scriptmanager:agents:input', payload) as Promise<{ ok: boolean }>,
-    permissionDecision: (payload: { sessionId: string; requestId: string; allowed: boolean }) => ipcRenderer.invoke('scriptmanager:agents:permission', payload) as Promise<{ ok: boolean }>,
-    interrupt: (sessionId: string) => ipcRenderer.invoke('scriptmanager:agents:interrupt', sessionId) as Promise<{ ok: boolean }>,
-    terminate: (sessionId: string) => ipcRenderer.invoke('scriptmanager:agents:terminate', sessionId) as Promise<{ ok: boolean }>,
+    run: (payload: { profileId: string; prompt: string; cwd: string }) => ipcRenderer.invoke('scriptmanager:agents:run', payload) as Promise<unknown>,
+    interruptRun: (runId: string) => ipcRenderer.invoke('scriptmanager:agents:run-interrupt', runId) as Promise<unknown>,
+    resumeRun: (payload: { runId: string; prompt: string }) => ipcRenderer.invoke('scriptmanager:agents:run-resume', payload) as Promise<unknown>,
+    terminateRun: (runId: string) => ipcRenderer.invoke('scriptmanager:agents:run-terminate', runId) as Promise<unknown>,
     onEvent: (listener: (payload: { sessionId: string; event: unknown }) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: { sessionId: string; event: unknown }) => listener(payload)
       ipcRenderer.on('scriptmanager:agents:event', handler)
@@ -111,9 +109,6 @@ contextBridge.exposeInMainWorld('scriptManagerDesktop', {
     createAgentProfile: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:create-agent-profile', payload) as Promise<unknown>,
     listAgentRuns: () => ipcRenderer.invoke('scriptmanager:runtime:list-agent-runs') as Promise<unknown[]>,
     readAgentRun: (id: string) => ipcRenderer.invoke('scriptmanager:runtime:read-agent-run', id) as Promise<unknown>,
-    createAgentRun: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:create-agent-run', payload) as Promise<unknown>,
-    appendAgentMessage: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:append-agent-message', payload) as Promise<unknown>,
-    updateAgentRun: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:update-agent-run', payload) as Promise<unknown>,
     createScript: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:create-script', payload) as Promise<unknown>,
     saveScript: (payload: unknown) => ipcRenderer.invoke('scriptmanager:runtime:save-script', payload) as Promise<unknown>,
     syncGist: (scriptId: string) => ipcRenderer.invoke('scriptmanager:runtime:sync-gist', scriptId) as Promise<{ gist_id: string; gist_url: string; gist_filename: string }>,

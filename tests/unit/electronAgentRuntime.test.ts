@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
 vi.mock('node:child_process', () => ({ spawn: spawnMock }))
 
-import { createDesktopAcpProviderAdapters, createDesktopAgentRuntime } from '../../electron/agentRuntime'
+import { createDesktopAcpProviderAdapters, createDesktopAgentRuntime, registerAgentServiceIpc } from '../../electron/agentRuntime'
 
 function childProcess() {
   const child = new EventEmitter() as EventEmitter & { stdout: PassThrough; stderr: PassThrough; stdin: { write: ReturnType<typeof vi.fn> }; kill: ReturnType<typeof vi.fn>; killed: boolean }
@@ -47,6 +47,30 @@ async function completeHandshake(child: ReturnType<typeof childProcess>, emit: (
 afterEach(() => vi.clearAllMocks())
 
 describe('electron ACP runtime bridge', () => {
+  it('routes desktop agent controls through the durable agent service', async () => {
+    const handlers = new Map<string, (...args: any[]) => unknown>()
+    const service = {
+      launch: vi.fn().mockResolvedValue({ id: 'run-1' }),
+      interrupt: vi.fn().mockResolvedValue({ id: 'run-1' }),
+      resume: vi.fn().mockResolvedValue({ id: 'run-1' }),
+      terminate: vi.fn().mockResolvedValue({ id: 'run-1' }),
+    }
+    registerAgentServiceIpc(
+      { handle: (channel, listener) => handlers.set(channel, listener) },
+      service,
+      async () => 'workspace-1',
+    )
+
+    await expect(handlers.get('scriptmanager:agents:run')?.({}, { profileId: 'profile-1', prompt: 'inspect', cwd: '/tmp' })).resolves.toEqual({ id: 'run-1' })
+    expect(service.launch).toHaveBeenCalledWith({ profileId: 'profile-1', prompt: 'inspect', cwd: '/tmp', desktopHost: true, workspaceId: 'workspace-1' })
+    await handlers.get('scriptmanager:agents:run-interrupt')?.({}, 'run-1')
+    await handlers.get('scriptmanager:agents:run-resume')?.({}, { runId: 'run-1', prompt: 'continue' })
+    await handlers.get('scriptmanager:agents:run-terminate')?.({}, 'run-1')
+    expect(service.interrupt).toHaveBeenCalledWith('run-1')
+    expect(service.resume).toHaveBeenCalledWith('run-1', 'continue')
+    expect(service.terminate).toHaveBeenCalledWith('run-1')
+  })
+
   it('fails a provider launch when the ACP handshake times out', async () => {
     const child = childProcess()
     const runtimeFactory = createDesktopAgentRuntime as unknown as (emit: (sessionId: string, event: unknown) => void, options: { requestTimeoutMs: number }) => ReturnType<typeof createDesktopAgentRuntime>

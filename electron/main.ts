@@ -11,17 +11,17 @@ import {
   runScriptForWindow,
   setDesktopNotificationsEnabled,
   setLastRunScriptListener,
-  persistDesktopAgentEvent,
 } from './desktopRuntime'
 import { OAUTH_ENDPOINTS, runOAuthFlow } from './oauthFlow'
 import { getDefaultClientId } from './oauthDefaults'
-import { registerAgentRuntimeIpc } from './agentRuntime'
-import { createDesktopAcpProviderAdapters, type DesktopAgentRuntime } from './agentRuntime'
+import { registerAgentServiceIpc } from './agentRuntime'
+import { createDesktopAcpProviderAdapters, createDesktopAgentRuntime, type DesktopAgentRuntime } from './agentRuntime'
 import { createAgentService } from '../src/lib/agents/service'
 import { prisma as workflowPrisma } from '../src/lib/db'
 import { createProductionWorkflowAdapters } from '../src/lib/workflows/runtimeAdapters'
 import { startWorkflowWorker } from '../src/lib/workflows/workerLoop'
 import { getPackagedServerLaunch } from './serverLaunch'
+import { createDesktopActorContext } from '../src/lib/runtime/trustedContext'
 
 // In dev mode, `concurrently` already runs the Next.js server on port 3000.
 // In production (packaged), Electron spawns the standalone server itself.
@@ -39,15 +39,11 @@ let splashWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let nativeNotificationsEnabled = true
 
-const desktopAgentRuntime: DesktopAgentRuntime = registerAgentRuntimeIpc(ipcMain, (sessionId, event) => {
-  if (!desktopAgentRuntime.isManaged(sessionId)) {
-    void persistDesktopAgentEvent(sessionId, event).catch((error) => {
-      console.warn('[Electron] Failed to persist agent event:', error)
-    })
-  }
+const desktopAgentRuntime: DesktopAgentRuntime = createDesktopAgentRuntime((sessionId, event) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scriptmanager:agents:event', { sessionId, event })
 })
 const desktopAgentService = createAgentService(workflowPrisma, createDesktopAcpProviderAdapters(desktopAgentRuntime))
+registerAgentServiceIpc(ipcMain, desktopAgentService, async () => (await createDesktopActorContext(workflowPrisma)).workspaceId)
 
 // 16x16 terracotta rounded square, embedded so the tray works without bundled assets.
 const TRAY_ICON_DATA_URL =
