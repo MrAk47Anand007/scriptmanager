@@ -6,6 +6,7 @@ import { ensureDefaultWorkspace } from '@/lib/rbac/bootstrap'
 import { hashSessionToken } from '@/lib/rbac/requestContext'
 import { GET as readApiToken, POST as createApiToken, DELETE as revokeApiToken } from '@/app/api/auth/api-token/route'
 import { POST as changePassword } from '@/app/api/auth/change-password/route'
+import { POST as logout } from '@/app/api/auth/logout/route'
 
 let sessionId = ''
 let sessionCookie = ''
@@ -67,5 +68,11 @@ describe('account control route authorization', () => {
     const stored = await prisma.setting.findUniqueOrThrow({ where: { key: 'auth_password_hash' } })
     expect(stored.value).not.toBeNull()
     expect(await verifyPassword('new-password', stored.value!)).toBe(true)
+  })
+
+  it('revokes the persisted session on logout', async () => {
+    const response = await logout(new Request('http://localhost/api/auth/logout', { method: 'POST', headers: { cookie: sessionCookie } }))
+    expect(response.status).toBe(200)
+    expect((await prisma.userSession.findUniqueOrThrow({ where: { id: sessionId } })).revokedAt).not.toBeNull()
   })
 })
