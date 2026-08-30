@@ -9,6 +9,15 @@ function render(text: string, event: ExecutionEvent) {
 }
 
 export function renderNotification(templateJson: string, event: ExecutionEvent): NotificationMessage {
-  const template = JSON.parse(templateJson || '{}') as Partial<NotificationMessage>
-  return redactExecutionValue({ title: render(template.title ?? 'ScriptManager event', event), body: render(template.body ?? '{{type}} for {{target}}', event), deepLink: template.deepLink ? render(template.deepLink, event) : undefined, data: { eventId:event.id, correlationId:event.correlationId } }) as NotificationMessage
+  let template: Partial<NotificationMessage> = {}
+  try {
+    const parsed = JSON.parse(templateJson || '{}')
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) template = parsed as Partial<NotificationMessage>
+  } catch {
+    // A malformed persisted template should not prevent other rules from running.
+  }
+  const title = typeof template.title === 'string' ? template.title : 'ScriptManager event'
+  const body = typeof template.body === 'string' ? template.body : '{{type}} for {{target}}'
+  const deepLink = typeof template.deepLink === 'string' && template.deepLink ? render(template.deepLink, event) : undefined
+  return redactExecutionValue({ title: render(title, event), body: render(body, event), deepLink, data: { eventId:event.id, correlationId:event.correlationId } }) as NotificationMessage
 }
