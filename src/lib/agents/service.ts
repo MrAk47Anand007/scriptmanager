@@ -29,7 +29,7 @@ export function createAgentService(database: PrismaClient, adapters: Record<AcpP
     if (event.type === 'message') await repository.appendMessage(runId, event.message)
     else if (event.type === 'artifact') await repository.appendArtifact(runId, event.artifact)
     else if (event.type === 'usage') await repository.updateRun(runId, { usage: event.usage })
-    else if (event.type === 'error') await repository.updateRun(runId, { status: event.error.recoverable ? 'interrupted' : 'failed', error: event.error, finishedAt: event.error.recoverable ? undefined : new Date() })
+    else if (event.type === 'error' && event.error.code !== 'provider_stderr') await repository.updateRun(runId, { status: event.error.recoverable ? 'interrupted' : 'failed', error: event.error, finishedAt: event.error.recoverable ? undefined : new Date() })
     else if (event.type === 'state') await repository.updateRun(runId, { status: event.state, finishedAt: ['succeeded', 'terminated', 'error', 'interrupted'].includes(event.state) ? new Date() : undefined })
     else if (event.type === 'permission_request' && profile && session) {
       const decision = await authorizeAgentAction(database, { actorId: profile.id, workspaceId: profile.workspaceId, runId, correlationId: (await database.agentRun.findUniqueOrThrow({ where: { id: runId } })).correlationId, accessLevel: profile.accessLevel as AgentAccessLevel, capability: event.request.capability, operation: event.request.operation, resource: event.request.resource, reason: event.request.reason, preview: event.request.preview })
@@ -83,6 +83,12 @@ export function createAgentService(database: PrismaClient, adapters: Record<AcpP
     }
   }
 
+  async function getRunInWorkspace(runId: string, workspaceId: string) {
+    const run = await database.agentRun.findFirst({ where: { id: runId, workspaceId } })
+    if (!run) throw new Error('Agent run not found')
+    return run
+  }
+
   return {
     createProviderConfig: repository.createProviderConfig,
     createProfile: repository.createProfile,
@@ -103,10 +109,21 @@ export function createAgentService(database: PrismaClient, adapters: Record<AcpP
       await session.input({ role: 'user', content: input.prompt })
       return (await repository.getRun(run.id))!
     },
-    async interrupt(runId: string) { const session = sessions.get(runId); if (session) await session.interrupt(); return repository.updateRun(runId, { status: 'interrupted' }) },
-    async terminate(runId: string) { const session = sessions.get(runId); if (session) await session.terminate(); sessions.delete(runId); return repository.updateRun(runId, { status: 'terminated', finishedAt: new Date() }) },
-    async resume(runId: string, prompt: string) {
-      const run = await database.agentRun.findUniqueOrThrow({ where: { id: runId } })
+    async interrupt(runId: string, workspaceId: string) {
+      await getRunInWorkspace(runId, workspaceId)
+      const session = sessions.get(runId)
+      if (session) await session.interrupt()
+      return repository.updateRun(runId, { status: 'interrupted' })
+    },
+    async terminate(runId: string, workspaceId: string) {
+      await getRunInWorkspace(runId, workspaceId)
+      const session = sessions.get(runId)
+      if (session) await session.terminate()
+      sessions.delete(runId)
+      return repository.updateRun(runId, { status: 'terminated', finishedAt: new Date() })
+    },
+    async resume(runId: string, prompt: string, workspaceId: string) {
+      const run = await getRunInWorkspace(runId, workspaceId)
       let session = sessions.get(runId)
       if (!session) { session = await adapters[run.provider as AcpProvider].reconnect(run.providerSessionId ?? run.id); sessions.set(runId, session); session.onEvent((event) => handleEvent(runId, event)) }
       await repository.appendMessage(runId, { role: 'user', content: prompt }); await session.input({ role: 'user', content: prompt }); return repository.updateRun(runId, { status: 'running', finishedAt: null })

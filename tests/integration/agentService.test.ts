@@ -14,11 +14,37 @@ describe('agent service', () => {
     const profile = await service.createProfile({ name: 'Dev', provider: 'codex', providerConfigId: config.id, accessLevel: 'develop', workspaceId: 'default' })
     const run = await service.launch({ profileId: profile.id, prompt: 'inspect', cwd: 'C:/workspace', desktopHost: true })
     await codex.emit(run.providerSessionId!, { type: 'message', message: { role: 'assistant', content: 'done' } })
-    await service.interrupt(run.id)
+    await service.interrupt(run.id, 'default')
     expect((await service.getRun(run.id))?.messages.some((message) => message.role === 'assistant' && message.content === 'done')).toBe(true)
     expect((await service.getRun(run.id))?.status).toBe('interrupted')
-    await service.resume(run.id, 'continue')
+    await service.resume(run.id, 'continue', 'default')
     expect((await service.getRun(run.id))?.status).toBe('running')
+  })
+
+  it('rejects run controls from another workspace', async () => {
+    const codex = new FakeAcpProviderAdapter('codex')
+    const service = createAgentService(prisma, { codex, claude: new FakeAcpProviderAdapter('claude') })
+    const config = await service.createProviderConfig({ provider: 'codex', name: 'Codex', executable: 'codex' })
+    const profile = await service.createProfile({ name: 'Dev', provider: 'codex', providerConfigId: config.id, accessLevel: 'develop', workspaceId: 'default' })
+    const run = await service.launch({ profileId: profile.id, prompt: 'inspect', cwd: '.', desktopHost: true })
+
+    await expect(service.interrupt(run.id, 'foreign-workspace')).rejects.toThrow('Agent run not found')
+    await expect(service.resume(run.id, 'continue', 'foreign-workspace')).rejects.toThrow('Agent run not found')
+    await expect(service.terminate(run.id, 'foreign-workspace')).rejects.toThrow('Agent run not found')
+    expect((await service.getRun(run.id))?.status).toBe('running')
+  })
+
+  it('does not treat provider stderr diagnostics as an interrupted run', async () => {
+    const codex = new FakeAcpProviderAdapter('codex')
+    const service = createAgentService(prisma, { codex, claude: new FakeAcpProviderAdapter('claude') })
+    const config = await service.createProviderConfig({ provider: 'codex', name: 'Codex', executable: 'codex' })
+    const profile = await service.createProfile({ name: 'Dev', provider: 'codex', providerConfigId: config.id, accessLevel: 'develop', workspaceId: 'default' })
+    const run = await service.launch({ profileId: profile.id, prompt: 'inspect', cwd: '.', desktopHost: true })
+
+    await codex.emit(run.providerSessionId!, { type: 'error', error: { code: 'provider_stderr', message: 'diagnostic output', recoverable: true } })
+
+    expect((await service.getRun(run.id))?.status).toBe('running')
+    expect((await service.getRun(run.id))?.errorJson).toBeNull()
   })
 
   it('refuses local provider launch in browser-only mode', async () => {

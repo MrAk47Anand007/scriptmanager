@@ -66,9 +66,9 @@ describe('electron ACP runtime bridge', () => {
     await handlers.get('scriptmanager:agents:run-interrupt')?.({}, 'run-1')
     await handlers.get('scriptmanager:agents:run-resume')?.({}, { runId: 'run-1', prompt: 'continue' })
     await handlers.get('scriptmanager:agents:run-terminate')?.({}, 'run-1')
-    expect(service.interrupt).toHaveBeenCalledWith('run-1')
-    expect(service.resume).toHaveBeenCalledWith('run-1', 'continue')
-    expect(service.terminate).toHaveBeenCalledWith('run-1')
+    expect(service.interrupt).toHaveBeenCalledWith('run-1', 'workspace-1')
+    expect(service.resume).toHaveBeenCalledWith('run-1', 'continue', 'workspace-1')
+    expect(service.terminate).toHaveBeenCalledWith('run-1', 'workspace-1')
   })
 
   it('fails a provider launch when the ACP handshake times out', async () => {
