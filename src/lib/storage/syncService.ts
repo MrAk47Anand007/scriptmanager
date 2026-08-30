@@ -39,7 +39,7 @@ export type CollectionSyncSummary = {
   error?: string
 }
 
-const SYNCABLE_EXTENSIONS = new Set(['.py', '.js', '.sh', '.ps1'])
+const SYNCABLE_EXTENSIONS = new Set(['.py', '.js', '.ts', '.sh', '.ps1', '.bat'])
 
 function normalizeRemotePrefix(prefix: string | null | undefined): string {
   return (prefix ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').trim()

@@ -58,6 +58,36 @@ describe('cloud sync workspace ownership', () => {
     expect(createdScripts[0]).toMatchObject({ workspaceId: 'workspace-b', collectionId: 'foreign-collection' })
   })
 
+  it('discovers TypeScript and batch scripts supported by the desktop runtime', async () => {
+    tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'scriptmanager-sync-'))
+    storageClient.list.mockResolvedValueOnce([
+      { path: 'new-script.ts', etag: 'typescript-etag', size: 12, modifiedAt: new Date().toISOString() },
+      { path: 'new-script.bat', etag: 'batch-etag', size: 12, modifiedAt: new Date().toISOString() },
+    ])
+    const database = {
+      collection: {
+        findFirst: vi.fn(async () => ({
+          id: 'collection-1',
+          workspaceId: 'workspace-1',
+          folderPath: null,
+          storageProviderId: 'provider-1',
+          remotePrefix: null,
+          scripts: [],
+        })),
+      },
+      script: {
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          createdScripts.push(data)
+          return data
+        }),
+      },
+    } as never
+
+    await expect(syncCollection(database, 'collection-1', tempRoot, 'workspace-1')).resolves.toMatchObject({ ok: true, pulled: 2 })
+    expect(createdScripts.map((script) => script.filename)).toEqual(['new-script.ts', 'new-script.bat'])
+  })
+
   it('does not sync a collection outside the requested workspace', async () => {
     const findFirst = vi.fn(async () => null)
     const database = {
