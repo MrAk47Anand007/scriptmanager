@@ -19,12 +19,15 @@ export function listScriptFiles(folderPath: string): string[] {
     const entries = fs.readdirSync(currentPath, { withFileTypes: true })
     for (const entry of entries) {
       const fullPath = path.join(currentPath, entry.name)
+      if (entry.isSymbolicLink()) {
+        continue
+      }
       if (entry.isDirectory()) {
         walk(fullPath)
         continue
       }
 
-      if (isSupportedScriptFile(entry.name)) {
+      if (entry.isFile() && isSupportedScriptFile(entry.name)) {
         results.push(fullPath)
       }
     }

@@ -39,6 +39,7 @@ import { filterPublicSettings, parsePublicSettings } from '../src/lib/settingsVi
 import { getDesktopWorkspaceLayout, ensureDesktopWorkspaceLayout, sanitizeWorkspaceName } from '../src/lib/workspaceLayout'
 import { resolveScriptSourcePathAfterMove, resolveScriptWorkingDirectory } from '../src/lib/scriptPathResolver'
 import { defaultScriptExtension, inferScriptLanguage } from '../src/lib/scriptLanguage'
+import { buildLinkedScriptName, getFolderDisplayName, listScriptFiles } from '../src/lib/linkedFolders'
 import {
   deleteStorageProvider as deleteDesktopStorageProvider,
   listStorageProviders as listDesktopStorageProviders,
@@ -377,7 +378,6 @@ const windowRuntimes = new Map<number, WindowRuntime>()
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_TERMINAL_SESSION_ID = 'terminal-1'
 const MAX_SCRIPT_VERSIONS = 10
-const SCRIPT_EXTENSIONS = new Set(['.py', '.js', '.ts', '.sh', '.ps1', '.bat'])
 const PYTHON_MANIFESTS = ['requirements.txt', 'pyproject.toml', 'Pipfile']
 const SAFE_FILENAME_CHARS = /[^a-zA-Z0-9_.-]/g
 const SETTINGS_CACHE_TTL_MS = 30_000
@@ -654,38 +654,6 @@ function serializeCollectionRecord(collection: CollectionRecord): CollectionDto 
     remote_prefix: collection.remotePrefix ?? null,
     created_at: collection.createdAt.toISOString(),
   }
-}
-
-function isSupportedScriptFile(fileName: string): boolean {
-  return SCRIPT_EXTENSIONS.has(path.extname(fileName).toLowerCase())
-}
-
-function getFolderDisplayName(folderPath: string): string {
-  return path.basename(folderPath) || folderPath
-}
-
-function buildLinkedScriptName(folderPath: string, filePath: string): string {
-  return path.relative(folderPath, filePath).replace(/\\/g, '/')
-}
-
-function listScriptFiles(folderPath: string): string[] {
-  const results: string[] = []
-  const walk = (currentPath: string) => {
-    const entries = fs.readdirSync(currentPath, { withFileTypes: true })
-    for (const entry of entries) {
-      const fullPath = path.join(currentPath, entry.name)
-      if (entry.isDirectory()) {
-        walk(fullPath)
-        continue
-      }
-      if (isSupportedScriptFile(entry.name)) {
-        results.push(fullPath)
-      }
-    }
-  }
-
-  walk(folderPath)
-  return results.sort((a, b) => a.localeCompare(b))
 }
 
 function sanitizeCollectionFolderName(name: string): string {

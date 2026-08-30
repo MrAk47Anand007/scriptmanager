@@ -15,6 +15,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/toast';
+import { SCRIPT_SCAN_EXTENSION_OPTIONS } from '@/lib/scriptScanOptions';
 import { Folder, Loader2, ScanSearch, X } from 'lucide-react';
 
 type ScannedFile = {
@@ -33,13 +34,6 @@ type ScanResult = {
 
 type Step = 'options' | 'scanning' | 'results'
 
-const EXTENSION_OPTIONS = [
-    { ext: '.py', label: 'Python (.py)' },
-    { ext: '.js', label: 'JavaScript (.js)' },
-    { ext: '.sh', label: 'Shell (.sh)' },
-    { ext: '.ps1', label: 'PowerShell (.ps1)' },
-] as const;
-
 const MAX_DISPLAYED_FILES = 500;
 
 function parentDir(filePath: string): string {
@@ -56,7 +50,7 @@ export function ScanPcDialog({ open, onOpenChange }: ScanPcDialogProps) {
     const dispatch = useAppDispatch();
     const [step, setStep] = useState<Step>('options');
     const [roots, setRoots] = useState<string[]>([]);
-    const [extensions, setExtensions] = useState<string[]>(EXTENSION_OPTIONS.map((option) => option.ext));
+    const [extensions, setExtensions] = useState<string[]>(SCRIPT_SCAN_EXTENSION_OPTIONS.map((option) => option.ext));
     const [scanResult, setScanResult] = useState<ScanResult | null>(null);
     const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
     const [importMode, setImportMode] = useState<'misc' | 'by-folder'>('misc');
@@ -210,7 +204,7 @@ export function ScanPcDialog({ open, onOpenChange }: ScanPcDialogProps) {
                         <div className="flex flex-col gap-2">
                             <Label>Script types</Label>
                             <div className="grid grid-cols-2 gap-2">
-                                {EXTENSION_OPTIONS.map((option) => (
+                                {SCRIPT_SCAN_EXTENSION_OPTIONS.map((option) => (
                                     <div key={option.ext} className="flex items-center space-x-2">
                                         <Checkbox
                                             id={`scan-ext-${option.ext}`}
