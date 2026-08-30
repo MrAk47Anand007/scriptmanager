@@ -38,6 +38,7 @@ import { syncCollectionRemote } from '@/lib/storageRuntimeClient';
 import { importDesktopScannedScripts, readScriptContentRuntime } from '@/lib/scriptsRuntimeClient';
 import { getDesktopDroppedScriptPaths } from '@/lib/desktopFileDrop';
 import { inferScriptDraft } from '@/lib/scriptDraft';
+import { getOperationError } from '@/lib/operationError';
 import { SaveAsTemplateDialog } from './sidebar/SaveAsTemplateDialog';
 import { ScriptTree, getCollectionTreeKey, type ScriptTreeCallbacks } from './sidebar/ScriptTree';
 import { TemplatePickerDialog } from './TemplatePickerDialog';
@@ -77,16 +78,6 @@ const GistSyncStatus = () => {
         </span>
     );
 };
-
-function getScriptsSidebarError(value: unknown, fallback: string): string {
-    if (value instanceof Error && value.message) return value.message;
-    if (typeof value === 'string' && value) return value;
-    if (value && typeof value === 'object' && 'message' in value) {
-        const message = (value as { message?: unknown }).message;
-        if (typeof message === 'string' && message) return message;
-    }
-    return fallback;
-}
 
 const ScriptsSidebarComponent = () => {
     const dispatch = useAppDispatch();
@@ -175,7 +166,7 @@ const ScriptsSidebarComponent = () => {
             setNewProjectName('');
             setIsCreatingProject(false);
         } catch (error) {
-            toast.error(getScriptsSidebarError(error, 'Failed to create project'));
+            toast.error(getOperationError(error, 'Failed to create project'));
         }
     };
 
@@ -184,7 +175,7 @@ const ScriptsSidebarComponent = () => {
             try {
                 await dispatch(deleteProject(id)).unwrap();
             } catch (error) {
-                toast.error(getScriptsSidebarError(error, 'Failed to delete project'));
+                toast.error(getOperationError(error, 'Failed to delete project'));
             }
         }
     }, [dispatch]);
@@ -215,7 +206,7 @@ const ScriptsSidebarComponent = () => {
 
     const handleDuplicateScript = useCallback((scriptId: string) => {
         void dispatch(duplicateScript(scriptId)).unwrap().catch((error) => {
-            toast.error(getScriptsSidebarError(error, 'Failed to duplicate script'));
+            toast.error(getOperationError(error, 'Failed to duplicate script'));
         });
     }, [dispatch]);
 
@@ -276,7 +267,7 @@ const ScriptsSidebarComponent = () => {
         try {
             await dispatch(fetchCollections()).unwrap();
         } catch (error) {
-            toast.error(getScriptsSidebarError(error, 'Failed to refresh collections'));
+            toast.error(getOperationError(error, 'Failed to refresh collections'));
         }
     }, [dispatch]);
 
@@ -413,7 +404,7 @@ const ScriptsSidebarComponent = () => {
             }
             setIsCreateScriptOpen(false);
         } catch (error) {
-            toast.error(getScriptsSidebarError(error, 'Failed to create script'));
+            toast.error(getOperationError(error, 'Failed to create script'));
         } finally {
             setIsCreatingScript(false);
         }
@@ -440,7 +431,7 @@ const ScriptsSidebarComponent = () => {
             }
             resetCollectionCreationState();
         } catch (error) {
-            toast.error(getScriptsSidebarError(error, 'Failed to create collection'));
+            toast.error(getOperationError(error, 'Failed to create collection'));
         } finally {
             setIsSubmittingCollection(false);
         }
@@ -467,7 +458,7 @@ const ScriptsSidebarComponent = () => {
             }
             setCollectionToDelete(null);
         } catch (error) {
-            toast.error(getScriptsSidebarError(error, 'Failed to delete collection'));
+            toast.error(getOperationError(error, 'Failed to delete collection'));
         } finally {
             setPendingCollectionDeleteId((current) => current === collectionToDelete.id ? null : current);
             setIsDeletingCollectionDialog(false);
@@ -490,7 +481,7 @@ const ScriptsSidebarComponent = () => {
             setCollectionToConvert(null);
             setConvertCollectionName('');
         } catch (error) {
-            toast.error(getScriptsSidebarError(error, 'Failed to save collection'));
+            toast.error(getOperationError(error, 'Failed to save collection'));
         } finally {
             setIsConvertingCollection(false);
         }
@@ -540,7 +531,7 @@ const ScriptsSidebarComponent = () => {
                 }
             }
         } catch (error) {
-            toast.error(getScriptsSidebarError(error, 'Failed to move item'));
+            toast.error(getOperationError(error, 'Failed to move item'));
         }
     };
 
@@ -607,7 +598,7 @@ const ScriptsSidebarComponent = () => {
                 setExpandedCollections(prev => ({ ...prev, [parentCollectionId]: true }));
             }
         } catch (error) {
-            toast.error(getScriptsSidebarError(error, 'Failed to create script from template'));
+            toast.error(getOperationError(error, 'Failed to create script from template'));
         }
     };
 

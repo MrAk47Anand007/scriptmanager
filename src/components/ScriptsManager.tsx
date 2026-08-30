@@ -41,6 +41,7 @@ import { BuildHistorySection } from './BuildHistorySection';
 import { TagsInput } from './TagsInput';
 import { EnvVarsPanel } from './EnvVarsPanel';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Github, Loader2, SlidersHorizontal, Download, ShieldCheck, KeyRound } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
@@ -79,6 +80,7 @@ import { readGithubGistSettingsRuntime } from '@/lib/gistCredentialsRuntimeClien
 import { getCanonicalFolderChangeEffect } from '@/lib/canonicalFolderReload';
 import type { CanonicalRecoveryDraft } from '@/lib/scriptsRuntimeClient';
 import { DESKTOP_BUILD_HISTORY_POLL_INTERVAL_MS, shouldPollDesktopBuildHistory } from '@/lib/buildHistoryPolling';
+import { getOperationError } from '@/lib/operationError';
 
 const LANGUAGE_OPTIONS = [
     { value: 'python', label: 'Python' },
@@ -748,19 +750,19 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
             const script = activeScript;
             if (script) {
                 const timeoutMs = timeoutSecs.trim() ? Math.round(parseFloat(timeoutSecs) * 1000) : null;
-                const result = await dispatch(saveScript({
-                    id: activeScriptId,
-                    name: script.name,
-                    content: scriptContent,
-                    sync_to_gist: script.sync_to_gist,
-                    language: scriptLanguage,
-                    interpreter: scriptLanguage === 'custom' ? customInterpreter : null,
-                    parameters: scriptParameters,
-                    timeout_ms: timeoutMs,
-                    skipGist: options.skipGist
-                }));
+                try {
+                    await dispatch(saveScript({
+                        id: activeScriptId,
+                        name: script.name,
+                        content: scriptContent,
+                        sync_to_gist: script.sync_to_gist,
+                        language: scriptLanguage,
+                        interpreter: scriptLanguage === 'custom' ? customInterpreter : null,
+                        parameters: scriptParameters,
+                        timeout_ms: timeoutMs,
+                        skipGist: options.skipGist
+                    })).unwrap();
 
-                if (saveScript.fulfilled.match(result)) {
                     // Refresh version list only if the user has already opened/loaded it.
                     if (!options.isAutoSave && versionsStatus !== 'idle') {
                         dispatch(fetchVersions(activeScriptId));
@@ -769,6 +771,10 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
                         setGistDirty(false);
                     }
                     return true;
+                } catch (error) {
+                    if (!options.isAutoSave) {
+                        toast.error(getOperationError(error, 'Failed to save script'));
+                    }
                 }
             }
         }
@@ -835,16 +841,15 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
     }, [activeScriptId, gistDirty, activeScript]);
 
     const toggleGistSync = async (enabled: boolean) => {
-        if (enabled) {
-            const gistSettings = await readGithubGistSettingsRuntime();
-            if (!gistSettings.configured) {
-                alert("Please configure your GitHub Token in Settings first.");
-                return;
-            }
-        }
-
         try {
             setIsGistSyncing(true);
+            if (enabled) {
+                const gistSettings = await readGithubGistSettingsRuntime();
+                if (!gistSettings.configured) {
+                    alert("Please configure your GitHub Token in Settings first.");
+                    return;
+                }
+            }
             if (activeScriptId && activeScript) {
                 await dispatch(saveScript({
                     id: activeScriptId,
@@ -853,8 +858,10 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
                     sync_to_gist: enabled,
                     language: scriptLanguage,
                     interpreter: scriptLanguage === 'custom' ? customInterpreter : null
-                }));
+                })).unwrap();
             }
+        } catch (error) {
+            toast.error(getOperationError(error, 'Failed to update Gist sync'));
         } finally {
             setIsGistSyncing(false);
         }
@@ -864,7 +871,10 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
         if (activeScriptId) {
             setIsScheduleSaving(true);
             try {
-                await dispatch(saveSchedule({ scriptId: activeScriptId, cron: cronExpression, enabled: scheduleEnabled }));
+                await dispatch(saveSchedule({ scriptId: activeScriptId, cron: cronExpression, enabled: scheduleEnabled })).unwrap();
+                toast.success('Schedule saved');
+            } catch (error) {
+                toast.error(getOperationError(error, 'Failed to save schedule'));
             } finally {
                 setIsScheduleSaving(false);
             }
@@ -875,7 +885,10 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
         if (activeScriptId && confirm("Regenerate webhook URL? The old one will stop working.")) {
             setIsRegeneratingWebhook(true);
             try {
-                await dispatch(regenerateWebhook(activeScriptId));
+                await dispatch(regenerateWebhook(activeScriptId)).unwrap();
+                toast.success('Webhook token regenerated');
+            } catch (error) {
+                toast.error(getOperationError(error, 'Failed to regenerate webhook token'));
             } finally {
                 setIsRegeneratingWebhook(false);
             }
@@ -886,10 +899,12 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
         if (!activeScriptId) return;
         setIsWebhookLoading(true);
         try {
-            const result = await dispatch(toggleWebhookSignature({ scriptId: activeScriptId, requireSignature: checked }));
-            if (toggleWebhookSignature.fulfilled.match(result) && result.payload.webhook_secret) {
-                setRevealedSecret(result.payload.webhook_secret);
+            const result = await dispatch(toggleWebhookSignature({ scriptId: activeScriptId, requireSignature: checked })).unwrap();
+            if (result.webhook_secret) {
+                setRevealedSecret(result.webhook_secret);
             }
+        } catch (error) {
+            toast.error(getOperationError(error, 'Failed to update webhook signature settings'));
         } finally {
             setIsWebhookLoading(false);
         }
@@ -897,30 +912,40 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
 
     const handleRotateWebhookSecret = useCallback(async () => {
         if (!activeScriptId) return;
-        const result = await dispatch(regenerateWebhookSecret(activeScriptId));
-        if (regenerateWebhookSecret.fulfilled.match(result)) {
-            setRevealedSecret(result.payload.secret);
+        try {
+            const result = await dispatch(regenerateWebhookSecret(activeScriptId)).unwrap();
+            setRevealedSecret(result.secret);
+        } catch (error) {
+            toast.error(getOperationError(error, 'Failed to rotate webhook secret'));
         }
     }, [activeScriptId, dispatch]);
 
     const handleAddTag = useCallback((name: string) => {
         if (!activeScriptId) return;
-        dispatch(addTagToScript({ scriptId: activeScriptId, name }));
+        void dispatch(addTagToScript({ scriptId: activeScriptId, name })).unwrap().catch((error) => {
+            toast.error(getOperationError(error, 'Failed to add tag'));
+        });
     }, [activeScriptId, dispatch]);
 
     const handleRemoveTag = useCallback((tagId: string) => {
         if (!activeScriptId) return;
-        dispatch(removeTagFromScript({ scriptId: activeScriptId, tagId }));
+        void dispatch(removeTagFromScript({ scriptId: activeScriptId, tagId })).unwrap().catch((error) => {
+            toast.error(getOperationError(error, 'Failed to remove tag'));
+        });
     }, [activeScriptId, dispatch]);
 
     const handleAddEnvVar = useCallback((key: string, value: string, isSecret: boolean) => {
         if (!activeScriptId) return;
-        dispatch(upsertEnvVar({ scriptId: activeScriptId, key, value, isSecret }));
+        void dispatch(upsertEnvVar({ scriptId: activeScriptId, key, value, isSecret })).unwrap().catch((error) => {
+            toast.error(getOperationError(error, 'Failed to save environment variable'));
+        });
     }, [activeScriptId, dispatch]);
 
     const handleDeleteEnvVar = useCallback((key: string) => {
         if (!activeScriptId) return;
-        dispatch(deleteEnvVar({ scriptId: activeScriptId, key }));
+        void dispatch(deleteEnvVar({ scriptId: activeScriptId, key })).unwrap().catch((error) => {
+            toast.error(getOperationError(error, 'Failed to delete environment variable'));
+        });
     }, [activeScriptId, dispatch]);
 
     const handleRestoreVersionContent = useCallback((content: string) => {
@@ -1065,12 +1090,12 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
         if (!activeScriptId) return;
         setIsLoadingBuildOutput(true);
         try {
-            const result = await dispatch(fetchBuildOutput({ scriptId: activeScriptId, buildId }));
-            if (fetchBuildOutput.fulfilled.match(result)) {
-                setBuildOutput(result.payload);
-                buildOutputBufferRef.current = '';
-                dispatch(setActiveDockTab('output'));
-            }
+            const output = await dispatch(fetchBuildOutput({ scriptId: activeScriptId, buildId })).unwrap();
+            setBuildOutput(output);
+            buildOutputBufferRef.current = '';
+            dispatch(setActiveDockTab('output'));
+        } catch (error) {
+            toast.error(getOperationError(error, 'Failed to load build output'));
         } finally {
             setIsLoadingBuildOutput(false);
         }
@@ -1078,10 +1103,14 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
 
     const handleMoveScript = async (collectionId: string) => {
         if (activeScriptId) {
-            await dispatch(moveScript({
-                scriptId: activeScriptId,
-                collectionId: collectionId === 'unsorted' ? null : collectionId
-            }));
+            try {
+                await dispatch(moveScript({
+                    scriptId: activeScriptId,
+                    collectionId: collectionId === 'unsorted' ? null : collectionId
+                })).unwrap();
+            } catch (error) {
+                toast.error(getOperationError(error, 'Failed to move script'));
+            }
         }
     }
 

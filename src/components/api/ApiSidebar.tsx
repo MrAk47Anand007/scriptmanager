@@ -86,6 +86,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getOperationError } from '@/lib/operationError'
 
 function blankRow(): KeyValueRow {
   return { id: crypto.randomUUID(), key: '', value: '', enabled: true }
@@ -133,16 +134,6 @@ function parseDraft(request: ApiRequest): ApiRequestDraft {
   }
 }
 
-function getApiOperationError(value: unknown, fallback: string): string {
-  if (value instanceof Error && value.message) return value.message
-  if (typeof value === 'string' && value) return value
-  if (value && typeof value === 'object' && 'message' in value) {
-    const message = (value as { message?: unknown }).message
-    if (typeof message === 'string' && message) return message
-  }
-  return fallback
-}
-
 interface RequestItemProps {
   request: ApiRequest
   active: boolean
@@ -164,7 +155,7 @@ const RequestItem = memo(function RequestItem({ request, active, collections, in
     try {
       await dispatch(deleteApiRequest(request.id)).unwrap()
     } catch (error) {
-      toast.error(getApiOperationError(error, 'Failed to delete request'))
+      toast.error(getOperationError(error, 'Failed to delete request'))
     }
   }
 
@@ -173,7 +164,7 @@ const RequestItem = memo(function RequestItem({ request, active, collections, in
     try {
       await dispatch(saveApiRequest(draft)).unwrap()
     } catch (error) {
-      toast.error(getApiOperationError(error, 'Failed to duplicate request'))
+      toast.error(getOperationError(error, 'Failed to duplicate request'))
     }
   }
 
@@ -190,7 +181,7 @@ const RequestItem = memo(function RequestItem({ request, active, collections, in
     try {
       await dispatch(saveApiRequest({ ...parseDraft(request), collectionId })).unwrap()
     } catch (error) {
-      toast.error(getApiOperationError(error, 'Failed to move request'))
+      toast.error(getOperationError(error, 'Failed to move request'))
     }
   }
 
@@ -322,7 +313,7 @@ const CollectionItem = memo(function CollectionItem({
       })).unwrap()
       setRenaming(false)
     } catch (error) {
-      toast.error(getApiOperationError(error, 'Failed to rename collection'))
+      toast.error(getOperationError(error, 'Failed to rename collection'))
     }
   }
 
@@ -569,7 +560,7 @@ export function ApiSidebar() {
         setNewCollectionName('')
         setShowNewCollection(false)
       } catch (error) {
-        toast.error(getApiOperationError(error, 'Failed to create collection'))
+        toast.error(getOperationError(error, 'Failed to create collection'))
       } finally {
         setIsCreatingCollection(false)
       }
@@ -587,7 +578,7 @@ export function ApiSidebar() {
       })).unwrap()
       setEnvironmentDialogOpen(false)
     } catch (error) {
-      toast.error(getApiOperationError(error, 'Failed to save environment'))
+      toast.error(getOperationError(error, 'Failed to save environment'))
     } finally {
       setIsSavingEnvironment(false)
     }
@@ -599,7 +590,7 @@ export function ApiSidebar() {
       await dispatch(saveApiGlobals(globalsDraft)).unwrap()
       setGlobalsDialogOpen(false)
     } catch (error) {
-      toast.error(getApiOperationError(error, 'Failed to save global variables'))
+      toast.error(getOperationError(error, 'Failed to save global variables'))
     } finally {
       setIsSavingGlobals(false)
     }
@@ -617,7 +608,7 @@ export function ApiSidebar() {
       })).unwrap()
       setCollectionVariablesOpen(false)
     } catch (error) {
-      toast.error(getApiOperationError(error, 'Failed to save collection variables'))
+      toast.error(getOperationError(error, 'Failed to save collection variables'))
     } finally {
       setIsSavingCollectionVariables(false)
     }
@@ -632,7 +623,7 @@ export function ApiSidebar() {
       dispatch(setActiveCollectionRun(result))
       setRunDialogOpen(true)
     } catch (error) {
-      toast.error(getApiOperationError(error, 'Failed to run collection'))
+      toast.error(getOperationError(error, 'Failed to run collection'))
     }
   }
 
@@ -670,7 +661,7 @@ export function ApiSidebar() {
         }
       }
     } catch (error) {
-      toast.error(getApiOperationError(error, 'Failed to import Postman workspace'))
+      toast.error(getOperationError(error, 'Failed to import Postman workspace'))
     } finally {
       setIsImporting(false)
     }
@@ -749,7 +740,7 @@ export function ApiSidebar() {
     try {
       await dispatch(deleteApiCollection(collection.id)).unwrap()
     } catch (error) {
-      toast.error(getApiOperationError(error, 'Failed to delete collection'))
+      toast.error(getOperationError(error, 'Failed to delete collection'))
     } finally {
       setDeletingCollectionId((current) => current === collection.id ? null : current)
     }
@@ -760,7 +751,7 @@ export function ApiSidebar() {
     try {
       await dispatch(deleteApiEnvironment(environment.id)).unwrap()
     } catch (error) {
-      toast.error(getApiOperationError(error, 'Failed to delete environment'))
+      toast.error(getOperationError(error, 'Failed to delete environment'))
     } finally {
       setDeletingEnvironmentId((current) => current === environment.id ? null : current)
     }
@@ -771,7 +762,7 @@ export function ApiSidebar() {
     try {
       await dispatch(deleteApiRequest(request.id)).unwrap()
     } catch (error) {
-      toast.error(getApiOperationError(error, 'Failed to delete request'))
+      toast.error(getOperationError(error, 'Failed to delete request'))
     } finally {
       setDeletingRequestId((current) => current === request.id ? null : current)
     }
@@ -1092,7 +1083,7 @@ export function ApiSidebar() {
                     try {
                       await dispatch(clearApiHistory()).unwrap()
                     } catch (error) {
-                      toast.error(getApiOperationError(error, 'Failed to clear request history'))
+                      toast.error(getOperationError(error, 'Failed to clear request history'))
                     } finally {
                       setIsClearingHistory(false)
                     }
