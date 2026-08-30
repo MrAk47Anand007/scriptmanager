@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getCanonicalFolderReloadAction } from '@/lib/canonicalFolderReload'
+import { getCanonicalFolderChangeEffect, getCanonicalFolderReloadAction } from '@/lib/canonicalFolderReload'
 
 describe('canonical folder reload decisions', () => {
   const change = {
@@ -37,5 +37,15 @@ describe('canonical folder reload decisions', () => {
       editorContent: 'print(2)',
       persistedContent: 'print(1)',
     })).toBe('ignore')
+  })
+
+  it('refreshes workspace metadata even when the changed file is not active', () => {
+    expect(getCanonicalFolderChangeEffect({
+      change: { ...change, scriptId: 'script-2', sourcePath: '/scripts/two.py' },
+      activeScriptId: 'script-1',
+      activeSourcePath: '/scripts/one.py',
+      editorContent: 'print(1)',
+      persistedContent: 'print(1)',
+    })).toEqual({ refreshWorkspace: true, reload: 'ignore' })
   })
 })

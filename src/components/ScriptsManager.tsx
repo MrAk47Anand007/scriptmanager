@@ -26,7 +26,7 @@ const TerminalComponent = dynamic(() => import('./TerminalComponent').then(mod =
 import { DOCK_PANE_IDS } from '@/components/workbench/BottomDock';
 import { setActiveDockTab } from '@/features/workbench/workbenchSlice';
 import {
-    fetchScriptContent, saveScript, runScript, fetchBuilds, fetchBuildOutput,
+    fetchScriptContent, fetchScripts, fetchCollections, saveScript, runScript, fetchBuilds, fetchBuildOutput,
     clearBuildOutput,
     regenerateWebhook, fetchSchedule, saveSchedule,
     moveScript, addTagToScript, removeTagFromScript, fetchAllTags,
@@ -75,7 +75,7 @@ import {
     exportScriptRuntime,
 } from '@/lib/scriptsRuntimeClient';
 import { readGithubGistSettingsRuntime } from '@/lib/gistCredentialsRuntimeClient';
-import { getCanonicalFolderReloadAction } from '@/lib/canonicalFolderReload';
+import { getCanonicalFolderChangeEffect } from '@/lib/canonicalFolderReload';
 import type { CanonicalRecoveryDraft } from '@/lib/scriptsRuntimeClient';
 
 const LANGUAGE_OPTIONS = [
@@ -459,6 +459,12 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
     const [isRegeneratingWebhook, setIsRegeneratingWebhook] = useState(false);
     const [isLoadingBuildOutput, setIsLoadingBuildOutput] = useState(false);
     const [terminalLaunchStage, setTerminalLaunchStage] = useState<'saving' | 'preparing' | 'opening' | null>(null);
+    const activeScriptRef = useRef(activeScript);
+    const activeScriptIdRef = useRef(activeScriptId);
+    const scriptContentRef = useRef(scriptContent);
+    activeScriptRef.current = activeScript;
+    activeScriptIdRef.current = activeScriptId;
+    scriptContentRef.current = scriptContent;
     const openTerminalPanel = useCallback(() => {
         setIsTerminalOpen(true);
         setIsTerminalMinimized(false);
@@ -516,21 +522,27 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
         if (!isDesktopRuntime) return;
 
         return subscribeToCanonicalFolderChanges((change) => {
-            const action = getCanonicalFolderReloadAction({
+            const currentActiveScript = activeScriptRef.current;
+            const currentActiveScriptId = activeScriptIdRef.current;
+            const effect = getCanonicalFolderChangeEffect({
                 change,
-                activeScriptId,
-                activeSourcePath: activeScript?.source_path,
-                editorContent: scriptContent,
-                persistedContent: activeScript?.content || '',
+                activeScriptId: currentActiveScriptId,
+                activeSourcePath: currentActiveScript?.source_path,
+                editorContent: scriptContentRef.current,
+                persistedContent: currentActiveScript?.content || '',
             });
-            if (action === 'ignore' || !activeScriptId) return;
 
-            if (action === 'recover' && activeScript?.source_path) {
+            if (effect.refreshWorkspace) {
+                void Promise.all([dispatch(fetchScripts()), dispatch(fetchCollections())]);
+            }
+            if (effect.reload === 'ignore' || !currentActiveScriptId) return;
+
+            if (effect.reload === 'recover' && currentActiveScript?.source_path) {
                 void saveCanonicalRecoveryDraft({
-                    scriptId: activeScriptId,
-                    sourcePath: activeScript.source_path,
-                    sourceRevision: activeScript.updated_at,
-                    content: scriptContent,
+                    scriptId: currentActiveScriptId,
+                    sourcePath: currentActiveScript.source_path,
+                    sourceRevision: currentActiveScript.updated_at,
+                    content: scriptContentRef.current,
                 }).then(() => {
                     setCanonicalFolderNotice('External change detected. Your unsaved editor buffer was saved as a recovery draft.')
                 }).catch(() => {
@@ -540,9 +552,9 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
                 setCanonicalFolderNotice('External change detected. Reloading the canonical script file.')
             }
 
-            dispatch(fetchScriptContent(activeScriptId));
+            dispatch(fetchScriptContent(currentActiveScriptId));
         });
-    }, [activeScript, activeScriptId, dispatch, isDesktopRuntime, scriptContent]);
+    }, [dispatch, isDesktopRuntime]);
 
     useEffect(() => {
         if (!isDesktopRuntime || !activeScriptId) {
