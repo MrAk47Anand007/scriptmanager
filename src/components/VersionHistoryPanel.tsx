@@ -8,6 +8,8 @@ import type { ScriptVersionMeta } from '@/features/scripts/scriptsSlice'
 import { selectVersions, selectVersionsStatus } from '@/features/scripts/selectors'
 import { Button } from '@/components/ui/button'
 import { Loader2, History, ChevronDown, ChevronRight, RotateCcw, Eye } from 'lucide-react'
+import { toast } from '@/components/ui/toast'
+import { getOperationError } from '@/lib/operationError'
 
 const DiffEditor = dynamic(
     () => import('@monaco-editor/react').then((mod) => mod.DiffEditor),
@@ -70,7 +72,9 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
         const next = !isOpen
         setIsOpen(next)
         if (next && versionsStatus === 'idle') {
-            dispatch(fetchVersions(scriptId))
+            void dispatch(fetchVersions(scriptId)).unwrap().catch((error) => {
+                toast.error(getOperationError(error, 'Failed to load version history'))
+            })
         }
     }, [isOpen, versionsStatus, dispatch, scriptId])
 
@@ -88,6 +92,8 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
             setSelectedVersion(version)
             setSelectedContent(result.content)
             setShowDiff(true)
+        } catch (error) {
+            toast.error(getOperationError(error, 'Failed to load version'))
         } finally {
             setLoadingVersionId(null)
         }
