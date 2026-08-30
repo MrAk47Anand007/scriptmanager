@@ -36,7 +36,7 @@ import { createWorkflowTriggerService } from '../src/lib/workflows/triggers'
 import { validateWorkflowGraph } from '../src/lib/workflows/graph'
 import { filterPublicSettings, parsePublicSettings } from '../src/lib/settingsVisibility'
 import { getDesktopWorkspaceLayout, ensureDesktopWorkspaceLayout, sanitizeWorkspaceName } from '../src/lib/workspaceLayout'
-import { resolveScriptWorkingDirectory } from '../src/lib/scriptPathResolver'
+import { resolveScriptSourcePathAfterMove, resolveScriptWorkingDirectory } from '../src/lib/scriptPathResolver'
 import { defaultScriptExtension, inferScriptLanguage } from '../src/lib/scriptLanguage'
 import {
   deleteStorageProvider as deleteDesktopStorageProvider,
@@ -2249,13 +2249,15 @@ async function moveLocalScript(payload: { scriptId: string; collectionId: string
   const sourcePath = await resolveScriptPath(script)
   const destinationDirectory = collection?.folderPath ? path.resolve(collection.folderPath) : await getWorkspaceRoot()
   const destinationPath = path.resolve(destinationDirectory, path.basename(script.filename))
+  const destinationIsManaged = !collection?.folderPath || await isManagedCollectionWorkspace(destinationDirectory)
+  const nextSourcePath = resolveScriptSourcePathAfterMove(destinationPath, destinationIsManaged)
   const moved = sourcePath !== destinationPath
 
   if (moved) moveManagedScriptFile(sourcePath, destinationDirectory, script.filename)
   try {
     const updated = await prisma.script.update({
       where: { id: script.id },
-      data: { collectionId: payload.collectionId },
+      data: { collectionId: payload.collectionId, sourcePath: nextSourcePath, sourceAvailable: true },
     })
     return { scriptId: updated.id, collectionId: updated.collectionId }
   } catch (error) {

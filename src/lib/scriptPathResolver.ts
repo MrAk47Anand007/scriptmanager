@@ -25,3 +25,7 @@ export function resolveScriptFilePath(script: ScriptPathInput, scriptsRoot: stri
 export function resolveScriptWorkingDirectory(scriptPath: string): string {
   return path.dirname(path.resolve(scriptPath))
 }
+
+export function resolveScriptSourcePathAfterMove(destinationPath: string, destinationIsManaged: boolean): string | null {
+  return destinationIsManaged ? null : path.resolve(destinationPath)
+}
