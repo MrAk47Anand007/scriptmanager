@@ -78,6 +78,7 @@ import {
 import { readGithubGistSettingsRuntime } from '@/lib/gistCredentialsRuntimeClient';
 import { getCanonicalFolderChangeEffect } from '@/lib/canonicalFolderReload';
 import type { CanonicalRecoveryDraft } from '@/lib/scriptsRuntimeClient';
+import { DESKTOP_BUILD_HISTORY_POLL_INTERVAL_MS, shouldPollDesktopBuildHistory } from '@/lib/buildHistoryPolling';
 
 const LANGUAGE_OPTIONS = [
     { value: 'python', label: 'Python' },
@@ -473,6 +474,23 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
             }
         }
     }, [activeScriptId, dispatch]);
+
+    useEffect(() => {
+        if (!shouldPollDesktopBuildHistory(isDesktopRuntime, activeScriptId)) {
+            return;
+        }
+
+        let inFlight = false;
+        const refresh = () => {
+            if (inFlight) return;
+            inFlight = true;
+            void dispatch(fetchBuilds(activeScriptId)).finally(() => {
+                inFlight = false;
+            });
+        };
+        const timer = window.setInterval(refresh, DESKTOP_BUILD_HISTORY_POLL_INTERVAL_MS);
+        return () => window.clearInterval(timer);
+    }, [activeScriptId, dispatch, isDesktopRuntime]);
 
     useEffect(() => {
         setScriptContent(activeScriptContent || '');
