@@ -4,6 +4,7 @@ mod commands;
 mod terminal;
 mod git_ops;
 mod fs_ops;
+mod execution;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -31,7 +32,10 @@ pub fn run() {
             git_ops::git_status,
             fs_ops::start_folder_watch,
             fs_ops::atomic_write_file,
-            fs_ops::read_file
+            fs_ops::read_file,
+            execution::execute_api_request,
+            execution::execute_js_script,
+            execution::run_workflow_dag
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
