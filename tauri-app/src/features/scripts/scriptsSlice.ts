@@ -1,0 +1,1056 @@
+import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
+import axios from 'axios'
+import type { ScriptParameter } from '@/lib/types'
+import {
+    createDesktopCollection,
+    createDesktopScript,
+    deleteDesktopCollection,
+    deleteDesktopScript,
+    duplicateDesktopScript,
+    hasDesktopScriptsRuntime,
+    listDesktopCollections,
+    listDesktopBuilds,
+    listDesktopScripts,
+    listDesktopScriptEnv,
+    listDesktopScriptVersions,
+    moveDesktopScript,
+    openDesktopScriptsFolder,
+    readDesktopScript,
+    readDesktopBuildOutput,
+    readDesktopScriptSchedule,
+    readDesktopScriptVersion,
+    regenerateDesktopWebhook,
+    regenerateDesktopWebhookSecret,
+    saveDesktopScriptEnv,
+    saveDesktopScriptSchedule,
+    toggleDesktopWebhookSignature,
+    deleteDesktopScriptEnv,
+    deleteDesktopScriptSchedule,
+    addDesktopTag,
+    listDesktopTags,
+    removeDesktopTag,
+    listDesktopTemplates,
+    saveDesktopTemplate,
+    deleteDesktopTemplate,
+    saveDesktopScript,
+    syncDesktopScriptToGist,
+    deleteDesktopGist,
+    startDesktopLocalRun,
+    updateDesktopCollection,
+} from '@/lib/scriptsRuntimeClient'
+
+export interface Tag {
+    id: string
+    name: string
+    color: string
+}
+
+export interface Script {
+    id: string
+    name: string
+    filename: string
+    source_path?: string | null
+    source_available?: boolean
+    description?: string
+    content?: string
+    language?: string
+    interpreter?: string | null
+    parameters?: ScriptParameter[]
+    created_at: string
+    updated_at: string
+    last_run?: string
+    webhook_token?: string
+    schedule_cron?: string
+    schedule_enabled?: boolean
+    collection_id?: string | null
+    // GitHub Gist
+    gist_id?: string
+    gist_url?: string
+    sync_to_gist?: boolean
+    // Tags
+    tags?: Tag[]
+    // Timeout override
+    timeout_ms?: number | null
+    // Webhook HMAC
+    require_webhook_signature?: boolean
+    webhook_secret_set?: boolean
+}
+
+export type { ScriptParameter }
+
+export interface EnvVar {
+    id: string
+    key: string
+    value: string
+    is_secret: boolean
+}
+
+export interface Build {
+    id: string
+    script_id: string
+    status: 'pending' | 'running' | 'success' | 'failure' | 'timeout' | 'cancelled'
+    started_at: string
+    completed_at?: string | null
+    triggered_by: string
+}
+
+export interface ScriptVersionMeta {
+    id: string
+    snapshot_number: number
+    saved_at: string
+}
+
+export interface Collection {
+    id: string;
+    name: string;
+    description?: string;
+    script_count?: number;
+    project_id?: string | null;
+    parent_id?: string | null;
+    folder_path?: string | null;
+    is_temporary?: boolean;
+    runtime_preset?: 'general' | 'python' | 'node' | 'shell' | 'powershell';
+    python_toolchain_enabled?: boolean;
+    python_venv_path?: string | null;
+    python_interpreter_path?: string | null;
+    storage_provider_id?: string | null;
+    remote_prefix?: string | null;
+    created_at: string;
+}
+
+export interface ScriptTemplate {
+    id: string
+    name: string
+    description: string
+    category: string
+    language: string
+    interpreter?: string | null
+    content: string
+    parameters: ScriptParameter[]
+    is_built_in: boolean
+    created_at: string
+}
+
+interface ScriptsState {
+    items: Script[];
+    collections: Collection[];
+    templates: ScriptTemplate[];
+    templatesStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
+    allTags: Tag[];
+    envVars: EnvVar[];
+    envVarsStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
+    versions: ScriptVersionMeta[];
+    versionsStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
+    activeScriptId: string | null;
+    activeScriptContent: string;
+    builds: Build[];
+    currentBuildOutput: string;
+    status: 'idle' | 'loading' | 'succeeded' | 'failed';
+    contentStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
+    runStatus: 'idle' | 'running';
+    error: string | null;
+    saveStatus: 'idle' | 'saving' | 'saved' | 'failed';
+    schedule: {
+        cron: string;
+        enabled: boolean;
+        nextRun: string | null;
+        status: 'idle' | 'loading' | 'saved' | 'failed';
+    };
+    // Auto-save state
+    autoSaveEnabled: boolean;
+}
+
+const initialState: ScriptsState = {
+    items: [],
+    collections: [],
+    templates: [],
+    templatesStatus: 'idle',
+    allTags: [],
+    envVars: [],
+    envVarsStatus: 'idle',
+    versions: [],
+    versionsStatus: 'idle',
+    activeScriptId: null,
+    activeScriptContent: '',
+    builds: [],
+    currentBuildOutput: '',
+    status: 'idle',
+    contentStatus: 'idle',
+    runStatus: 'idle',
+    error: null,
+    saveStatus: 'idle',
+    schedule: {
+        cron: '',
+        enabled: false,
+        nextRun: null,
+        status: 'idle'
+    },
+    autoSaveEnabled: false
+}
+
+function isDesktopScriptsRuntimeAvailable(): boolean {
+    return typeof window !== 'undefined' && hasDesktopScriptsRuntime()
+}
+
+export const fetchScripts = createAsyncThunk('scripts/fetchScripts', async () => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopScripts()
+    }
+    const response = await axios.get('/api/scripts')
+    return response.data
+})
+
+export const fetchScriptContent = createAsyncThunk('scripts/fetchScriptContent', async (id: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return readDesktopScript(id)
+    }
+    const response = await axios.get(`/api/scripts/${id}`)
+    return response.data
+})
+
+export const createScript = createAsyncThunk('scripts/createScript', async (payload: string | {
+    name: string
+    description?: string
+    syncToGist?: boolean
+    content?: string
+    language?: string
+    interpreter?: string | null
+    parameters?: ScriptParameter[]
+    collectionId?: string | null
+}) => {
+    const name = typeof payload === 'string' ? payload : payload.name
+    const description = typeof payload === 'string' ? undefined : payload.description
+    const syncToGist = typeof payload === 'string' ? undefined : payload.syncToGist
+    const content = typeof payload === 'string' ? undefined : payload.content
+    const language = typeof payload === 'string' ? undefined : payload.language
+    const interpreter = typeof payload === 'string' ? undefined : payload.interpreter
+    const parameters = typeof payload === 'string' ? undefined : payload.parameters
+    const collectionId = typeof payload === 'string' ? undefined : payload.collectionId
+
+    if (isDesktopScriptsRuntimeAvailable()) {
+        const created = await createDesktopScript({
+            name,
+            description,
+            syncToGist,
+            content: content ?? '# New script\nprint("Hello World")',
+            language,
+            interpreter,
+            parameters,
+            collectionId,
+        })
+        if (syncToGist) {
+            try {
+                const gist = await syncDesktopScriptToGist(created.id)
+                return { ...created, ...gist, sync_to_gist: true }
+            } catch (error) {
+                console.warn('[Gist] Desktop sync failed after local create:', error)
+            }
+        }
+        return created
+    }
+
+    const response = await axios.post('/api/scripts', {
+        name,
+        description,
+        content: content ?? '# New script\nprint("Hello World")',
+        sync_to_gist: syncToGist,
+        language,
+        interpreter,
+        parameters,
+        collection_id: collectionId,
+    })
+    return response.data
+})
+
+export const openScriptsFolder = createAsyncThunk(
+    'scripts/openScriptsFolder',
+    async (payload: {
+        folderPath: string
+        mode: 'temporary' | 'collection'
+        collectionName?: string
+        runtimePreset?: Collection['runtime_preset']
+        pythonToolchainEnabled?: boolean
+        createVenvIfMissing?: boolean
+    }, { dispatch }) => {
+        const response = isDesktopScriptsRuntimeAvailable()
+            ? await openDesktopScriptsFolder(payload)
+            : (await axios.post('/api/scripts/open-folder', {
+                folderPath: payload.folderPath,
+                mode: payload.mode,
+                collectionName: payload.collectionName,
+                runtime_preset: payload.runtimePreset,
+                python_toolchain_enabled: payload.pythonToolchainEnabled,
+                create_venv_if_missing: payload.createVenvIfMissing,
+            })).data
+
+        await Promise.all([
+            dispatch(fetchCollections()),
+            dispatch(fetchScripts()),
+        ])
+
+        return response as {
+            collection: Collection
+            scripts: Array<{ id: string; name: string }>
+            imported_count: number
+        }
+    }
+)
+
+export const importScriptsFolder = createAsyncThunk(
+    'scripts/importScriptsFolder',
+    async (payload: {
+        mode: 'temporary' | 'collection'
+        collectionName?: string
+        folderName: string
+        files: Array<{ relativePath: string; content: string }>
+    }, { dispatch }) => {
+        const response = await axios.post('/api/scripts/import-folder', payload)
+
+        await Promise.all([
+            dispatch(fetchCollections()),
+            dispatch(fetchScripts()),
+        ])
+
+        return response.data as {
+            collection: Collection
+            scripts: Array<{ id: string; name: string }>
+            imported_count: number
+        }
+    }
+)
+
+export const fetchTemplates = createAsyncThunk('scripts/fetchTemplates', async () => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopTemplates()
+    }
+    const response = await axios.get('/api/templates')
+    return response.data
+})
+
+export const saveAsTemplate = createAsyncThunk(
+    'scripts/saveAsTemplate',
+    async (payload: {
+        name: string
+        description: string
+        category: string
+        language: string
+        interpreter?: string | null
+        content: string
+        parameters?: ScriptParameter[]
+    }, { rejectWithValue }) => {
+        try {
+            if (isDesktopScriptsRuntimeAvailable()) {
+                return await saveDesktopTemplate(payload)
+            }
+            const response = await axios.post('/api/templates', payload)
+            return response.data
+        } catch (err: unknown) {
+            const axiosErr = err as { response?: { data?: unknown } }
+            return rejectWithValue(axiosErr.response?.data ?? { error: 'Unknown error' })
+        }
+    }
+)
+
+export const deleteTemplate = createAsyncThunk('scripts/deleteTemplate', async (id: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        await deleteDesktopTemplate(id)
+        return id
+    }
+    await axios.delete(`/api/templates/${id}`)
+    return id
+})
+
+export const deleteScript = createAsyncThunk('scripts/deleteScript', async ({ id, deleteGist }: { id: string; deleteGist: boolean }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        if (deleteGist) await deleteDesktopGist(id)
+        await deleteDesktopScript(id)
+        return id
+    }
+    await axios.delete(`/api/scripts/${id}?deleteGist=${deleteGist}`)
+    return id
+})
+
+export const saveScript = createAsyncThunk('scripts/saveScript', async (data: { id: string; name: string; content: string; sync_to_gist?: boolean; language?: string; interpreter?: string | null; parameters?: ScriptParameter[]; timeout_ms?: number | null; skipGist?: boolean }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        const saved = await saveDesktopScript(data)
+        if (data.sync_to_gist && !data.skipGist) {
+            try {
+                const gist = await syncDesktopScriptToGist(data.id)
+                return { ...saved, ...gist, sync_to_gist: true }
+            } catch (error) {
+                console.warn('[Gist] Desktop sync failed after local save:', error)
+            }
+        }
+        return saved
+    }
+    const response = await axios.post('/api/scripts', data)
+    return response.data
+})
+
+export const runScript = createAsyncThunk('scripts/runScript', async ({ id, paramValues, buildId }: { id: string; paramValues?: Record<string, string>; buildId?: string }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return startDesktopLocalRun(id, paramValues, buildId)
+    }
+    const response = await axios.post(`/api/scripts/${id}/run`, { paramValues, buildId })
+    return response.data
+})
+
+export const fetchBuilds = createAsyncThunk('scripts/fetchBuilds', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopBuilds(scriptId)
+    }
+    const response = await axios.get(`/api/builds/${scriptId}`)
+    return response.data
+})
+
+export const fetchBuildOutput = createAsyncThunk('scripts/fetchBuildOutput', async ({ scriptId, buildId }: { scriptId: string; buildId: string }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return readDesktopBuildOutput(scriptId, buildId)
+    }
+    const response = await axios.get(`/api/builds/output/${scriptId}/${buildId}`)
+    return response.data.output
+})
+
+export const regenerateWebhook = createAsyncThunk('scripts/regenerateWebhook', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        const result = await regenerateDesktopWebhook(scriptId)
+        return { scriptId, token: result.webhook_token }
+    }
+    const response = await axios.post(`/api/scripts/${scriptId}/webhook/regenerate`)
+    return { scriptId, token: response.data.webhook_token }
+})
+
+export const regenerateWebhookSecret = createAsyncThunk('scripts/regenerateWebhookSecret', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        const result = await regenerateDesktopWebhookSecret(scriptId)
+        return { scriptId, secret: result.webhook_secret }
+    }
+    const response = await axios.post(`/api/scripts/${scriptId}/webhook/secret`)
+    return { scriptId, secret: response.data.webhook_secret as string }
+})
+
+export const toggleWebhookSignature = createAsyncThunk('scripts/toggleWebhookSignature', async ({ scriptId, requireSignature }: { scriptId: string; requireSignature: boolean }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return { scriptId, ...(await toggleDesktopWebhookSignature(scriptId, requireSignature)) }
+    }
+    const response = await axios.put(`/api/scripts/${scriptId}/webhook/secret`, { require_signature: requireSignature })
+    return {
+        scriptId,
+        require_webhook_signature: response.data.require_webhook_signature as boolean,
+        // new secret if auto-generated
+        webhook_secret: response.data.webhook_secret as string | undefined,
+    }
+})
+
+export const fetchSchedule = createAsyncThunk('scripts/fetchSchedule', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return readDesktopScriptSchedule(scriptId)
+    }
+    const response = await axios.get(`/api/scripts/${scriptId}/schedule`)
+    return response.data
+})
+
+export const saveSchedule = createAsyncThunk('scripts/saveSchedule', async (data: { scriptId: string; cron: string; enabled: boolean }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return saveDesktopScriptSchedule(data)
+    }
+    const response = await axios.put(`/api/scripts/${data.scriptId}/schedule`, { cron: data.cron, enabled: data.enabled })
+    return response.data
+})
+
+export const deleteSchedule = createAsyncThunk('scripts/deleteSchedule', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return deleteDesktopScriptSchedule(scriptId)
+    }
+    await axios.delete(`/api/scripts/${scriptId}/schedule`)
+    return null
+})
+
+export const forceSyncGist = createAsyncThunk('scripts/forceSyncGist', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return { scriptId, ...(await syncDesktopScriptToGist(scriptId)) }
+    }
+    const response = await axios.post(`/api/scripts/${scriptId}/gist/sync`)
+    return { scriptId, ...response.data }
+})
+
+export const deleteGist = createAsyncThunk('scripts/deleteGist', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        await deleteDesktopGist(scriptId)
+        return scriptId
+    }
+    await axios.delete(`/api/scripts/${scriptId}/gist`)
+    return scriptId
+})
+
+// --- Duplication Thunk ---
+
+export const duplicateScript = createAsyncThunk('scripts/duplicateScript', async (id: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return duplicateDesktopScript(id) as Promise<Script>
+    }
+    const response = await axios.post(`/api/scripts/${id}/duplicate`)
+    return response.data as Script
+})
+
+// --- Collection Thunks ---
+
+export const fetchCollections = createAsyncThunk('scripts/fetchCollections', async () => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopCollections()
+    }
+    const response = await axios.get('/api/collections')
+    return response.data
+})
+
+export const createCollection = createAsyncThunk('scripts/createCollection', async (payload: {
+    name: string
+    projectId?: string | null
+    parentId?: string | null
+    runtimePreset?: Collection['runtime_preset']
+    pythonToolchainEnabled?: boolean
+}) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return createDesktopCollection({
+            name: payload.name,
+            projectId: payload.projectId,
+            parentId: payload.parentId,
+            runtimePreset: payload.runtimePreset,
+            pythonToolchainEnabled: payload.pythonToolchainEnabled,
+        })
+    }
+    const response = await axios.post('/api/collections', {
+        name: payload.name,
+        project_id: payload.projectId,
+        parent_id: payload.parentId,
+        runtime_preset: payload.runtimePreset,
+        python_toolchain_enabled: payload.pythonToolchainEnabled,
+    })
+    return response.data
+})
+
+export const deleteCollection = createAsyncThunk('scripts/deleteCollection', async (id: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return deleteDesktopCollection(id, false)
+    }
+    await axios.delete(`/api/collections/${id}`)
+    return {
+        id,
+        deletedCollectionIds: [id],
+        deletedScriptIds: [] as string[],
+        deletedFolderPath: null as string | null,
+    }
+})
+
+export const removeTemporaryCollection = createAsyncThunk(
+    'scripts/removeTemporaryCollection',
+    async (id: string) => {
+        if (isDesktopScriptsRuntimeAvailable()) {
+            return deleteDesktopCollection(id, true)
+        }
+        const response = await axios.delete(`/api/collections/${id}?hardDelete=true`)
+        return {
+            id,
+            deletedCollectionIds: [id],
+            deletedScriptIds: (response.data.deleted_script_ids ?? []) as string[],
+            deletedFolderPath: null as string | null,
+        }
+    }
+)
+
+export const convertTemporaryCollection = createAsyncThunk(
+    'scripts/convertTemporaryCollection',
+    async ({ id, name }: { id: string; name: string }) => {
+        if (isDesktopScriptsRuntimeAvailable()) {
+            const result = await updateDesktopCollection({ id, name, isTemporary: false })
+            return result.updatedCollections[0]
+        }
+        const response = await axios.put(`/api/collections/${id}`, {
+            name,
+            is_temporary: false,
+        })
+        return response.data as Collection
+    }
+)
+
+export const moveScript = createAsyncThunk('scripts/moveScript', async ({ scriptId, collectionId }: { scriptId: string, collectionId: string | null }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return moveDesktopScript(scriptId, collectionId)
+    }
+    const response = await axios.put(`/api/scripts/${scriptId}/move`, { collection_id: collectionId })
+    return { scriptId, collectionId: response.data.collection_id }
+})
+
+export const moveCollection = createAsyncThunk('scripts/moveCollection', async ({ collectionId, projectId, parentId }: { collectionId: string, projectId?: string | null, parentId?: string | null }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return updateDesktopCollection({
+            id: collectionId,
+            projectId,
+            parentId,
+        })
+    }
+    const payload: any = {}
+    if (projectId !== undefined) payload.project_id = projectId;
+    if (parentId !== undefined) payload.parent_id = parentId;
+    const response = await axios.put(`/api/collections/${collectionId}`, payload)
+    return { updatedCollections: [response.data as Collection] }
+})
+
+export const updateCollectionCloudBinding = createAsyncThunk(
+    'scripts/updateCollectionCloudBinding',
+    async ({ collectionId, projectId, storageProviderId, remotePrefix }: {
+        collectionId: string
+        projectId?: string | null
+        storageProviderId: string | null
+        remotePrefix: string | null
+    }) => {
+        if (isDesktopScriptsRuntimeAvailable()) {
+            return updateDesktopCollection({
+                id: collectionId,
+                storageProviderId,
+                remotePrefix,
+            })
+        }
+        // Web PUT resets project_id when omitted, so pass it through explicitly.
+        const response = await axios.put(`/api/collections/${collectionId}`, {
+            project_id: projectId ?? null,
+            storage_provider_id: storageProviderId,
+            remote_prefix: remotePrefix,
+        })
+        return { updatedCollections: [response.data as Collection] }
+    }
+)
+
+// --- Env Var Thunks ---
+
+export const fetchEnvVars = createAsyncThunk('scripts/fetchEnvVars', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopScriptEnv(scriptId)
+    }
+    const response = await axios.get(`/api/scripts/${scriptId}/env`)
+    return response.data as EnvVar[]
+})
+
+export const upsertEnvVar = createAsyncThunk('scripts/upsertEnvVar', async ({ scriptId, key, value, isSecret }: { scriptId: string; key: string; value: string; isSecret: boolean }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return saveDesktopScriptEnv({ scriptId, key, value, isSecret })
+    }
+    const response = await axios.post(`/api/scripts/${scriptId}/env`, { key, value, is_secret: isSecret })
+    return response.data as EnvVar
+})
+
+export const deleteEnvVar = createAsyncThunk('scripts/deleteEnvVar', async ({ scriptId, key }: { scriptId: string; key: string }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        await deleteDesktopScriptEnv({ scriptId, key })
+        return key
+    }
+    await axios.delete(`/api/scripts/${scriptId}/env?key=${encodeURIComponent(key)}`)
+    return key
+})
+
+// --- Version History Thunks ---
+
+export const fetchVersions = createAsyncThunk('scripts/fetchVersions', async (scriptId: string) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopScriptVersions(scriptId)
+    }
+    const response = await axios.get(`/api/scripts/${scriptId}/versions`)
+    return response.data as ScriptVersionMeta[]
+})
+
+export const fetchVersionContent = createAsyncThunk(
+    'scripts/fetchVersionContent',
+    async ({ scriptId, versionId }: { scriptId: string; versionId: string }) => {
+        if (isDesktopScriptsRuntimeAvailable()) {
+            return readDesktopScriptVersion(scriptId, versionId)
+        }
+        const response = await axios.get(`/api/scripts/${scriptId}/versions/${versionId}`)
+        return response.data as { id: string; snapshot_number: number; content: string; saved_at: string }
+    }
+)
+
+// --- Tag Thunks ---
+
+export const fetchAllTags = createAsyncThunk('scripts/fetchAllTags', async () => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return listDesktopTags()
+    }
+    const response = await axios.get('/api/tags')
+    return response.data as Tag[]
+})
+
+export const addTagToScript = createAsyncThunk('scripts/addTagToScript', async ({ scriptId, name, color }: { scriptId: string; name: string; color?: string }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        return { scriptId, tag: await addDesktopTag({ scriptId, name, color }) }
+    }
+    const response = await axios.post(`/api/scripts/${scriptId}/tags`, { name, color })
+    return { scriptId, tag: response.data as Tag }
+})
+
+export const removeTagFromScript = createAsyncThunk('scripts/removeTagFromScript', async ({ scriptId, tagId }: { scriptId: string; tagId: string }) => {
+    if (isDesktopScriptsRuntimeAvailable()) {
+        await removeDesktopTag({ scriptId, tagId })
+        return { scriptId, tagId }
+    }
+    await axios.delete(`/api/scripts/${scriptId}/tags?tagId=${tagId}`)
+    return { scriptId, tagId }
+})
+
+const scriptsSlice = createSlice({
+    name: 'scripts',
+    initialState,
+    reducers: {
+        setActiveScript(state, action: PayloadAction<string | null>) {
+            state.activeScriptId = action.payload
+            state.contentStatus = 'idle'
+            state.currentBuildOutput = ''
+            state.builds = []
+            state.schedule = { cron: '', enabled: false, nextRun: null, status: 'idle' }
+            state.envVars = []
+            state.envVarsStatus = 'idle'
+            state.versions = []
+            state.versionsStatus = 'idle'
+        },
+        updateActiveScriptContent(state, action: PayloadAction<string>) {
+            state.activeScriptContent = action.payload
+        },
+        appendBuildOutput(state, action: PayloadAction<string>) {
+            state.currentBuildOutput += action.payload
+        },
+        clearBuildOutput(state) {
+            state.currentBuildOutput = ''
+        },
+        setRunStatus(state, action: PayloadAction<'idle' | 'running'>) {
+            state.runStatus = action.payload
+        },
+        setAutoSaveEnabled: (state, action: PayloadAction<boolean>) => {
+            state.autoSaveEnabled = action.payload
+        },
+    },
+    extraReducers: (builder) => {
+        builder
+            .addCase(fetchScripts.pending, (state) => {
+                state.status = 'loading'
+            })
+            .addCase(fetchScripts.fulfilled, (state, action) => {
+                state.items = action.payload
+                state.status = 'succeeded'
+            })
+            .addCase(fetchScripts.rejected, (state, action) => {
+                state.status = 'failed'
+                state.error = action.error.message || 'Failed to fetch scripts'
+            })
+            .addCase(fetchScriptContent.pending, (state) => {
+                state.contentStatus = 'loading'
+            })
+            .addCase(fetchScriptContent.fulfilled, (state, action) => {
+                state.activeScriptContent = action.payload.content
+                state.contentStatus = 'succeeded'
+
+                // Update the script in items list with the latest content so we can track dirty state
+                const idx = state.items.findIndex(s => s.id === state.activeScriptId)
+                if (idx !== -1) {
+                    state.items[idx].content = action.payload.content
+                    // Merge parameters back into the items array so the UI can read them
+                    if (action.payload.parameters) {
+                        state.items[idx].parameters = action.payload.parameters
+                    }
+                }
+            })
+            .addCase(fetchScriptContent.rejected, (state) => {
+                state.contentStatus = 'failed'
+            })
+            .addCase(runScript.pending, (state) => {
+                state.runStatus = 'running'
+            })
+            .addCase(runScript.fulfilled, (state) => {
+                state.runStatus = 'idle'
+            })
+            .addCase(runScript.rejected, (state) => {
+                state.runStatus = 'idle'
+            })
+            .addCase(createScript.fulfilled, (state, action) => {
+                const requestedContent =
+                    typeof action.meta.arg === 'string'
+                        ? undefined
+                        : action.meta.arg.content
+                const nextContent = requestedContent ?? '# New script\nprint("Hello World")'
+                state.items.push(action.payload)
+                state.activeScriptId = action.payload.id
+                state.activeScriptContent = nextContent
+                state.items[state.items.length - 1].content = nextContent
+            })
+            .addCase(saveScript.pending, (state) => {
+                state.saveStatus = 'saving'
+            })
+            .addCase(saveScript.fulfilled, (state, action) => {
+                state.saveStatus = 'saved'
+                const idx = state.items.findIndex(s => s.id === action.payload.id)
+                if (idx !== -1) {
+                    state.items[idx] = { ...state.items[idx], ...action.payload }
+                    if (action.meta.arg.content !== undefined) {
+                        state.items[idx].content = action.meta.arg.content
+                    }
+                } else {
+                    state.items.push({ ...action.payload, content: action.meta.arg.content })
+                    state.activeScriptId = action.payload.id
+                }
+            })
+            .addCase(saveScript.rejected, (state) => {
+                state.saveStatus = 'failed'
+            })
+            .addCase(fetchBuilds.fulfilled, (state, action) => {
+                state.builds = action.payload
+            })
+            .addCase(fetchBuildOutput.fulfilled, (state, action) => {
+                state.currentBuildOutput = action.payload
+            })
+            .addCase(regenerateWebhook.fulfilled, (state, action) => {
+                const script = state.items.find(s => s.id === action.payload.scriptId)
+                if (script) {
+                    script.webhook_token = action.payload.token
+                }
+            })
+            .addCase(fetchSchedule.fulfilled, (state, action) => {
+                state.schedule.cron = action.payload.schedule_cron || ''
+                state.schedule.enabled = action.payload.schedule_enabled
+                state.schedule.nextRun = action.payload.next_run_time
+                state.schedule.status = 'idle'
+            })
+            .addCase(saveSchedule.fulfilled, (state, action) => {
+                // Saves can also come from the Schedules dashboard for a
+                // non-active script — only sync the editor state for the active one.
+                if (action.meta.arg.scriptId === state.activeScriptId) {
+                    state.schedule.cron = action.payload.schedule_cron || ''
+                    state.schedule.enabled = action.payload.schedule_enabled
+                    state.schedule.nextRun = action.payload.next_run_time
+                    state.schedule.status = 'saved'
+                }
+                const savedItem = state.items.find(s => s.id === action.meta.arg.scriptId)
+                if (savedItem) {
+                    savedItem.schedule_cron = action.payload.schedule_cron || undefined
+                    savedItem.schedule_enabled = action.payload.schedule_enabled
+                }
+            })
+            .addCase(deleteSchedule.fulfilled, (state, action) => {
+                if (action.meta.arg === state.activeScriptId) {
+                    state.schedule.cron = ''
+                    state.schedule.enabled = false
+                    state.schedule.nextRun = null
+                    state.schedule.status = 'idle'
+                }
+                const clearedItem = state.items.find(s => s.id === action.meta.arg)
+                if (clearedItem) {
+                    clearedItem.schedule_cron = undefined
+                    clearedItem.schedule_enabled = false
+                }
+            })
+            .addCase(fetchCollections.fulfilled, (state, action) => {
+                state.collections = action.payload
+            })
+            .addCase(createCollection.fulfilled, (state, action) => {
+                state.collections.push(action.payload)
+            })
+            .addCase(deleteCollection.fulfilled, (state, action) => {
+                const deletedCollectionIds = action.payload.deletedCollectionIds?.length
+                    ? action.payload.deletedCollectionIds
+                    : [action.payload.id]
+                state.collections = state.collections.filter(c => !deletedCollectionIds.includes(c.id))
+                if (action.payload.deletedScriptIds.length > 0) {
+                    state.items = state.items.filter(script => !action.payload.deletedScriptIds.includes(script.id))
+                    if (state.activeScriptId && action.payload.deletedScriptIds.includes(state.activeScriptId)) {
+                        state.activeScriptId = null
+                        state.activeScriptContent = ''
+                    }
+                } else {
+                    state.items.forEach(script => {
+                        if (script.collection_id && deletedCollectionIds.includes(script.collection_id)) {
+                            script.collection_id = null
+                        }
+                    })
+                }
+            })
+            .addCase(removeTemporaryCollection.fulfilled, (state, action) => {
+                const deletedCollectionIds = action.payload.deletedCollectionIds?.length
+                    ? action.payload.deletedCollectionIds
+                    : [action.payload.id]
+                state.collections = state.collections.filter(c => !deletedCollectionIds.includes(c.id))
+                state.items = state.items.filter(script => !action.payload.deletedScriptIds.includes(script.id))
+                if (state.activeScriptId && action.payload.deletedScriptIds.includes(state.activeScriptId)) {
+                    state.activeScriptId = null
+                    state.activeScriptContent = ''
+                }
+            })
+            .addCase(convertTemporaryCollection.fulfilled, (state, action) => {
+                const idx = state.collections.findIndex(collection => collection.id === action.payload.id)
+                if (idx !== -1) {
+                    state.collections[idx] = action.payload
+                }
+            })
+            // Delete Script
+            .addCase(deleteScript.fulfilled, (state, action) => {
+                state.items = state.items.filter(i => i.id !== action.payload)
+                if (state.activeScriptId === action.payload) {
+                    state.activeScriptId = null
+                    state.activeScriptContent = ''
+                }
+            })
+            .addCase(moveScript.fulfilled, (state, action) => {
+                const script = state.items.find(s => s.id === action.payload.scriptId)
+                if (script) {
+                    script.collection_id = action.payload.collectionId
+                }
+            })
+            .addCase(moveCollection.fulfilled, (state, action) => {
+                for (const updatedCollection of action.payload.updatedCollections ?? []) {
+                    const existing = state.collections.find(c => c.id === updatedCollection.id)
+                    if (existing) {
+                        Object.assign(existing, updatedCollection)
+                    } else {
+                        state.collections.push(updatedCollection)
+                    }
+                }
+            })
+            .addCase(updateCollectionCloudBinding.fulfilled, (state, action) => {
+                for (const updatedCollection of action.payload.updatedCollections ?? []) {
+                    const existing = state.collections.find(c => c.id === updatedCollection.id)
+                    if (existing) {
+                        Object.assign(existing, updatedCollection)
+                    } else {
+                        state.collections.push(updatedCollection)
+                    }
+                }
+            })
+            .addCase(forceSyncGist.fulfilled, (state, action) => {
+                const script = state.items.find(s => s.id === action.payload.scriptId)
+                if (script) {
+                    script.gist_id = action.payload.gist_id
+                    script.gist_url = action.payload.gist_url
+                    script.sync_to_gist = true
+                }
+            })
+            .addCase(deleteGist.fulfilled, (state, action) => {
+                const script = state.items.find(s => s.id === action.payload)
+                if (script) {
+                    script.gist_id = undefined
+                    script.gist_url = undefined
+                    script.sync_to_gist = false
+                }
+            })
+            .addCase(fetchTemplates.pending, (state) => {
+                state.templatesStatus = 'loading'
+            })
+            .addCase(fetchTemplates.fulfilled, (state, action) => {
+                state.templates = action.payload
+                state.templatesStatus = 'succeeded'
+            })
+            .addCase(fetchTemplates.rejected, (state) => {
+                state.templatesStatus = 'failed'
+            })
+            .addCase(saveAsTemplate.fulfilled, (state, action) => {
+                state.templates.push(action.payload)
+            })
+            .addCase(deleteTemplate.fulfilled, (state, action) => {
+                state.templates = state.templates.filter(t => t.id !== action.payload)
+            })
+            .addCase(fetchEnvVars.pending, (state) => {
+                state.envVarsStatus = 'loading'
+            })
+            .addCase(fetchEnvVars.fulfilled, (state, action) => {
+                state.envVars = action.payload
+                state.envVarsStatus = 'succeeded'
+            })
+            .addCase(fetchEnvVars.rejected, (state) => {
+                state.envVarsStatus = 'failed'
+            })
+            .addCase(upsertEnvVar.fulfilled, (state, action) => {
+                const idx = state.envVars.findIndex(v => v.key === action.payload.key)
+                if (idx !== -1) {
+                    state.envVars[idx] = action.payload
+                } else {
+                    state.envVars.push(action.payload)
+                    state.envVars.sort((a, b) => a.key.localeCompare(b.key))
+                }
+            })
+            .addCase(deleteEnvVar.fulfilled, (state, action) => {
+                state.envVars = state.envVars.filter(v => v.key !== action.payload)
+            })
+            .addCase(fetchAllTags.fulfilled, (state, action) => {
+                state.allTags = action.payload
+            })
+            .addCase(addTagToScript.fulfilled, (state, action) => {
+                const { scriptId, tag } = action.payload
+                const script = state.items.find(s => s.id === scriptId)
+                if (script) {
+                    if (!script.tags) script.tags = []
+                    if (!script.tags.find(t => t.id === tag.id)) {
+                        script.tags.push(tag)
+                    }
+                }
+                // Also add to allTags if not present
+                if (!state.allTags.find(t => t.id === tag.id)) {
+                    state.allTags.push(tag)
+                }
+            })
+            .addCase(removeTagFromScript.fulfilled, (state, action) => {
+                const { scriptId, tagId } = action.payload
+                const script = state.items.find(s => s.id === scriptId)
+                if (script && script.tags) {
+                    script.tags = script.tags.filter(t => t.id !== tagId)
+                }
+            })
+            .addCase(duplicateScript.fulfilled, (state, action) => {
+                // Insert duplicate next to original in items list
+                const originalIdx = state.items.findIndex(s => s.id === action.meta.arg)
+                if (originalIdx !== -1) {
+                    state.items.splice(originalIdx + 1, 0, action.payload)
+                } else {
+                    state.items.push(action.payload)
+                }
+                // Automatically switch to the new duplicate
+                state.activeScriptId = action.payload.id
+                state.contentStatus = 'idle'
+                state.builds = []
+                state.envVars = []
+                state.envVarsStatus = 'idle'
+                state.versions = []
+                state.versionsStatus = 'idle'
+            })
+            .addCase(regenerateWebhookSecret.fulfilled, (state, action) => {
+                const { scriptId } = action.payload
+                const script = state.items.find(s => s.id === scriptId)
+                if (script) {
+                    script.webhook_secret_set = true
+                }
+            })
+            .addCase(toggleWebhookSignature.fulfilled, (state, action) => {
+                const { scriptId, require_webhook_signature, webhook_secret } = action.payload
+                const script = state.items.find(s => s.id === scriptId)
+                if (script) {
+                    script.require_webhook_signature = require_webhook_signature
+                    if (webhook_secret) script.webhook_secret_set = true
+                }
+            })
+            .addCase(fetchVersions.pending, (state) => {
+                state.versionsStatus = 'loading'
+            })
+            .addCase(fetchVersions.fulfilled, (state, action) => {
+                state.versions = action.payload
+                state.versionsStatus = 'succeeded'
+            })
+            .addCase(fetchVersions.rejected, (state) => {
+                state.versionsStatus = 'failed'
+            })
+        // fetchVersionContent doesn't need to update global state — used locally in the component
+    }
+})
+
+export const {
+    setActiveScript,
+    updateActiveScriptContent,
+    appendBuildOutput,
+    clearBuildOutput,
+    setRunStatus,
+    setAutoSaveEnabled
+} = scriptsSlice.actions
+export default scriptsSlice.reducer
