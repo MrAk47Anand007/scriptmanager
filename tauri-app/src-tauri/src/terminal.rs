@@ -5,7 +5,7 @@ use tauri::{State, Window, Emitter};
 use std::io::{Read, Write};
 
 pub struct TerminalState {
-    pub ptys: Mutex<HashMap<String, Box<dyn portable_pty::MasterPty + Send>>>,
+    pub ptys: Mutex<HashMap<String, (Box<dyn portable_pty::MasterPty + Send>, Box<dyn Write + Send>)>>,
 }
 
 impl Default for TerminalState {
@@ -37,12 +37,13 @@ pub fn create_terminal(
         CommandBuilder::new("bash")
     };
 
-    let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let _child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     
     // Drop slave to avoid deadlock
     drop(pair.slave);
     
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
     let session_id_clone = session_id.clone();
     
     // Read loop
@@ -55,7 +56,7 @@ pub fn create_terminal(
         }
     });
 
-    state.ptys.lock().unwrap().insert(session_id, pair.master);
+    state.ptys.lock().unwrap().insert(session_id, (pair.master, writer));
 
     Ok(())
 }
@@ -67,10 +68,8 @@ pub fn write_terminal(
     state: State<'_, TerminalState>,
 ) -> Result<(), String> {
     let mut ptys = state.ptys.lock().unwrap();
-    if let Some(master) = ptys.get_mut(&session_id) {
-        if let Ok(mut writer) = master.try_clone_writer() {
-            writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
-        }
+    if let Some((_, writer)) = ptys.get_mut(&session_id) {
+        writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -83,7 +82,7 @@ pub fn resize_terminal(
     state: State<'_, TerminalState>,
 ) -> Result<(), String> {
     let ptys = state.ptys.lock().unwrap();
-    if let Some(master) = ptys.get(&session_id) {
+    if let Some((master, _)) = ptys.get(&session_id) {
         master.resize(PtySize {
             rows,
             cols,

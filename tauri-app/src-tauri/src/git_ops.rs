@@ -1,4 +1,4 @@
-use git2::{Repository, Oid, Signature};
+use git2::Repository;
 use tauri::command;
 use serde::{Deserialize, Serialize};
 

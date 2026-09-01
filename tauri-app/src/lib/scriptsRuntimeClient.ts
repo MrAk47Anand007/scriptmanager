@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import axios from 'axios'
 
 export function hasDesktopScriptsRuntime(): boolean {
-  return Boolean(window.scriptManagerDesktop?.runtime)
+  return true
 }
 
 export const DEFAULT_TERMINAL_SESSION_ID = 'terminal-1'
@@ -495,7 +495,7 @@ export async function cancelDesktopRun(buildId: string): Promise<{ ok: boolean }
 }
 
 export function subscribeToCanonicalFolderChanges(listener: (event: CanonicalFolderChange) => void): () => void {
-  return window.scriptManagerDesktop?.runtime?.onCanonicalFolderChange?.(listener) ?? (() => undefined)
+  window.scriptManagerDesktop?.runtime?.onCanonicalFolderChange?.(listener); return () => undefined;
 }
 
 export async function warmScriptsTerminal(sessionId = DEFAULT_TERMINAL_SESSION_ID): Promise<void> {
@@ -528,11 +528,11 @@ export async function startDesktopLocalRun(scriptId: string, paramValues?: Recor
 }
 
 export function subscribeToDesktopTerminal(listener: (event: ScriptManagerDesktopTerminalEvent) => void) {
-  return window.scriptManagerDesktop?.runtime?.onTerminalEvent(listener) ?? (() => undefined)
+  window.scriptManagerDesktop?.runtime?.onTerminalEvent(listener); return () => undefined;
 }
 
 export function subscribeToDesktopBuildEvents(listener: (event: ScriptManagerDesktopBuildEvent) => void) {
-  return window.scriptManagerDesktop?.runtime?.onBuildEvent(listener) ?? (() => undefined)
+  window.scriptManagerDesktop?.runtime?.onBuildEvent(listener); return () => undefined;
 }
 
 export async function sendDesktopTerminalInput(data: string, sessionId = DEFAULT_TERMINAL_SESSION_ID) {

@@ -1,3 +1,4 @@
+import dynamic from '@/lib/dynamic';
 
 
 import { lazy,  useEffect, useState  } from 'react'
@@ -154,3 +155,4 @@ export function OpsView() {
         </div>
     )
 }
+

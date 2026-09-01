@@ -5,7 +5,7 @@ export function hasDesktopOpsRuntime(): boolean {
 }
 
 export function subscribeToDesktopRemoteExec(listener: (event: ScriptManagerDesktopRemoteExecEvent) => void) {
-  return window.scriptManagerDesktop?.runtime?.onRemoteExecEvent(listener) ?? (() => undefined)
+  window.scriptManagerDesktop?.runtime?.onRemoteExecEvent(listener); return () => undefined;
 }
 
 export async function listProjectsRuntime() {

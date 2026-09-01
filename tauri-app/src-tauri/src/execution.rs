@@ -52,7 +52,7 @@ pub fn execute_js_script(code: String) -> Result<String, String> {
     
     match result {
         Ok(res) => Ok(res.display().to_string()),
-        Err(e) => Err(format!("Execution error: {}", e.display())),
+        Err(e) => Err(format!("Execution error: {}", e)),
     }
 }
 

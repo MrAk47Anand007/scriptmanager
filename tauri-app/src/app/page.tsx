@@ -1,7 +1,7 @@
 
 
 
-import { lazy,  useState, useEffect, useMemo, startTransition  } from 'react'
+import React, { lazy, Suspense, useState, useEffect, useMemo, startTransition  } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchScripts, fetchCollections, fetchTemplates, fetchAllTags, setAutoSaveEnabled } from '@/features/scripts/scriptsSlice'
 import { fetchSettings } from '@/features/settings/settingsSlice'
@@ -36,6 +36,17 @@ import { EditorTabs } from '@/components/workbench/EditorTabs'
 import { useTabSync } from '@/components/workbench/tabSync'
 import { BottomDock } from '@/components/workbench/BottomDock'
 import { DesktopNotificationHost } from '@/components/notifications/DesktopNotificationHost'
+
+function dynamic(importFn: any, options: any) {
+  const LazyComponent = React.lazy(() => importFn().then((comp: any) => ({ default: comp })));
+  return function DynamicWrapper(props: any) {
+    return (
+      <React.Suspense fallback={options?.loading ? options.loading() : <div>Loading...</div>}>
+        <LazyComponent {...props} />
+      </React.Suspense>
+    );
+  }
+}
 
 const ScriptsManager = dynamic(
   () => import('@/components/ScriptsManager').then((mod) => mod.ScriptsManager),

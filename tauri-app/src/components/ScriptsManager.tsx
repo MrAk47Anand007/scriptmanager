@@ -1,3 +1,4 @@
+import dynamic from '@/lib/dynamic';
 
 
 import { lazy,  memo, useEffect, useRef, useState, useCallback, useDeferredValue, useMemo  } from 'react';
@@ -43,7 +44,7 @@ import { EnvVarsPanel } from './EnvVarsPanel';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
-import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Github, Loader2, SlidersHorizontal, Download, ShieldCheck, KeyRound } from 'lucide-react';
+import { Play, Save, Terminal, Clock, Link as LinkIcon, Calendar, RefreshCw, Folder, Globe, Loader2, SlidersHorizontal, Download, ShieldCheck, KeyRound } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -1342,7 +1343,7 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
                             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                                 {activeScript?.gist_url && (
                                     <a href={activeScript.gist_url} target="_blank" rel="noopener noreferrer" className="mr-2 flex items-center gap-1 text-xs text-blue-600 hover:underline" title="View on GitHub Gist">
-                                        <Github className="h-3.5 w-3.5" />
+                                        <Globe className="h-3.5 w-3.5" />
                                     </a>
                                 )}
 
@@ -1631,3 +1632,4 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
         </div>
     );
 };
+

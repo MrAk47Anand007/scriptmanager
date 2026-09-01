@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Loader2, Save, Github, Trash2 } from 'lucide-react'
+import { Loader2, Save, Globe, Trash2 } from 'lucide-react'
 
 export const GitHubGistSection = () => {
     const [githubToken, setGithubToken] = useState('')
@@ -75,7 +75,7 @@ export const GitHubGistSection = () => {
 
             <Card>
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-2"><Github className="h-5 w-5" /> GitHub Integration</CardTitle>
+                    <CardTitle className="flex items-center gap-2"><Globe className="h-5 w-5" /> GitHub Integration</CardTitle>
                     <CardDescription>
                         Configure your GitHub Personal Access Token to enable Gist synchronization for scripts.
                     </CardDescription>

@@ -1,4 +1,4 @@
-import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
+import { createSlice, createAsyncThunk, type PayloadAction } from '@reduxjs/toolkit'
 import axios from 'axios'
 import type { ScriptParameter } from '@/lib/types'
 import {
@@ -189,7 +189,7 @@ const initialState: ScriptsState = {
 }
 
 function isDesktopScriptsRuntimeAvailable(): boolean {
-    return typeof window !== 'undefined' && hasDesktopScriptsRuntime()
+    return true
 }
 
 export const fetchScripts = createAsyncThunk('scripts/fetchScripts', async () => {

@@ -1,3 +1,4 @@
+import dynamic from '@/lib/dynamic';
 
 
 import { lazy,  useState, useMemo  } from 'react'
@@ -438,3 +439,4 @@ export function ApiResponseViewer() {
     </div>
   )
 }
+

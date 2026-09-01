@@ -5,7 +5,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchSettings } from '@/features/settings/settingsSlice'
 import { selectSettings, selectSettingsStatus, selectSettingsError } from '@/features/settings/selectors'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Bell, Boxes, KeyRound, Loader2, Settings2, Palette, Cloud, Github, Lock, Monitor, Users } from 'lucide-react'
+import { Bell, Boxes, KeyRound, Loader2, Settings2, Palette, Cloud, Globe, Lock, Monitor, Users } from 'lucide-react'
 import { isDesktop } from '@/lib/runtime'
 import { cn } from '@/lib/utils'
 import { GeneralSection } from './GeneralSection'
@@ -25,7 +25,7 @@ const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ clas
     { id: 'general', label: 'General', icon: Settings2 },
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'cloud-storage', label: 'Cloud Storage', icon: Cloud },
-    { id: 'github-gist', label: 'GitHub Gist', icon: Github },
+    { id: 'github-gist', label: 'GitHub Gist', icon: Globe },
     { id: 'security', label: 'Security', icon: Lock },
     { id: 'secrets', label: 'Secret Vault', icon: KeyRound },
     { id: 'notifications', label: 'Notifications', icon: Bell },

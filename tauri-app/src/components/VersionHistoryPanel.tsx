@@ -11,17 +11,7 @@ import { Loader2, History, ChevronDown, ChevronRight, RotateCcw, Eye } from 'luc
 import { toast } from '@/components/ui/toast'
 import { getOperationError } from '@/lib/operationError'
 
-const DiffEditor = dynamic(
-    () => import('@monaco-editor/react').then((mod) => mod.DiffEditor),
-    {
-        ssr: false,
-        loading: () => (
-            <div className="h-64 flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-                <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
-            </div>
-        ),
-    }
-)
+import { DiffEditor } from '@monaco-editor/react'
 
 interface VersionHistoryPanelProps {
     scriptId: string
