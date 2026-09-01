@@ -39,3 +39,17 @@ pub async fn create_script(
 
     Ok(script)
 }
+
+#[tauri::command]
+pub async fn get_collections() -> Result<Vec<serde_json::Value>, String> {
+    Ok(vec![])
+}
+
+#[tauri::command]
+pub async fn get_settings() -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "theme": "dark",
+        "notifications": true
+    }))
+}
+

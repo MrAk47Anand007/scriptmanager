@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core';
 import axios from 'axios'
 
 export function hasDesktopScriptsRuntime(): boolean {
@@ -164,19 +165,11 @@ type DesktopCollectionWorkspaceStatus = {
 }
 
 export async function listDesktopScripts(): Promise<DesktopScriptRecord[]> {
-  if (!window.scriptManagerDesktop?.runtime) {
-    throw new Error('Desktop runtime unavailable')
-  }
-
-  return window.scriptManagerDesktop.runtime.listScripts() as Promise<DesktopScriptRecord[]>
+  return invoke('get_scripts');
 }
 
 export async function listDesktopCollections(): Promise<DesktopCollectionRecord[]> {
-  if (!window.scriptManagerDesktop?.runtime) {
-    throw new Error('Desktop runtime unavailable')
-  }
-
-  return window.scriptManagerDesktop.runtime.listCollections() as Promise<DesktopCollectionRecord[]>
+  return invoke('get_collections');
 }
 
 export async function createDesktopCollection(payload: DesktopCreateCollectionPayload): Promise<DesktopCollectionRecord> {

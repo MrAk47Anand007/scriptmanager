@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core';
 export async function readSettingsRuntime(): Promise<Record<string, string>> {
   if (window.scriptManagerDesktop?.runtime?.readSettings) {
     return window.scriptManagerDesktop.runtime.readSettings() as Promise<Record<string, string>>
