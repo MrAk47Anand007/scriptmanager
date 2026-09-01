@@ -21,7 +21,7 @@ pub async fn create_script(
     let id = Uuid::new_v4().to_string();
     
     sqlx::query(
-        "INSERT INTO scripts (id, workspace_id, name, filename, language) VALUES (?, 'default', ?, ?, ?)"
+        "INSERT INTO scripts (id, name, filename, language, description, parameters, require_webhook_signature, sync_to_gist, schedule_enabled) VALUES (?, ?, ?, ?, '', '[]', false, false, false)"
     )
     .bind(&id)
     .bind(&name)
@@ -41,8 +41,11 @@ pub async fn create_script(
 }
 
 #[tauri::command]
-pub async fn get_collections() -> Result<Vec<serde_json::Value>, String> {
-    Ok(vec![])
+pub async fn get_collections(pool: State<'_, SqlitePool>) -> Result<Vec<crate::models::Collection>, String> {
+    sqlx::query_as::<_, crate::models::Collection>("SELECT * FROM collections")
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

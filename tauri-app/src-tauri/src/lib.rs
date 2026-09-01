@@ -1,11 +1,15 @@
 mod db;
 mod models;
 mod commands;
+mod terminal;
+mod git_ops;
+mod fs_ops;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
+        .manage(terminal::TerminalState::default())
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
@@ -18,7 +22,16 @@ pub fn run() {
             commands::get_scripts,
             commands::create_script,
             commands::get_collections,
-            commands::get_settings
+            commands::get_settings,
+            terminal::create_terminal,
+            terminal::write_terminal,
+            terminal::resize_terminal,
+            git_ops::git_clone,
+            git_ops::git_log,
+            git_ops::git_status,
+            fs_ops::start_folder_watch,
+            fs_ops::atomic_write_file,
+            fs_ops::read_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
