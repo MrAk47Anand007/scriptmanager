@@ -570,7 +570,30 @@ function createApplicationMenu() {
 
 function startServer() {
   if (IS_DEV) {
-    // Dev: server is already running via `concurrently`, nothing to spawn
+    if (process.env.SCRIPT_MANAGER_EMBEDDED_SERVER === 'true') {
+      return
+    }
+
+    // In dev mode when started directly via `npm run electron`, auto-spawn the local dev server
+    const isWin = process.platform === 'win32'
+    serverProcess = spawn(
+      isWin ? 'cmd.exe' : 'npm',
+      isWin ? ['/d', '/s', '/c', 'npm.cmd run dev'] : ['run', 'dev'],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          PORT: String(PORT),
+          DESKTOP_AUTH_SECRET: DESKTOP_SECRET,
+          SCRIPT_MANAGER_EMBEDDED_SERVER: 'true',
+        },
+        stdio: 'pipe',
+      }
+    )
+
+    serverProcess.stdout?.on('data', (d: Buffer) => console.log('[Server]', d.toString().trimEnd()))
+    serverProcess.stderr?.on('data', (d: Buffer) => console.error('[Server]', d.toString().trimEnd()))
+    serverProcess.on('exit', (code) => console.log('[Server] exited with code', code))
     return
   }
 
