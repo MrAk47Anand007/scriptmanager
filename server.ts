@@ -17,7 +17,7 @@ app.prepare().then(async () => {
   // Initialize the scheduler ONCE on server start (long-lived singleton)
   try {
     // Dynamic import to avoid circular deps during build
-    const { initScheduler } = await import('./src/lib/schedulerService')
+    const { initScheduler } = await import('@/lib/schedulerService')
     await initScheduler({ includeScripts: process.env.SCRIPT_MANAGER_EMBEDDED_SERVER !== 'true' })
   } catch (err) {
     console.error('[Server] Failed to initialize scheduler:', err)
@@ -25,7 +25,7 @@ app.prepare().then(async () => {
 
   // Start the durable workflow worker (reconciles interrupted runs, drains queue)
   try {
-    const { startWorkflowWorker } = await import('./src/lib/workflows/workerLoop')
+    const { startWorkflowWorker } = await import('@/lib/workflows/workerLoop')
     startWorkflowWorker({ supportsAgentNodes: false })
   } catch (err) {
     console.error('[Server] Failed to start workflow worker:', err)
@@ -34,7 +34,7 @@ app.prepare().then(async () => {
   // Retry notification deliveries independently of workflow execution so a
   // transient webhook or desktop-shell outage cannot leave history stuck.
   try {
-    const { startNotificationWorker } = await import('./src/lib/notifications/worker')
+    const { startNotificationWorker } = await import('@/lib/notifications/worker')
     startNotificationWorker()
   } catch (err) {
     console.error('[Server] Failed to start notification worker:', err)
@@ -53,14 +53,14 @@ app.prepare().then(async () => {
 
   // Initialize Terminal WebSocket Server
   try {
-    const { initWebSocketServer } = await import('./src/lib/socketService')
+    const { initWebSocketServer } = await import('@/lib/socketService')
     initWebSocketServer(server)
   } catch (err) {
     console.error('[Server] Failed to load socket service:', err)
   }
 
   try {
-    const { initBuildWebSocketServer } = await import('./src/lib/buildSocketService')
+    const { initBuildWebSocketServer } = await import('@/lib/buildSocketService')
     initBuildWebSocketServer(server)
   } catch (err) {
     console.error('[Server] Failed to load build socket service:', err)
