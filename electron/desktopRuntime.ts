@@ -3553,7 +3553,7 @@ export function initDesktopRuntimeIpc() {
 
   ipcMain.handle('scriptmanager:runtime:list-canonical-recovery-drafts', async (_event, scriptId: string) => {
     const { script } = await getAuthorizedDesktopScript(scriptId)
-    if (!script.sourcePath) throw new Error('Script is not backed by a canonical source file')
+    if (!script.sourcePath) return []
     return getDesktopRecoveryDraftStore().list(script.id)
   })
 
