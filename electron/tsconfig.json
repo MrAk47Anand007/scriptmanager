@@ -6,7 +6,11 @@
     "outDir": "../dist-electron",
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
   "include": ["*.ts", "**/*.ts"]
 }

@@ -66,7 +66,7 @@ export function registerWorkflowCronTrigger(input: { id: string; workflowId: str
     try {
       const fresh = await prisma.workflowTrigger.findUnique({ where: { id: input.id }, include: { workflow: { include: { versions: true } } } })
       if (!fresh || !fresh.enabled || fresh.type !== 'cron') return
-      const version = fresh.workflow.versions.find((item) => item.version === fresh.workflow.publishedVersion)
+      const version = fresh.workflow.versions.find((item: { version: number; id: string }) => item.version === fresh.workflow.publishedVersion)
       if (!version) return
       await createWorkflowTriggerService(createWorkflowRepository(prisma)).cron({ workflowId: fresh.workflowId, versionId: version.id, triggerId: fresh.id, scheduledAt: new Date() })
       notifyWorkflowWorker()
