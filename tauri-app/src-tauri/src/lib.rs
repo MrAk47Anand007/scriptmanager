@@ -18,6 +18,10 @@ pub fn run() {
                 let pool = db::init_db(&handle).await.expect("Failed to initialize database");
                 handle.manage(pool);
             });
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

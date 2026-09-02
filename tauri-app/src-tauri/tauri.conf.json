@@ -12,11 +12,15 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "ScriptManager",
-        "width": 800,
-        "height": 600,
+        "width": 1200,
+        "height": 800,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "visible": true,
+        "focus": true,
+        "center": true
       }
     ],
     "security": {
