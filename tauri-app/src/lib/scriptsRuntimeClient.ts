@@ -1,5 +1,5 @@
-import { invoke } from '@tauri-apps/api/core';
 import axios from 'axios'
+import { UnsupportedTauriFeatureError } from '@/lib/unsupportedTauriFeature'
 
 export function hasDesktopScriptsRuntime(): boolean {
   return true
@@ -165,11 +165,19 @@ type DesktopCollectionWorkspaceStatus = {
 }
 
 export async function listDesktopScripts(): Promise<DesktopScriptRecord[]> {
-  return invoke('get_scripts');
+  if (!window.scriptManagerDesktop?.runtime?.listScripts) {
+    throw new Error('Desktop runtime unavailable')
+  }
+
+  return window.scriptManagerDesktop.runtime.listScripts() as Promise<DesktopScriptRecord[]>
 }
 
 export async function listDesktopCollections(): Promise<DesktopCollectionRecord[]> {
-  return invoke('get_collections');
+  if (!window.scriptManagerDesktop?.runtime?.listCollections) {
+    throw new Error('Desktop runtime unavailable')
+  }
+
+  return window.scriptManagerDesktop.runtime.listCollections() as Promise<DesktopCollectionRecord[]>
 }
 
 export async function createDesktopCollection(payload: DesktopCreateCollectionPayload): Promise<DesktopCollectionRecord> {
@@ -296,12 +304,12 @@ export async function saveDesktopScript(payload: DesktopSaveScriptPayload): Prom
 }
 
 export async function syncDesktopScriptToGist(scriptId: string): Promise<{ gist_id: string; gist_url: string; gist_filename: string }> {
-  if (!window.scriptManagerDesktop?.runtime?.syncGist) throw new Error('Desktop runtime unavailable')
+  if (!window.scriptManagerDesktop?.runtime?.syncGist) throw new UnsupportedTauriFeatureError('GitHub Gist sync')
   return window.scriptManagerDesktop.runtime.syncGist(scriptId)
 }
 
 export async function deleteDesktopGist(scriptId: string): Promise<{ ok: boolean }> {
-  if (!window.scriptManagerDesktop?.runtime?.deleteGist) throw new Error('Desktop runtime unavailable')
+  if (!window.scriptManagerDesktop?.runtime?.deleteGist) throw new UnsupportedTauriFeatureError('GitHub Gist sync')
   return window.scriptManagerDesktop.runtime.deleteGist(scriptId)
 }
 
@@ -316,17 +324,17 @@ export async function readDesktopBuildOutput(scriptId: string, buildId: string):
 }
 
 export async function readDesktopScriptSchedule(scriptId: string): Promise<DesktopScriptSchedule> {
-  if (!window.scriptManagerDesktop?.runtime?.readSchedule) throw new Error('Desktop runtime unavailable')
+  if (!window.scriptManagerDesktop?.runtime?.readSchedule) throw new UnsupportedTauriFeatureError('Script schedules')
   return window.scriptManagerDesktop.runtime.readSchedule(scriptId) as Promise<DesktopScriptSchedule>
 }
 
 export async function saveDesktopScriptSchedule(payload: { scriptId: string; cron: string; enabled: boolean }): Promise<DesktopScriptSchedule> {
-  if (!window.scriptManagerDesktop?.runtime?.saveSchedule) throw new Error('Desktop runtime unavailable')
+  if (!window.scriptManagerDesktop?.runtime?.saveSchedule) throw new UnsupportedTauriFeatureError('Script schedules')
   return window.scriptManagerDesktop.runtime.saveSchedule(payload) as Promise<DesktopScriptSchedule>
 }
 
 export async function deleteDesktopScriptSchedule(scriptId: string) {
-  if (!window.scriptManagerDesktop?.runtime?.deleteSchedule) throw new Error('Desktop runtime unavailable')
+  if (!window.scriptManagerDesktop?.runtime?.deleteSchedule) throw new UnsupportedTauriFeatureError('Script schedules')
   return window.scriptManagerDesktop.runtime.deleteSchedule(scriptId)
 }
 

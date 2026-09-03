@@ -10,7 +10,7 @@ declare global {
   type ScriptManagerDesktopBuildEvent =
     | { type: 'started'; buildId: string }
     | { type: 'line'; buildId: string; line: string }
-    | { type: 'done'; buildId: string; status: 'success' | 'failure' | 'timeout' | 'cancelled'; exitCode: number }
+     | { type: 'done'; buildId: string; status: 'success' | 'failure' | 'timeout' | 'cancelled'; exitCode: number | null }
     | { type: 'error'; buildId: string; message: string }
 
   type ScriptManagerDesktopRemoteExecEvent =
@@ -20,7 +20,9 @@ declare global {
 
   interface Window {
     __ELECTRON__?: boolean
+    __TAURI__?: boolean
     scriptManagerDesktop?: {
+      capabilities?: Record<string, boolean>
       selectFolder: () => Promise<string | null>
       setTitleBarTheme?: (theme: 'light' | 'dark') => Promise<boolean>
       revealPath: (targetPath: string) => Promise<boolean>
