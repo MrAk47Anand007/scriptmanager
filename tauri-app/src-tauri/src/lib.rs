@@ -1,6 +1,7 @@
 use tauri::Manager;
 mod api_client;
 mod approvals;
+mod agents;
 mod commands;
 mod db;
 mod error;
@@ -12,6 +13,7 @@ mod models;
 mod notifications;
 mod observability;
 mod projects;
+mod plugins;
 mod remote_exec;
 mod schema;
 mod scheduler;
@@ -165,7 +167,20 @@ pub fn run() {
             storage::save_storage_provider,
             storage::delete_storage_provider,
             storage::test_storage_provider,
-            storage::sync_collection
+            storage::sync_collection,
+            agents::list_agent_profiles,
+            agents::create_agent_profile,
+            agents::list_agent_runs,
+            agents::read_agent_run,
+            agents::discover_agent_providers,
+            agents::run_agent,
+            agents::interrupt_agent_run,
+            agents::resume_agent_run,
+            plugins::list_plugins,
+            plugins::update_plugin,
+            plugins::remove_plugin,
+            plugins::save_plugin,
+            plugins::run_plugin
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

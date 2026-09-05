@@ -57,12 +57,7 @@ export async function launchAgentRuntime(payload: AgentRunPayload): Promise<Agen
   if (window.scriptManagerDesktop?.agents?.run) {
     return window.scriptManagerDesktop.agents.run(payload) as Promise<AgentRunRuntime>
   }
-  const response = await fetch('/api/agents/runs', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  return readJsonResponse(response) as Promise<AgentRunRuntime>
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function interruptAgentRuntime(id: string): Promise<unknown> {
@@ -85,8 +80,7 @@ export async function listAgentProfilesRuntime(): Promise<AgentProfileRuntime[]>
   if (window.scriptManagerDesktop?.runtime?.listAgentProfiles) {
     return window.scriptManagerDesktop.runtime.listAgentProfiles() as Promise<AgentProfileRuntime[]>
   }
-  const response = await fetch('/api/agents/profiles')
-  return readJsonResponse(response) as Promise<AgentProfileRuntime[]>
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function createAgentProfileRuntime(payload: AgentProfilePayload): Promise<AgentProfileRuntime> {
@@ -94,45 +88,25 @@ export async function createAgentProfileRuntime(payload: AgentProfilePayload): P
     return window.scriptManagerDesktop.runtime.createAgentProfile(payload) as Promise<AgentProfileRuntime>
   }
 
-  const providerResponse = await fetch('/api/agents/providers', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      provider: payload.provider,
-      name: `${payload.name} provider`,
-      executable: payload.provider === 'codex' ? 'codex-acp' : 'claude-agent-acp',
-    }),
-  })
-  const provider = await readJsonResponse(providerResponse) as { id: string }
-  const response = await fetch('/api/agents/profiles', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ ...payload, providerConfigId: provider.id }),
-  })
-  return readJsonResponse(response) as Promise<AgentProfileRuntime>
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function listAgentRunsRuntime(): Promise<AgentRunRuntime[]> {
   if (window.scriptManagerDesktop?.runtime?.listAgentRuns) {
     return window.scriptManagerDesktop.runtime.listAgentRuns() as Promise<AgentRunRuntime[]>
   }
-  const response = await fetch('/api/agents/runs')
-  return readJsonResponse(response) as Promise<AgentRunRuntime[]>
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function readAgentRunRuntime(id: string): Promise<AgentRunDetailRuntime> {
   if (window.scriptManagerDesktop?.runtime?.readAgentRun) {
     return window.scriptManagerDesktop.runtime.readAgentRun(id) as Promise<AgentRunDetailRuntime>
   }
-  const response = await fetch(`/api/agents/runs/${encodeURIComponent(id)}`)
-  return readJsonResponse(response) as Promise<AgentRunDetailRuntime>
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function updateAgentRunRuntime(id: string, status: 'interrupted' | 'running' | 'failed') {
   if (status === 'failed') throw new Error('Failed agent runs require the desktop runtime')
   const path = status === 'interrupted' ? 'interrupt' : 'resume'
-  const response = await fetch(`/api/agents/runs/${encodeURIComponent(id)}/${path}`, {
-    method: 'POST',
-  })
-  return readJsonResponse(response)
+  throw new Error('Desktop runtime unavailable')
 }

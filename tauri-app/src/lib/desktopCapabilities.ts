@@ -12,8 +12,8 @@ export const desktopCapabilities = {
   git: true,
   ops: true,
   storage: true,
-  agents: false,
-  plugins: false,
+  agents: true,
+  plugins: true,
   workspaceAccess: false,
 } as const
 
