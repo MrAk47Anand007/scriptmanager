@@ -129,7 +129,7 @@ const tabCapabilities: Record<TabId, { enabled: boolean; feature: string }> = {
   git: { enabled: desktopCapabilities.git, feature: 'Source control' },
   executions: { enabled: desktopCapabilities.observability, feature: 'Execution dashboard' },
   approvals: { enabled: desktopCapabilities.approvals, feature: 'Approval inbox' },
-  schedules: { enabled: false, feature: 'Schedules' },
+  schedules: { enabled: true, feature: 'Schedules' },
   ops: { enabled: desktopCapabilities.ops, feature: 'Ops console' },
 }
 

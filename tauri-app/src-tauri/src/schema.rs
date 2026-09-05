@@ -62,6 +62,7 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
     .await?;
 
     ensure_column(pool, "scripts", "content", "TEXT NOT NULL DEFAULT ''").await?;
+    ensure_column(pool, "scripts", "schedule_next_run_at", "TEXT").await?;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS tags (

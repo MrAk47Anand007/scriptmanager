@@ -5,10 +5,12 @@ mod db;
 mod error;
 mod execution;
 mod fs_ops;
+mod gist;
 mod git_ops;
 mod models;
 mod projects;
 mod schema;
+mod scheduler;
 mod security;
 mod settings;
 mod state;
@@ -26,6 +28,7 @@ pub fn run() {
                 let pool = db::init_db(&handle)
                     .await
                     .expect("Failed to initialize database");
+                scheduler::spawn(handle.clone(), pool.clone());
                 handle.manage(pool);
 
                 let paths = state::AppPaths::resolve(&handle)
@@ -126,7 +129,12 @@ pub fn run() {
             security::create_secret,
             security::rotate_secret,
             security::disable_secret,
-            security::reveal_secret
+            security::reveal_secret,
+            scheduler::read_schedule,
+            scheduler::save_schedule,
+            scheduler::delete_schedule,
+            gist::sync_gist,
+            gist::delete_gist
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

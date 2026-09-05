@@ -91,11 +91,13 @@ impl ExecutionState {
 #[derive(Debug, serde::Deserialize)]
 pub struct RunScriptPayload {
     #[serde(rename = "scriptId")]
-    script_id: String,
+    pub script_id: String,
     #[serde(rename = "paramValues")]
-    param_values: Option<HashMap<String, String>>,
+    pub param_values: Option<HashMap<String, String>>,
     #[serde(rename = "buildId")]
-    build_id: Option<String>,
+    pub build_id: Option<String>,
+    #[serde(rename = "triggeredBy", default)]
+    pub triggered_by: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -185,7 +187,7 @@ fn sanitize_env_key(key: &str) -> String {
         .to_uppercase()
 }
 
-fn emit_line_event(window: &Window, build_id: &str, line: &str) {
+fn emit_line_event<E: tauri::Emitter<tauri::Wry>>(window: &E, build_id: &str, line: &str) {
     let _ = window.emit(
         "build-event",
         BuildEvent::Line {
@@ -195,7 +197,7 @@ fn emit_line_event(window: &Window, build_id: &str, line: &str) {
     );
 }
 
-fn emit_error_event(window: &Window, build_id: &str, message: &str) {
+fn emit_error_event<E: tauri::Emitter<tauri::Wry>>(window: &E, build_id: &str, message: &str) {
     let _ = window.emit(
         "build-event",
         BuildEvent::Error {
@@ -205,7 +207,7 @@ fn emit_error_event(window: &Window, build_id: &str, message: &str) {
     );
 }
 
-fn emit_done_event(window: &Window, build_id: &str, status: &str, exit_code: Option<i64>) {
+fn emit_done_event<E: tauri::Emitter<tauri::Wry>>(window: &E, build_id: &str, status: &str, exit_code: Option<i64>) {
     let _ = window.emit(
         "build-event",
         BuildEvent::Done {
@@ -216,7 +218,7 @@ fn emit_done_event(window: &Window, build_id: &str, status: &str, exit_code: Opt
     );
 }
 
-fn emit_started_event(window: &Window, build_id: &str) {
+fn emit_started_event<E: tauri::Emitter<tauri::Wry>>(window: &E, build_id: &str) {
     let _ = window.emit(
         "build-event",
         BuildEvent::Started {
@@ -232,6 +234,20 @@ pub async fn run_script(
     exec_state: tauri::State<'_, ExecutionState>,
     payload: RunScriptPayload,
 ) -> Result<RunScriptResult, String> {
+    run_script_core((*pool).clone(), window, &exec_state, payload).await
+}
+
+/// Shared execution path used by manual runs and the scheduler.
+/// `triggered_by` distinguishes build records ('manual' vs 'schedule').
+pub async fn run_script_core<E>(
+    pool: sqlx::SqlitePool,
+    window: E,
+    exec_state: &ExecutionState,
+    payload: RunScriptPayload,
+) -> Result<RunScriptResult, String>
+where
+    E: tauri::Emitter<tauri::Wry> + Clone + Send + Sync + 'static,
+{
     let build_id = payload.build_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let script_id = payload.script_id.clone();
 
@@ -239,11 +255,12 @@ pub async fn run_script(
 
     // Create the build record
     sqlx::query(
-        "INSERT INTO builds (id, script_id, status, triggered_by, started_at) VALUES (?, ?, 'running', 'manual', CURRENT_TIMESTAMP)",
+        "INSERT INTO builds (id, script_id, status, triggered_by, started_at) VALUES (?, ?, 'running', ?, CURRENT_TIMESTAMP)",
     )
     .bind(&build_id)
     .bind(&script_id)
-    .execute(&*pool)
+    .bind(payload.triggered_by.as_deref().unwrap_or("manual"))
+    .execute(&pool)
     .await
     .map_err(|e| e.to_string())?;
 
@@ -252,7 +269,7 @@ pub async fn run_script(
         "SELECT id, name, filename, language, interpreter, content, timeout_ms FROM scripts WHERE id = ?",
     )
     .bind(&script_id)
-    .fetch_optional(&*pool)
+    .fetch_optional(&pool)
     .await
     .map_err(|e| e.to_string())?;
 
@@ -263,7 +280,7 @@ pub async fn run_script(
                 "UPDATE builds SET status = 'failure', exit_code = -1, finished_at = CURRENT_TIMESTAMP WHERE id = ?",
             )
             .bind(&build_id)
-            .execute(&*pool)
+            .execute(&pool)
             .await;
             emit_error_event(&window, &build_id, "Script not found");
             emit_done_event(&window, &build_id, "failure", Some(-1));
@@ -290,7 +307,7 @@ pub async fn run_script(
     let _ = sqlx::query("UPDATE builds SET log_file = ? WHERE id = ?")
         .bind(&log_file)
         .bind(&build_id)
-        .execute(&*pool)
+        .execute(&pool)
         .await;
 
     // Resolve interpreter
@@ -303,7 +320,7 @@ pub async fn run_script(
         "SELECT key, value, is_secret FROM script_env_vars WHERE script_id = ?",
     )
     .bind(&script_id)
-    .fetch_all(&*pool)
+    .fetch_all(&pool)
     .await
     .map_err(|e| e.to_string())?;
 
@@ -348,7 +365,7 @@ pub async fn run_script(
                 "UPDATE builds SET status = 'failure', exit_code = -1, finished_at = CURRENT_TIMESTAMP WHERE id = ?",
             )
             .bind(&build_id)
-            .execute(&*pool)
+            .execute(&pool)
             .await;
             emit_error_event(&window, &build_id, &format!("Failed to start process: {e}"));
             emit_done_event(&window, &build_id, "failure", Some(-1));
@@ -363,7 +380,7 @@ pub async fn run_script(
     let mut stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
 
-    let pool_for_bg = (*pool).clone();
+    let pool_for_bg = pool.clone();
     let window_for_bg = window.clone();
     let bg_build_id = build_id.clone();
     let bg_log_file = log_file.clone();
