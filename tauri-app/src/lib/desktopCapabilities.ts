@@ -10,7 +10,7 @@ export const desktopCapabilities = {
   secrets: true,
   notifications: false,
   git: true,
-  ops: false,
+  ops: true,
   storage: false,
   agents: false,
   plugins: false,

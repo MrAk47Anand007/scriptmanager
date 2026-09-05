@@ -64,78 +64,61 @@ export async function listServerProfilesRuntime() {
   if (window.scriptManagerDesktop?.runtime?.listServerProfiles) {
     return window.scriptManagerDesktop.runtime.listServerProfiles()
   }
-  const response = await axios.get('/api/ops/server-profiles')
-  return response.data
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function saveServerProfileRuntime(payload: Record<string, unknown>) {
   if (window.scriptManagerDesktop?.runtime?.saveServerProfile) {
     return window.scriptManagerDesktop.runtime.saveServerProfile(payload)
   }
-  const response = payload.id
-    ? await axios.put(`/api/ops/server-profiles/${payload.id}`, payload)
-    : await axios.post('/api/ops/server-profiles', payload)
-  return response.data
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function deleteServerProfileRuntime(id: string) {
   if (window.scriptManagerDesktop?.runtime?.deleteServerProfile) {
     return window.scriptManagerDesktop.runtime.deleteServerProfile(id)
   }
-  await axios.delete(`/api/ops/server-profiles/${id}`)
-  return id
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function testServerProfileConnectionRuntime(profileId: string) {
   if (window.scriptManagerDesktop?.runtime?.testServerProfileConnection) {
     return window.scriptManagerDesktop.runtime.testServerProfileConnection(profileId)
   }
-  const response = await axios.post(`/api/ops/server-profiles/${profileId}/test-connection`)
-  return response.data
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function transferRemoteScriptRuntime(payload: Record<string, unknown>) {
   if (window.scriptManagerDesktop?.runtime?.transferRemoteScript) {
     return window.scriptManagerDesktop.runtime.transferRemoteScript(payload)
   }
-  const profileId = String(payload.profileId)
-  const response = await axios.post(`/api/ops/server-profiles/${profileId}/scp`, payload)
-  return response.data
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function startRemoteExecutionRuntime(payload: Record<string, unknown>) {
   if (window.scriptManagerDesktop?.runtime?.startRemoteExecution) {
     return window.scriptManagerDesktop.runtime.startRemoteExecution(payload)
   }
-  const response = await axios.post('/api/ops/remote-exec', payload)
-  return response.data
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function approveRemoteExecutionRuntime(id: string, note?: string) {
   if (window.scriptManagerDesktop?.runtime?.approveRemoteExecution) {
     return window.scriptManagerDesktop.runtime.approveRemoteExecution({ id, note })
   }
-  const response = await axios.post(`/api/ops/remote-exec/${id}/approve`, note ? { note } : {})
-  return response.data as { ok: true; remote_exec_id: string }
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function rejectRemoteExecutionRuntime(id: string) {
   if (window.scriptManagerDesktop?.runtime?.rejectRemoteExecution) {
     return window.scriptManagerDesktop.runtime.rejectRemoteExecution(id)
   }
-  const response = await axios.post(`/api/ops/remote-exec/${id}/reject`)
-  return response.data as { ok: true; remote_exec_id: string }
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function listAuditLogRuntime(params?: { profileId?: string; scriptId?: string; limit?: number; offset?: number }) {
   if (window.scriptManagerDesktop?.runtime?.listAuditLog) {
     return window.scriptManagerDesktop.runtime.listAuditLog(params)
   }
-  const query = new URLSearchParams()
-  if (params?.profileId) query.set('profileId', params.profileId)
-  if (params?.scriptId) query.set('scriptId', params.scriptId)
-  if (params?.limit) query.set('limit', String(params.limit))
-  if (params?.offset) query.set('offset', String(params.offset))
-  const response = await axios.get(`/api/ops/audit-log?${query}`)
-  return response.data
+  throw new Error('Desktop runtime unavailable')
 }

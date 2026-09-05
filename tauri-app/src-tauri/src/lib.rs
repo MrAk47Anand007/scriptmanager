@@ -12,6 +12,7 @@ mod models;
 mod notifications;
 mod observability;
 mod projects;
+mod remote_exec;
 mod schema;
 mod scheduler;
 mod security;
@@ -149,7 +150,16 @@ pub fn run() {
             notifications::create_notification_channel,
             notifications::list_notification_rules,
             notifications::create_notification_rule,
-            notifications::list_notification_deliveries
+            notifications::list_notification_deliveries,
+            remote_exec::list_server_profiles,
+            remote_exec::save_server_profile,
+            remote_exec::delete_server_profile,
+            remote_exec::test_server_profile_connection,
+            remote_exec::transfer_remote_script,
+            remote_exec::start_remote_execution,
+            remote_exec::approve_remote_execution,
+            remote_exec::reject_remote_execution,
+            remote_exec::list_audit_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

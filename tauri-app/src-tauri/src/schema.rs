@@ -192,6 +192,58 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
     .await?;
 
     sqlx::query(
+        "CREATE TABLE IF NOT EXISTS server_profiles (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            host TEXT NOT NULL,
+            port INTEGER NOT NULL DEFAULT 22,
+            username TEXT NOT NULL,
+            auth_method TEXT NOT NULL DEFAULT 'password',
+            has_secret INTEGER NOT NULL DEFAULT 0,
+            key_path TEXT,
+            project_id TEXT,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS remote_executions (
+            id TEXT PRIMARY KEY,
+            profile_id TEXT NOT NULL REFERENCES server_profiles(id) ON DELETE CASCADE,
+            script_id TEXT,
+            command TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            requested_by TEXT NOT NULL DEFAULT 'local-admin',
+            approved_by TEXT,
+            note TEXT NOT NULL DEFAULT '',
+            output TEXT NOT NULL DEFAULT '',
+            exit_code INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            started_at TEXT,
+            finished_at TEXT
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS audit_log (
+            id TEXT PRIMARY KEY,
+            action TEXT NOT NULL,
+            actor TEXT NOT NULL DEFAULT 'local-admin',
+            resource TEXT NOT NULL DEFAULT '',
+            detail TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS notification_channels (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
