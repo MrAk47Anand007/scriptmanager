@@ -122,6 +122,11 @@ window.scriptManagerDesktop = {
     listAuditLog: (params?: unknown) => invokeTauri('list_audit_log', { params: params ?? null }),
     onRemoteExecEvent: (listener: DesktopListener<ScriptManagerDesktopRemoteExecEvent>) =>
       subscribe('remote-exec-event', listener),
+    listStorageProviders: () => invokeTauri('list_storage_providers'),
+    saveStorageProvider: (payload: unknown) => invokeTauri('save_storage_provider', { payload: payload as Record<string, unknown> }),
+    deleteStorageProvider: (id: string) => invokeTauri('delete_storage_provider', { id }),
+    testStorageProvider: (id: string) => invokeTauri('test_storage_provider', { id }),
+    syncCollection: (collectionId: string) => invokeTauri('sync_collection', { collectionId }),
     listProjects: () => invokeTauri('list_projects'),
     saveProject: (payload: unknown) => invokeTauri('save_project', { payload: payload as Record<string, unknown> }),
     deleteProject: (id: string) => invokeTauri('delete_project', { id }),

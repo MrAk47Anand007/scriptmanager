@@ -13,12 +13,7 @@ export async function listStorageProviders(): Promise<StorageProviderRecord[]> {
     return window.scriptManagerDesktop!.runtime!.listStorageProviders!() as Promise<StorageProviderRecord[]>
   }
 
-  const response = await fetch('/api/storage-providers')
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({ error: 'Failed to list storage providers' }))
-    throw new Error(data.error ?? 'Failed to list storage providers')
-  }
-  return response.json() as Promise<StorageProviderRecord[]>
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function saveStorageProvider(payload: SaveStorageProviderPayload): Promise<StorageProviderRecord> {
@@ -26,16 +21,7 @@ export async function saveStorageProvider(payload: SaveStorageProviderPayload): 
     return window.scriptManagerDesktop!.runtime!.saveStorageProvider!(payload) as Promise<StorageProviderRecord>
   }
 
-  const response = await fetch('/api/storage-providers', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({ error: 'Failed to save storage provider' }))
-    throw new Error(data.error ?? 'Failed to save storage provider')
-  }
-  return response.json() as Promise<StorageProviderRecord>
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function deleteStorageProvider(id: string): Promise<{ id: string }> {
@@ -43,12 +29,7 @@ export async function deleteStorageProvider(id: string): Promise<{ id: string }>
     return window.scriptManagerDesktop!.runtime!.deleteStorageProvider!(id) as Promise<{ id: string }>
   }
 
-  const response = await fetch(`/api/storage-providers/${id}`, { method: 'DELETE' })
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({ error: 'Failed to delete storage provider' }))
-    throw new Error(data.error ?? 'Failed to delete storage provider')
-  }
-  return response.json() as Promise<{ id: string }>
+  throw new Error('Desktop runtime unavailable')
 }
 
 export type CollectionSyncResult = {
@@ -65,9 +46,7 @@ export async function syncCollectionRemote(collectionId: string): Promise<Collec
     return window.scriptManagerDesktop!.runtime!.syncCollection!(collectionId) as Promise<CollectionSyncResult>
   }
 
-  const response = await fetch(`/api/collections/${collectionId}/sync`, { method: 'POST' })
-  const data = await response.json().catch(() => ({ ok: false, pulled: 0, pushed: 0, conflicts: 0, skipped: [], error: 'Sync failed' }))
-  return data as CollectionSyncResult
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function testStorageProvider(id: string): Promise<StorageProviderTestResult> {
@@ -75,10 +54,5 @@ export async function testStorageProvider(id: string): Promise<StorageProviderTe
     return window.scriptManagerDesktop!.runtime!.testStorageProvider!(id) as Promise<StorageProviderTestResult>
   }
 
-  const response = await fetch(`/api/storage-providers/${id}/test`, { method: 'POST' })
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({ error: 'Failed to test storage provider' }))
-    throw new Error(data.error ?? 'Failed to test storage provider')
-  }
-  return response.json() as Promise<StorageProviderTestResult>
+  throw new Error('Desktop runtime unavailable')
 }

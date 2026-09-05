@@ -18,6 +18,7 @@ mod scheduler;
 mod security;
 mod settings;
 mod state;
+mod storage;
 mod terminal;
 mod workflows;
 
@@ -159,7 +160,12 @@ pub fn run() {
             remote_exec::start_remote_execution,
             remote_exec::approve_remote_execution,
             remote_exec::reject_remote_execution,
-            remote_exec::list_audit_log
+            remote_exec::list_audit_log,
+            storage::list_storage_providers,
+            storage::save_storage_provider,
+            storage::delete_storage_provider,
+            storage::test_storage_provider,
+            storage::sync_collection
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
