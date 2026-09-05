@@ -58,3 +58,8 @@ coverage/
 .superpowers/
 .claude/
 tsc_output.txt
+
+# Mimosa agent tool state
+.mimosa/
+**/.mimosa/
+.commandcode/

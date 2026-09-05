@@ -9,6 +9,7 @@ mod git_ops;
 mod models;
 mod projects;
 mod schema;
+mod settings;
 mod state;
 mod terminal;
 mod workflows;
@@ -111,7 +112,15 @@ pub fn run() {
             api_client::list_api_history,
             api_client::clear_api_history,
             api_client::run_api_collection,
-            api_client::list_api_collection_runs
+            api_client::list_api_collection_runs,
+            settings::read_settings,
+            settings::save_settings,
+            settings::read_github_gist_settings,
+            settings::save_github_gist_settings,
+            settings::clear_github_gist_settings,
+            settings::export_scripts,
+            settings::export_script,
+            settings::import_scripts
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

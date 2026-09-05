@@ -122,7 +122,7 @@ type TabId = 'scripts' | 'settings' | 'api' | 'workflows' | 'agents' | 'git' | '
 
 const tabCapabilities: Record<TabId, { enabled: boolean; feature: string }> = {
   scripts: { enabled: desktopCapabilities.scripts, feature: 'Scripts workspace' },
-  settings: { enabled: false, feature: 'Settings' },
+  settings: { enabled: true, feature: 'Settings' },
   api: { enabled: desktopCapabilities.apiClient, feature: 'API workspace' },
   workflows: { enabled: desktopCapabilities.workflows, feature: 'Workflow builder' },
   agents: { enabled: desktopCapabilities.agents, feature: 'Agents workbench' },

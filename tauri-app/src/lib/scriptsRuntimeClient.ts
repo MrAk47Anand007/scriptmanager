@@ -259,11 +259,7 @@ export async function exportScriptsRuntime(): Promise<Record<string, unknown>> {
     return window.scriptManagerDesktop.runtime.exportScripts() as Promise<Record<string, unknown>>
   }
 
-  const response = await fetch('/api/export')
-  if (!response.ok) {
-    throw new Error('Failed to export scripts')
-  }
-  return response.json() as Promise<Record<string, unknown>>
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function exportScriptRuntime(scriptId: string): Promise<Record<string, unknown>> {
@@ -271,11 +267,7 @@ export async function exportScriptRuntime(scriptId: string): Promise<Record<stri
     return window.scriptManagerDesktop.runtime.exportScript(scriptId) as Promise<Record<string, unknown>>
   }
 
-  const response = await fetch(`/api/scripts/${encodeURIComponent(scriptId)}/export`)
-  if (!response.ok) {
-    throw new Error('Failed to export script')
-  }
-  return response.json() as Promise<Record<string, unknown>>
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function importScriptsRuntime(payload: unknown): Promise<{ message: string; results?: unknown[] }> {
@@ -283,8 +275,7 @@ export async function importScriptsRuntime(payload: unknown): Promise<{ message:
     return window.scriptManagerDesktop.runtime.importScripts(payload) as Promise<{ message: string; results?: unknown[] }>
   }
 
-  const response = await axios.post('/api/scripts/import', payload)
-  return response.data as { message: string; results?: unknown[] }
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function createDesktopScript(payload: DesktopCreateScriptPayload): Promise<DesktopScriptRecord> {
