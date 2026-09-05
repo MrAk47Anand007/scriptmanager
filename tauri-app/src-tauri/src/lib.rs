@@ -9,6 +9,7 @@ mod git_ops;
 mod models;
 mod projects;
 mod schema;
+mod security;
 mod settings;
 mod state;
 mod terminal;
@@ -120,7 +121,12 @@ pub fn run() {
             settings::clear_github_gist_settings,
             settings::export_scripts,
             settings::export_script,
-            settings::import_scripts
+            settings::import_scripts,
+            security::list_secrets,
+            security::create_secret,
+            security::rotate_secret,
+            security::disable_secret,
+            security::reveal_secret
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

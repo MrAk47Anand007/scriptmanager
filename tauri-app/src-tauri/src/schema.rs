@@ -158,6 +158,56 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
     .await?;
 
     sqlx::query(
+        "CREATE TABLE IF NOT EXISTS secrets (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT NOT NULL DEFAULT '',
+            scope TEXT NOT NULL DEFAULT 'global',
+            status TEXT NOT NULL DEFAULT 'active',
+            current_version INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS secret_versions (
+            id TEXT PRIMARY KEY,
+            secret_id TEXT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
+            version_number INTEGER NOT NULL,
+            ciphertext TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS secret_bindings (
+            id TEXT PRIMARY KEY,
+            secret_id TEXT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
+            resource TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS secret_access_events (
+            id TEXT PRIMARY KEY,
+            secret_id TEXT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
+            action TEXT NOT NULL,
+            detail TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS api_collections (
             id TEXT PRIMARY KEY,
             workspace_id TEXT NOT NULL DEFAULT 'default',
