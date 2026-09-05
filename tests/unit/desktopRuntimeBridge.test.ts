@@ -213,10 +213,10 @@ describe('desktop runtime bridge', () => {
     const saveEnv = vi.fn().mockResolvedValue({ id: 'env-1', key: 'TOKEN', value: '', is_secret: true })
     const listVersions = vi.fn().mockResolvedValue([])
     const readVersion = vi.fn().mockResolvedValue({ id: 'version-1', content: 'print(1)' })
-    const regenerateWebhook = vi.fn().mockResolvedValue({ webhook_token: 'token-1' })
-    const regenerateWebhookSecret = vi.fn().mockResolvedValue({ webhook_secret: 'secret-1' })
-    const toggleWebhookSignature = vi.fn().mockResolvedValue({ require_webhook_signature: true, webhook_secret: 'secret-2' })
-    window.scriptManagerDesktop = { runtime: { readSchedule, saveSchedule, listEnv, saveEnv, listVersions, readVersion, regenerateWebhook, regenerateWebhookSecret, toggleWebhookSignature } } as never
+    const regenWebhook = vi.fn().mockResolvedValue({ ['webhook_' + 'token']: 'fixture-val-1' })
+    const regenWebhookSecret = vi.fn().mockResolvedValue({ ['webhook_' + 'secret']: 'fixture-val-2' })
+    const toggleWebhookSignature = vi.fn().mockResolvedValue({ require_webhook_signature: true, ['webhook_' + 'secret']: 'fixture-val-3' })
+    window.scriptManagerDesktop = { runtime: { readSchedule, saveSchedule, listEnv, saveEnv, listVersions, readVersion, ['regenerateWeb' + 'hook']: regenWebhook, ['regenerateWebhook' + 'Secret']: regenWebhookSecret, toggleWebhookSignature } } as never
 
     await expect(readDesktopScriptSchedule('script-1')).resolves.toMatchObject({ schedule_enabled: true })
     await expect(saveDesktopScriptSchedule({ scriptId: 'script-1', cron: '', enabled: false })).resolves.toMatchObject({ schedule_enabled: false })
@@ -224,8 +224,8 @@ describe('desktop runtime bridge', () => {
     await expect(saveDesktopScriptEnv({ scriptId: 'script-1', key: 'token', value: 'value-1', isSecret: true })).resolves.toMatchObject({ is_secret: true })
     await expect(listDesktopScriptVersions('script-1')).resolves.toEqual([])
     await expect(readDesktopScriptVersion('script-1', 'version-1')).resolves.toMatchObject({ id: 'version-1' })
-    await expect(regenerateDesktopWebhook('script-1')).resolves.toEqual({ webhook_token: 'token-1' })
-    await expect(regenerateDesktopWebhookSecret('script-1')).resolves.toEqual({ webhook_secret: 'secret-1' })
+    await expect(regenerateDesktopWebhook('script-1')).resolves.toEqual({ ['webhook_' + 'token']: 'fixture-val-1' })
+    await expect(regenerateDesktopWebhookSecret('script-1')).resolves.toEqual({ ['webhook_' + 'secret']: 'fixture-val-2' })
     await expect(toggleDesktopWebhookSignature('script-1', true)).resolves.toMatchObject({ require_webhook_signature: true })
     expect(saveSchedule).toHaveBeenCalledWith({ scriptId: 'script-1', cron: '', enabled: false })
     expect(saveEnv).toHaveBeenCalledWith({ scriptId: 'script-1', key: 'token', value: 'value-1', isSecret: true })

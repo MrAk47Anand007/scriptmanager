@@ -1,8 +1,8 @@
 [package]
-name = "app"
+name = "scriptmanager"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "A native desktop script manager built with Tauri"
+authors = ["ScriptManager Contributors"]
 license = ""
 repository = ""
 edition = "2021"
@@ -11,7 +11,7 @@ rust-version = "1.77.2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "app_lib"
+name = "scriptmanager_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -33,3 +33,6 @@ git2 = "0.18"
 reqwest = { version = "0.12", features = ["json"] }
 boa_engine = "0.19"
 tokio-stream = "0.1"
+urlencoding = "2"
+base64 = "0.22"
+url = "2"

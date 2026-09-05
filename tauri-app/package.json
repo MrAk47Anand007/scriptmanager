@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "tauri:build": "tauri build",
+    "tauri:build:no-bundle": "tauri build --no-bundle",
     "lint": "oxlint",
     "preview": "vite preview"
   },

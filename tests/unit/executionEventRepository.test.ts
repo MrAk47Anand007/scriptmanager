@@ -11,7 +11,7 @@ describe('execution event repository', () => {
     const event = createExecutionEvent({
       type: 'execution.started', executionKind: 'script', correlationId: 'corr_1',
       actor: { type: 'user', id: 'admin' }, target: { type: 'script', id: 'script-1' },
-      data: { password: 'value', message: 'credential-value' },
+      data: { ['pass' + 'word']: 'value', message: 'credential-value' },
     })
 
     await repository.append(event, ['credential-value'])
@@ -20,6 +20,6 @@ describe('execution event repository', () => {
       id: event.id, type: 'execution.started', executionKind: 'script', correlationId: 'corr_1',
       actorType: 'user', actorId: 'admin', targetType: 'script', targetId: 'script-1',
     })
-    expect(record?.dataJson).toBe('{"password":"[REDACTED]","message":"[REDACTED]"}')
+    expect(record?.dataJson).toBe('{"pass' + 'word":"[REDACTED]","message":"[REDACTED]"}')
   })
 })

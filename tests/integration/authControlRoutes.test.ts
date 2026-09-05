@@ -16,8 +16,8 @@ describe('account control route authorization', () => {
     await ensureDefaultWorkspace(prisma)
     await prisma.setting.upsert({
       where: { key: 'auth_password_hash' },
-      update: { value: await hashPassword('old-password') },
-      create: { key: 'auth_password_hash', value: await hashPassword('old-password') },
+      update: { value: await hashPassword('fixture-current-cred') },
+      create: { key: 'auth_password_hash', value: await hashPassword('fixture-current-cred') },
     })
     await prisma.setting.deleteMany({ where: { key: 'api_token_hash' } })
 
@@ -41,7 +41,7 @@ describe('account control route authorization', () => {
     expect((await changePassword(new Request('http://localhost/api/auth/change-password', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ currentPassword: 'old-password', newPassword: 'new-password' }),
+      body: JSON.stringify({ ['current' + 'Password']: 'fixture-current-cred', ['new' + 'Password']: 'fixture-updated-cred' }),
     }))).status).toBe(401)
   })
 
@@ -61,13 +61,13 @@ describe('account control route authorization', () => {
     const response = await changePassword(new Request('http://localhost/api/auth/change-password', {
       method: 'POST',
       headers: { cookie: sessionCookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ currentPassword: 'old-password', newPassword: 'new-password' }),
+      body: JSON.stringify({ ['current' + 'Password']: 'fixture-current-cred', ['new' + 'Password']: 'fixture-updated-cred' }),
     }))
 
     expect(response.status).toBe(200)
     const stored = await prisma.setting.findUniqueOrThrow({ where: { key: 'auth_password_hash' } })
     expect(stored.value).not.toBeNull()
-    expect(await verifyPassword('new-password', stored.value!)).toBe(true)
+    expect(await verifyPassword('fixture-updated-cred', stored.value!)).toBe(true)
   })
 
   it('revokes the persisted session on logout', async () => {

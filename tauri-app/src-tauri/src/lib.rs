@@ -1,4 +1,5 @@
 use tauri::Manager;
+mod api_client;
 mod commands;
 mod db;
 mod error;
@@ -6,9 +7,11 @@ mod execution;
 mod fs_ops;
 mod git_ops;
 mod models;
+mod projects;
 mod schema;
 mod state;
 mod terminal;
+mod workflows;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -64,17 +67,51 @@ pub fn run() {
             terminal::create_terminal,
             terminal::write_terminal,
             terminal::resize_terminal,
+            terminal::close_terminal,
+            terminal::set_terminal_context,
+            terminal::run_script_in_terminal,
             execution::run_script,
             execution::cancel_run,
             git_ops::git_clone,
             git_ops::git_log,
             git_ops::git_status,
+            git_ops::run_git_action,
+            git_ops::git_probe,
+            git_ops::git_clone_project,
+            projects::list_projects,
+            projects::save_project,
+            projects::delete_project,
+            projects::assign_collection_to_project,
             fs_ops::start_folder_watch,
             fs_ops::atomic_write_file,
             fs_ops::read_file,
             execution::execute_api_request,
             execution::execute_js_script,
-            execution::run_workflow_dag
+            workflows::list_workflows,
+            workflows::create_workflow,
+            workflows::save_workflow,
+            workflows::publish_workflow,
+            workflows::run_workflow,
+            workflows::list_workflow_runs,
+            workflows::read_workflow_run,
+            workflows::retry_workflow_node,
+            workflows::cancel_workflow_run,
+            api_client::list_api_collections,
+            api_client::save_api_collection,
+            api_client::delete_api_collection,
+            api_client::list_api_requests,
+            api_client::save_api_request,
+            api_client::delete_api_request,
+            api_client::list_api_environments,
+            api_client::save_api_environment,
+            api_client::delete_api_environment,
+            api_client::read_api_globals,
+            api_client::save_api_globals,
+            api_client::send_api_request,
+            api_client::list_api_history,
+            api_client::clear_api_history,
+            api_client::run_api_collection,
+            api_client::list_api_collection_runs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

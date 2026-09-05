@@ -63,15 +63,6 @@ pub fn execute_js_script(code: String) -> Result<String, String> {
     }
 }
 
-#[command]
-pub async fn run_workflow_dag(workflow_id: String) -> Result<String, String> {
-    // This is a stub for the complex DAG execution logic.
-    // The tokio async runtime allows for concurrent node execution.
-    // Full logic will map workflow nodes to execution streams.
-
-    Ok(format!("Workflow {} started successfully.", workflow_id))
-}
-
 // --- Script Execution ---
 
 pub struct ExecutionState {

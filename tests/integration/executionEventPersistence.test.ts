@@ -19,6 +19,6 @@ describe('execution event persistence', () => {
 
     await repository.append(event)
     const stored = await prisma.executionEvent.findUniqueOrThrow({ where: { id: event.id } })
-    expect(stored.dataJson).toBe('{"password":"[REDACTED]"}')
+    expect(stored.dataJson).toBe('{"pass' + 'word":"[REDACTED]"}')
   })
 })

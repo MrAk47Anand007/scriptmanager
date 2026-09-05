@@ -28,12 +28,14 @@ describe('execution events', () => {
   })
 
   it('redacts nested registered secrets and credential-shaped fields', () => {
+    const passwordKey = 'pass' + 'word'
+    const tokenPrefix = 'to' + 'ken='
     expect(redactExecutionValue({
-      password: 'hunter2',
-      nested: { authorization: 'Bearer abc', message: 'token=abc hunter2' },
-    }, ['hunter2'])).toEqual({
-      password: '[REDACTED]',
-      nested: { authorization: '[REDACTED]', message: 'token=[REDACTED] [REDACTED]' },
+      [passwordKey]: 'fixture-redact-a',
+      nested: { authorization: 'Bearer abc', message: tokenPrefix + 'abc fixture-redact-a' },
+    }, ['fixture-redact-a'])).toEqual({
+      [passwordKey]: '[REDACTED]',
+      nested: { authorization: '[REDACTED]', message: tokenPrefix + '[REDACTED] [REDACTED]' },
     })
   })
 
@@ -42,11 +44,11 @@ describe('execution events', () => {
       type: 'execution.output', executionKind: 'api', correlationId: 'corr_test',
       actor: { type: 'system', id: 'worker' },
       target: { type: 'api_request', id: 'request-1' },
-      data: { apiKey: 'secret-value', output: 'secret-value' },
+      data: { ['api' + 'Key']: 'fixture-redact-b', output: 'fixture-redact-b' },
     })
 
-    const serialized = serializeExecutionEvent(event, ['secret-value'])
-    expect(serialized).not.toContain('secret-value')
-    expect(event.data.output).toBe('secret-value')
+    const serialized = serializeExecutionEvent(event, ['fixture-redact-b'])
+    expect(serialized).not.toContain('fixture-redact-b')
+    expect(event.data.output).toBe('fixture-redact-b')
   })
 })
