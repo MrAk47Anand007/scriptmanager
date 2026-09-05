@@ -9,7 +9,8 @@
     "tauri:build": "tauri build",
     "tauri:build:no-bundle": "tauri build --no-bundle",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "guard:no-api-fallback": "node scripts/check-no-desktop-api-fallback.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -6,36 +6,15 @@ export async function loadWorkspaceAccessRuntime() {
     return window.scriptManagerDesktop.runtime.listWorkspaceAccess()
   }
 
-  const response = await fetch('/api/workspaces/current')
-  if (!response.ok) {
-    throw new Error((await response.json()).error ?? 'Could not load workspace access')
-  }
-  const data = await response.json()
-  const [sessionsResponse, auditResponse] = await Promise.all([
-    fetch('/api/workspaces/current/sessions'),
-    fetch('/api/workspaces/current/audit'),
-  ])
-  return {
-    ...data,
-    sessions: sessionsResponse.ok ? await sessionsResponse.json() : [],
-    audit: auditResponse.ok ? await auditResponse.json() : [],
-  }
+  throw new Error('Desktop runtime unavailable')
 }
 
-export async function createWorkspaceInvitationRuntime(payload: CreateInvitationPayload) {
+export async function createWorkspaceInvitationRuntime(_payload: CreateInvitationPayload) {
   if (window.scriptManagerDesktop?.runtime?.createWorkspaceInvitation) {
-    return window.scriptManagerDesktop.runtime.createWorkspaceInvitation(payload)
+    return window.scriptManagerDesktop.runtime.createWorkspaceInvitation(_payload)
   }
 
-  const response = await fetch('/api/workspaces/current/invitations', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!response.ok) {
-    throw new Error((await response.json()).error ?? 'Invitation failed')
-  }
-  return response.json()
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function revokeWorkspaceGrantsRuntime(actorId?: string) {
@@ -43,15 +22,7 @@ export async function revokeWorkspaceGrantsRuntime(actorId?: string) {
     return window.scriptManagerDesktop.runtime.revokeWorkspaceGrants(actorId ? { actorId } : {})
   }
 
-  const response = await fetch('/api/workspaces/current/grants/revoke', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(actorId ? { actorId } : {}),
-  })
-  if (!response.ok) {
-    throw new Error((await response.json()).error ?? 'Grant revocation failed')
-  }
-  return response.json()
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function createWorkspaceRoleRuntime(payload: CreateRolePayload) {
@@ -59,13 +30,5 @@ export async function createWorkspaceRoleRuntime(payload: CreateRolePayload) {
     return window.scriptManagerDesktop.runtime.createWorkspaceRole(payload)
   }
 
-  const response = await fetch('/api/workspaces/current/roles', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!response.ok) {
-    throw new Error((await response.json()).error ?? 'Role creation failed')
-  }
-  return response.json()
+  throw new Error('Desktop runtime unavailable')
 }

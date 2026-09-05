@@ -23,6 +23,7 @@ mod state;
 mod storage;
 mod terminal;
 mod workflows;
+mod workspace_access;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -180,7 +181,11 @@ pub fn run() {
             plugins::update_plugin,
             plugins::remove_plugin,
             plugins::save_plugin,
-            plugins::run_plugin
+            plugins::run_plugin,
+            workspace_access::list_workspace_access,
+            workspace_access::create_workspace_invitation,
+            workspace_access::revoke_workspace_grants,
+            workspace_access::create_workspace_role
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

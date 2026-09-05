@@ -141,6 +141,10 @@ window.scriptManagerDesktop = {
     updatePlugin: (payload: { id: string; action: string; settings?: unknown }) =>
       invokeTauri('update_plugin', { payload: payload as Record<string, unknown> }),
     removePlugin: (id: string) => invokeTauri('remove_plugin', { id }),
+    listWorkspaceAccess: () => invokeTauri('list_workspace_access'),
+    createWorkspaceInvitation: (payload: unknown) => invokeTauri('create_workspace_invitation', { payload: payload as Record<string, unknown> }),
+    revokeWorkspaceGrants: (payload?: { actorId?: string }) => invokeTauri('revoke_workspace_grants', { payload: payload ?? {} }),
+    createWorkspaceRole: (payload: unknown) => invokeTauri('create_workspace_role', { payload: payload as Record<string, unknown> }),
     listProjects: () => invokeTauri('list_projects'),
     saveProject: (payload: unknown) => invokeTauri('save_project', { payload: payload as Record<string, unknown> }),
     deleteProject: (id: string) => invokeTauri('delete_project', { id }),
