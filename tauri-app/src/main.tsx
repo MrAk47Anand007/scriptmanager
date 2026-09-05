@@ -104,6 +104,13 @@ window.scriptManagerDesktop = {
       invokeTauri('retry_observability_run', { kind: 'workflow', id: payload.id, nodeId: payload.nodeId ?? null }),
     readObservabilityLog: (payload: { kind: string; id: string }) =>
       invokeTauri('read_observability_log', { kind: payload.kind, id: payload.id }),
+    listApprovals: (status?: string) => invokeTauri('list_approvals', { status: status ?? null }),
+    decideApproval: (payload: { id: string; decision: string; note?: string }) => invokeTauri('decide_approval', { payload }),
+    listNotificationChannels: () => invokeTauri('list_notification_channels'),
+    createNotificationChannel: (payload: { name: string; kind: string; config?: unknown }) => invokeTauri('create_notification_channel', { payload }),
+    listNotificationRules: () => invokeTauri('list_notification_rules'),
+    createNotificationRule: (payload: unknown) => invokeTauri('create_notification_rule', { payload: payload as Record<string, unknown> }),
+    listNotificationDeliveries: (since?: string) => invokeTauri('list_notification_deliveries', { since: since ?? null }),
     listProjects: () => invokeTauri('list_projects'),
     saveProject: (payload: unknown) => invokeTauri('save_project', { payload: payload as Record<string, unknown> }),
     deleteProject: (id: string) => invokeTauri('delete_project', { id }),

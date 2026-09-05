@@ -5,11 +5,7 @@ export async function listApprovalsRuntime(status = 'pending') {
     return window.scriptManagerDesktop.runtime.listApprovals(status)
   }
 
-  const response = await fetch(`/api/approvals?status=${encodeURIComponent(status)}`)
-  if (!response.ok) {
-    throw new Error('Failed to load approvals')
-  }
-  return response.json()
+  throw new Error('Desktop runtime unavailable')
 }
 
 export async function decideApprovalRuntime(id: string, decision: ApprovalDecisionKind, note?: string) {
@@ -17,13 +13,5 @@ export async function decideApprovalRuntime(id: string, decision: ApprovalDecisi
     return window.scriptManagerDesktop.runtime.decideApproval({ id, decision, note })
   }
 
-  const response = await fetch(`/api/approvals/${id}/decision`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ decision, note }),
-  })
-  if (!response.ok) {
-    throw new Error((await response.json()).error ?? 'Failed to decide approval')
-  }
-  return response.json()
+  throw new Error('Desktop runtime unavailable')
 }

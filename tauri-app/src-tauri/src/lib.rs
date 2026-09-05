@@ -1,5 +1,6 @@
 use tauri::Manager;
 mod api_client;
+mod approvals;
 mod commands;
 mod db;
 mod error;
@@ -8,6 +9,7 @@ mod fs_ops;
 mod gist;
 mod git_ops;
 mod models;
+mod notifications;
 mod observability;
 mod projects;
 mod schema;
@@ -140,7 +142,14 @@ pub fn run() {
             observability::get_observability_run_detail,
             observability::read_observability_log,
             observability::cancel_observability_run,
-            observability::retry_observability_run
+            observability::retry_observability_run,
+            approvals::list_approvals,
+            approvals::decide_approval,
+            notifications::list_notification_channels,
+            notifications::create_notification_channel,
+            notifications::list_notification_rules,
+            notifications::create_notification_rule,
+            notifications::list_notification_deliveries
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

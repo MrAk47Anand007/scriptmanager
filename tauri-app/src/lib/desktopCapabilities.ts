@@ -6,7 +6,7 @@ export const desktopCapabilities = {
   apiClient: true,
   workflows: true,
   observability: true,
-  approvals: false,
+  approvals: true,
   secrets: true,
   notifications: false,
   git: true,

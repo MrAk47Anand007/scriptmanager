@@ -159,6 +159,84 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
     .await?;
 
     sqlx::query(
+        "CREATE TABLE IF NOT EXISTS approval_requests (
+            id TEXT PRIMARY KEY,
+            operation TEXT NOT NULL,
+            resource TEXT NOT NULL,
+            capability TEXT NOT NULL DEFAULT '',
+            actor_id TEXT NOT NULL DEFAULT 'local-admin',
+            actor_name TEXT,
+            risk TEXT NOT NULL DEFAULT 'medium',
+            reason TEXT NOT NULL DEFAULT '',
+            preview_json TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'pending',
+            expires_at TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            decided_at TEXT
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS approval_decisions (
+            id TEXT PRIMARY KEY,
+            request_id TEXT NOT NULL REFERENCES approval_requests(id) ON DELETE CASCADE,
+            decision TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            decided_by TEXT NOT NULL DEFAULT 'local-admin',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS notification_channels (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'desktop',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            config_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS notification_rules (
+            id TEXT PRIMARY KEY,
+            channel_id TEXT NOT NULL REFERENCES notification_channels(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            event_types TEXT NOT NULL DEFAULT '',
+            filter_json TEXT NOT NULL DEFAULT '{}',
+            template_json TEXT NOT NULL DEFAULT '{}',
+            throttle_seconds INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS notification_deliveries (
+            id TEXT PRIMARY KEY,
+            channel_id TEXT NOT NULL REFERENCES notification_channels(id) ON DELETE CASCADE,
+            rule_id TEXT,
+            status TEXT NOT NULL DEFAULT 'delivered',
+            attempt_count INTEGER NOT NULL DEFAULT 1,
+            last_error TEXT,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            delivered_at TEXT
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS secrets (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
