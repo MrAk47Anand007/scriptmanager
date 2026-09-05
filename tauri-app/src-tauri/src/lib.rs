@@ -8,6 +8,7 @@ mod fs_ops;
 mod gist;
 mod git_ops;
 mod models;
+mod observability;
 mod projects;
 mod schema;
 mod scheduler;
@@ -134,7 +135,12 @@ pub fn run() {
             scheduler::save_schedule,
             scheduler::delete_schedule,
             gist::sync_gist,
-            gist::delete_gist
+            gist::delete_gist,
+            observability::get_observability_dashboard,
+            observability::get_observability_run_detail,
+            observability::read_observability_log,
+            observability::cancel_observability_run,
+            observability::retry_observability_run
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

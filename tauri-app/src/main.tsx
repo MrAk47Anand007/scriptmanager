@@ -95,6 +95,15 @@ window.scriptManagerDesktop = {
     readSchedule: (scriptId: string) => invokeTauri('read_schedule', { scriptId }),
     saveSchedule: (payload: { scriptId: string; cron: string; enabled: boolean }) => invokeTauri('save_schedule', { payload }),
     deleteSchedule: (scriptId: string) => invokeTauri('delete_schedule', { scriptId }),
+    getObservabilityDashboard: (filters?: { kind?: string; status?: string }) =>
+      invokeTauri('get_observability_dashboard', { filters: filters ?? null }),
+    getObservabilityRunDetail: (payload: { kind: string; id: string }) =>
+      invokeTauri('get_observability_run_detail', { kind: payload.kind, id: payload.id }),
+    cancelObservabilityRun: (id: string) => invokeTauri('cancel_observability_run', { kind: 'workflow', id }),
+    retryObservabilityRun: (payload: { id: string; nodeId?: string }) =>
+      invokeTauri('retry_observability_run', { kind: 'workflow', id: payload.id, nodeId: payload.nodeId ?? null }),
+    readObservabilityLog: (payload: { kind: string; id: string }) =>
+      invokeTauri('read_observability_log', { kind: payload.kind, id: payload.id }),
     listProjects: () => invokeTauri('list_projects'),
     saveProject: (payload: unknown) => invokeTauri('save_project', { payload: payload as Record<string, unknown> }),
     deleteProject: (id: string) => invokeTauri('delete_project', { id }),

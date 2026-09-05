@@ -5,7 +5,7 @@ export const desktopCapabilities = {
   terminal: true,
   apiClient: true,
   workflows: true,
-  observability: false,
+  observability: true,
   approvals: false,
   secrets: true,
   notifications: false,

@@ -760,7 +760,7 @@ struct WorkflowRunRow {
     finished_at: Option<String>,
 }
 
-async fn get_run_detail(pool: &SqlitePool, run_id: &str) -> Result<WorkflowRunDetail, String> {
+pub(crate) async fn get_run_detail(pool: &SqlitePool, run_id: &str) -> Result<WorkflowRunDetail, String> {
     let run = sqlx::query_as::<_, WorkflowRunRow>(
         "SELECT id, workflow_id, status, created_at, started_at, finished_at
          FROM workflow_runs WHERE id = ?",
@@ -1530,7 +1530,7 @@ pub async fn read_workflow_run(
     get_run_detail(&pool, &run_id).await
 }
 
-async fn retry_node_record(
+pub(crate) async fn retry_node_record(
     pool: &SqlitePool,
     run_id: &str,
     node_id: &str,
