@@ -1,7 +1,13 @@
 import axios from 'axios'
+import { invokeTauri } from '@/lib/tauriInvoke'
+import { isDesktopRenderer } from '@/lib/runtime/desktopMode'
 
 export function hasDesktopOpsRuntime(): boolean {
   return Boolean(window.scriptManagerDesktop?.runtime?.listProjects)
+}
+
+function isTauri(): boolean {
+  return isDesktopRenderer()
 }
 
 export function subscribeToDesktopRemoteExec(listener: (event: ScriptManagerDesktopRemoteExecEvent) => void) {
@@ -9,6 +15,9 @@ export function subscribeToDesktopRemoteExec(listener: (event: ScriptManagerDesk
 }
 
 export async function listProjectsRuntime() {
+  if (isTauri()) {
+    return invokeTauri('list_projects')
+  }
   if (window.scriptManagerDesktop?.runtime?.listProjects) {
     return window.scriptManagerDesktop.runtime.listProjects()
   }
@@ -17,6 +26,9 @@ export async function listProjectsRuntime() {
 }
 
 export async function saveProjectRuntime(payload: Record<string, unknown>) {
+  if (isTauri()) {
+    return invokeTauri('save_project', { payload })
+  }
   if (window.scriptManagerDesktop?.runtime?.saveProject) {
     return window.scriptManagerDesktop.runtime.saveProject(payload)
   }
@@ -27,6 +39,9 @@ export async function saveProjectRuntime(payload: Record<string, unknown>) {
 }
 
 export async function deleteProjectRuntime(id: string) {
+  if (isTauri()) {
+    return invokeTauri('delete_project', { id })
+  }
   if (window.scriptManagerDesktop?.runtime?.deleteProject) {
     return window.scriptManagerDesktop.runtime.deleteProject(id)
   }
@@ -35,6 +50,9 @@ export async function deleteProjectRuntime(id: string) {
 }
 
 export async function assignCollectionToProjectRuntime(payload: { collectionId: string; projectId: string | null }) {
+  if (isTauri()) {
+    return invokeTauri('assign_collection_to_project', { payload })
+  }
   if (window.scriptManagerDesktop?.runtime?.assignCollectionToProject) {
     return window.scriptManagerDesktop.runtime.assignCollectionToProject(payload)
   }

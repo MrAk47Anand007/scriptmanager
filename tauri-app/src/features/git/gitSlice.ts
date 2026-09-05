@@ -1,7 +1,6 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import axios from 'axios'
 import type { GitAction, GitBranches, GitCommitLog, GitDiffFile, GitStatus } from '@/lib/git/types'
-import { runGitActionRuntime } from '@/lib/gitRuntimeClient'
+import { cloneGitRepoRuntime, probeGitRepoRuntime, runGitActionRuntime } from '@/lib/gitRuntimeClient'
 
 interface GitState {
   projectId: string | null
@@ -40,16 +39,14 @@ export const runGitAction = createAsyncThunk(
 export const probeGitRepo = createAsyncThunk(
   'git/probe',
   async ({ url, token }: { url: string; token?: string }) => {
-    const response = await axios.post('/api/git/probe', { url, token })
-    return response.data
+    return probeGitRepoRuntime({ url, token })
   }
 )
 
 export const cloneGitRepo = createAsyncThunk(
   'git/clone',
   async (payload: { url: string; targetPath: string; token?: string; projectName?: string; branch?: string }) => {
-    const response = await axios.post('/api/git/clone', payload)
-    return response.data
+    return cloneGitRepoRuntime(payload)
   }
 )
 

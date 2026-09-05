@@ -8,6 +8,7 @@ import {
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchProjects, updateProject } from '@/features/ops/opsSlice'
 import { runGitAction, selectDiffPath, selectGitProject, setGitTab } from '@/features/git/gitSlice'
+import { cloneGitRepoRuntime, probeGitRepoRuntime } from '@/lib/gitRuntimeClient'
 import { extractRepoName } from '@/lib/git/urlUtils'
 import type { GitAction, GitFileStatus } from '@/lib/git/types'
 import { getOperationError } from '@/lib/operationError'
@@ -119,16 +120,11 @@ export function SourceControlWorkbench() {
     setCloneError(null)
     setCloneNotice(null)
 
-    // Probe first if token not provided yet
+    // Probe first if token not provided yet (Tauri IPC in desktop, HTTP in web)
     if (!cloneToken.trim()) {
       setIsProbing(true)
       try {
-        const probeRes = await fetch('/api/git/probe', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ url: cloneUrl.trim() }),
-        })
-        const probeData = await probeRes.json()
+        const probeData = await probeGitRepoRuntime({ url: cloneUrl.trim() }) as { status?: string; message?: string }
         setIsProbing(false)
 
         if (probeData.status === 'auth_required' || probeData.status === 'auth_failed') {
@@ -151,28 +147,13 @@ export function SourceControlWorkbench() {
     // Execute Clone
     setIsCloning(true)
     try {
-      const cloneRes = await fetch('/api/git/clone', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          url: cloneUrl.trim(),
-          targetPath: cloneDestination.trim(),
-          token: cloneToken.trim() || undefined,
-          projectName: cloneProjectName.trim() || undefined,
-        }),
-      })
-      const cloneData = await cloneRes.json()
+      const cloneData = await cloneGitRepoRuntime({
+        url: cloneUrl.trim(),
+        targetPath: cloneDestination.trim(),
+        token: cloneToken.trim() || undefined,
+        projectName: cloneProjectName.trim() || undefined,
+      }) as { id?: string; error?: string }
       setIsCloning(false)
-
-      if (!cloneRes.ok) {
-        if (cloneData.error?.includes('Authentication failed')) {
-          setShowTokenInput(true)
-          setCloneError('Authentication failed. Please verify your Personal Access Token.')
-        } else {
-          setCloneError(cloneData.error || 'Failed to clone repository.')
-        }
-        return
-      }
 
       // Success! Reset and switch to new project
       setIsCloneModalOpen(false)
@@ -187,7 +168,13 @@ export function SourceControlWorkbench() {
       }
     } catch (err) {
       setIsCloning(false)
-      setCloneError(err instanceof Error ? err.message : 'Clone failed.')
+      const message = err instanceof Error ? err.message : 'Clone failed.'
+      if (message.includes('Authentication failed')) {
+        setShowTokenInput(true)
+        setCloneError('Authentication failed. Please verify your Personal Access Token.')
+      } else {
+        setCloneError(message || 'Failed to clone repository.')
+      }
     }
   }
 

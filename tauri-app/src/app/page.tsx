@@ -36,6 +36,8 @@ import { EditorTabs } from '@/components/workbench/EditorTabs'
 import { useTabSync } from '@/components/workbench/tabSync'
 import { BottomDock } from '@/components/workbench/BottomDock'
 import { DesktopNotificationHost } from '@/components/notifications/DesktopNotificationHost'
+import { MigrationBoundary } from '@/components/MigrationBoundary'
+import { desktopCapabilities } from '@/lib/desktopCapabilities'
 
 function dynamic(importFn: any, options: any) {
   const LazyComponent = React.lazy(() => importFn().then((comp: any) => ({ default: comp })));
@@ -118,6 +120,19 @@ function scheduleIdleWork(callback: () => void, delay = 180) {
 
 type TabId = 'scripts' | 'settings' | 'api' | 'workflows' | 'agents' | 'git' | 'executions' | 'approvals' | 'schedules' | 'ops'
 
+const tabCapabilities: Record<TabId, { enabled: boolean; feature: string }> = {
+  scripts: { enabled: desktopCapabilities.scripts, feature: 'Scripts workspace' },
+  settings: { enabled: false, feature: 'Settings' },
+  api: { enabled: desktopCapabilities.apiClient, feature: 'API workspace' },
+  workflows: { enabled: desktopCapabilities.workflows, feature: 'Workflow builder' },
+  agents: { enabled: desktopCapabilities.agents, feature: 'Agents workbench' },
+  git: { enabled: desktopCapabilities.git, feature: 'Source control' },
+  executions: { enabled: desktopCapabilities.observability, feature: 'Execution dashboard' },
+  approvals: { enabled: desktopCapabilities.approvals, feature: 'Approval inbox' },
+  schedules: { enabled: false, feature: 'Schedules' },
+  ops: { enabled: desktopCapabilities.ops, feature: 'Ops console' },
+}
+
 export default function Home() {
   const dispatch = useAppDispatch()
   const isOpsModeActive = useAppSelector(selectIsModeActive)
@@ -165,7 +180,7 @@ export default function Home() {
   })
 
   useEffect(() => {
-    const desktop = typeof window !== 'undefined' && Boolean(window.__ELECTRON__)
+    const desktop = typeof window !== 'undefined' && Boolean(window.__ELECTRON__ || window.__TAURI__)
     if (typeof document !== 'undefined') {
       if (desktop) {
         document.body.dataset.electron = 'true'
@@ -232,7 +247,7 @@ export default function Home() {
   }, [activeActivity])
 
   useEffect(() => {
-    if (!mountedTabs.api) {
+    if (!mountedTabs.api || !desktopCapabilities.apiClient) {
       return
     }
 
@@ -247,7 +262,7 @@ export default function Home() {
   }, [activeTab, dispatch, mountedTabs.api])
 
   useEffect(() => {
-    if (!isOpsModeActive) {
+    if (!isOpsModeActive || !desktopCapabilities.ops) {
       return
     }
 
@@ -319,32 +334,87 @@ export default function Home() {
         <main className="relative flex-1 overflow-hidden">
           {mountedTabs.scripts && (
             <div className={scriptsPanelClassName}>
-              {isBootstrapping ? <SectionSkeleton label="Preparing scripts workspace" /> : <ScriptsManager hideSidebar />}
+              <MigrationBoundary
+                enabled={tabCapabilities.scripts.enabled}
+                feature={tabCapabilities.scripts.feature}
+              >
+                {isBootstrapping ? <SectionSkeleton label="Preparing scripts workspace" /> : <ScriptsManager hideSidebar />}
+              </MigrationBoundary>
             </div>
           )}
           {mountedTabs.api && (
             <div className={apiPanelClassName}>
-              <ApiManager hideSidebar />
+              <MigrationBoundary enabled={tabCapabilities.api.enabled} feature={tabCapabilities.api.feature}>
+                <ApiManager hideSidebar />
+              </MigrationBoundary>
             </div>
           )}
           {mountedTabs.schedules && (
             <div className={schedulesPanelClassName}>
-              <SchedulesView />
+              <MigrationBoundary
+                enabled={tabCapabilities.schedules.enabled}
+                feature={tabCapabilities.schedules.feature}
+              >
+                <SchedulesView />
+              </MigrationBoundary>
             </div>
           )}
           {mountedTabs.ops && (
             <div className={opsPanelClassName}>
-              <OpsView />
+              <MigrationBoundary enabled={tabCapabilities.ops.enabled} feature={tabCapabilities.ops.feature}>
+                <OpsView />
+              </MigrationBoundary>
             </div>
           )}
-          {mountedTabs.workflows && <div className={workflowsPanelClassName}><WorkflowBuilder /></div>}
-          {mountedTabs.agents && <div className={agentsPanelClassName}><AgentsView /></div>}
-          {mountedTabs.git && <div className={gitPanelClassName}><SourceControlWorkbench /></div>}
-          {mountedTabs.executions && <div className={executionsPanelClassName}><ExecutionDashboard /></div>}
-          {mountedTabs.approvals && <div className={approvalsPanelClassName}><ApprovalInbox /></div>}
+          {mountedTabs.workflows && (
+            <div className={workflowsPanelClassName}>
+              <MigrationBoundary
+                enabled={tabCapabilities.workflows.enabled}
+                feature={tabCapabilities.workflows.feature}
+              >
+                <WorkflowBuilder />
+              </MigrationBoundary>
+            </div>
+          )}
+          {mountedTabs.agents && (
+            <div className={agentsPanelClassName}>
+              <MigrationBoundary enabled={tabCapabilities.agents.enabled} feature={tabCapabilities.agents.feature}>
+                <AgentsView />
+              </MigrationBoundary>
+            </div>
+          )}
+          {mountedTabs.git && (
+            <div className={gitPanelClassName}>
+              <MigrationBoundary enabled={tabCapabilities.git.enabled} feature={tabCapabilities.git.feature}>
+                <SourceControlWorkbench />
+              </MigrationBoundary>
+            </div>
+          )}
+          {mountedTabs.executions && (
+            <div className={executionsPanelClassName}>
+              <MigrationBoundary
+                enabled={tabCapabilities.executions.enabled}
+                feature={tabCapabilities.executions.feature}
+              >
+                <ExecutionDashboard />
+              </MigrationBoundary>
+            </div>
+          )}
+          {mountedTabs.approvals && (
+            <div className={approvalsPanelClassName}>
+              <MigrationBoundary
+                enabled={tabCapabilities.approvals.enabled}
+                feature={tabCapabilities.approvals.feature}
+              >
+                <ApprovalInbox />
+              </MigrationBoundary>
+            </div>
+          )}
           {mountedTabs.settings && (
             <div className={settingsPanelClassName}>
-              <SettingsManager />
+              <MigrationBoundary enabled={tabCapabilities.settings.enabled} feature={tabCapabilities.settings.feature}>
+                <SettingsManager />
+              </MigrationBoundary>
             </div>
           )}
         </main>

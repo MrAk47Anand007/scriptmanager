@@ -1,8 +1,17 @@
 import type { WorkflowDefinition } from '@/lib/workflows/types'
+import { invokeTauri } from '@/lib/tauriInvoke'
+import { isDesktopRenderer } from '@/lib/runtime/desktopMode'
 
 type SaveWorkflowPayload = { id: string; definition: WorkflowDefinition; projectId?: string | null }
 
+function isTauri(): boolean {
+  return isDesktopRenderer()
+}
+
 export async function listWorkflowsRuntime() {
+  if (isTauri()) {
+    return invokeTauri('list_workflows')
+  }
   if (window.scriptManagerDesktop?.runtime?.listWorkflows) {
     return window.scriptManagerDesktop.runtime.listWorkflows()
   }
@@ -14,6 +23,9 @@ export async function listWorkflowsRuntime() {
 }
 
 export async function createWorkflowRuntime(payload: { name: string; description?: string; definition: WorkflowDefinition; projectId?: string | null }) {
+  if (isTauri()) {
+    return invokeTauri('create_workflow', { payload })
+  }
   if (window.scriptManagerDesktop?.runtime?.createWorkflow) {
     return window.scriptManagerDesktop.runtime.createWorkflow(payload)
   }
@@ -29,6 +41,9 @@ export async function createWorkflowRuntime(payload: { name: string; description
 }
 
 export async function saveWorkflowRuntime(payload: SaveWorkflowPayload) {
+  if (isTauri()) {
+    return invokeTauri('save_workflow', { payload })
+  }
   if (window.scriptManagerDesktop?.runtime?.saveWorkflow) {
     return window.scriptManagerDesktop.runtime.saveWorkflow(payload)
   }
@@ -44,6 +59,9 @@ export async function saveWorkflowRuntime(payload: SaveWorkflowPayload) {
 }
 
 export async function publishWorkflowRuntime(id: string) {
+  if (isTauri()) {
+    return invokeTauri('publish_workflow', { id })
+  }
   if (window.scriptManagerDesktop?.runtime?.publishWorkflow) {
     return window.scriptManagerDesktop.runtime.publishWorkflow(id)
   }
@@ -55,6 +73,9 @@ export async function publishWorkflowRuntime(id: string) {
 }
 
 export async function runWorkflowRuntime(id: string) {
+  if (isTauri()) {
+    return invokeTauri('run_workflow', { payload: { id, input: {} } })
+  }
   if (window.scriptManagerDesktop?.runtime?.runWorkflow) {
     return window.scriptManagerDesktop.runtime.runWorkflow({ id, input: {} })
   }
@@ -99,6 +120,9 @@ export function normalizeWorkflowRunDetail(raw: Record<string, any>) {
 }
 
 export async function fetchWorkflowRunsRuntime(workflowId: string) {
+  if (isTauri()) {
+    return invokeTauri('list_workflow_runs', { workflowId })
+  }
   if (window.scriptManagerDesktop?.runtime?.listWorkflowRuns) {
     return window.scriptManagerDesktop.runtime.listWorkflowRuns(workflowId)
   }
@@ -110,6 +134,10 @@ export async function fetchWorkflowRunsRuntime(workflowId: string) {
 }
 
 export async function fetchWorkflowRunRuntime(runId: string) {
+  if (isTauri()) {
+    const response = await invokeTauri<Record<string, any>>('read_workflow_run', { runId })
+    return normalizeWorkflowRunDetail(response)
+  }
   if (window.scriptManagerDesktop?.runtime?.readWorkflowRun) {
     const response = await window.scriptManagerDesktop.runtime.readWorkflowRun(runId)
     return normalizeWorkflowRunDetail(response as Record<string, any>)
@@ -122,6 +150,10 @@ export async function fetchWorkflowRunRuntime(runId: string) {
 }
 
 export async function retryWorkflowNodeRuntime(payload: { runId: string; nodeId: string }) {
+  if (isTauri()) {
+    const response = await invokeTauri<Record<string, any>>('retry_workflow_node', { payload })
+    return normalizeWorkflowRunDetail(response)
+  }
   if (window.scriptManagerDesktop?.runtime?.retryWorkflowNode) {
     const response = await window.scriptManagerDesktop.runtime.retryWorkflowNode(payload)
     return normalizeWorkflowRunDetail(response as Record<string, any>)
@@ -138,6 +170,10 @@ export async function retryWorkflowNodeRuntime(payload: { runId: string; nodeId:
 }
 
 export async function cancelWorkflowRunRuntime(runId: string) {
+  if (isTauri()) {
+    const response = await invokeTauri<Record<string, any>>('cancel_workflow_run', { runId })
+    return normalizeWorkflowRunDetail(response)
+  }
   if (window.scriptManagerDesktop?.runtime?.cancelWorkflowRun) {
     const response = await window.scriptManagerDesktop.runtime.cancelWorkflowRun(runId)
     return normalizeWorkflowRunDetail(response as Record<string, any>)
