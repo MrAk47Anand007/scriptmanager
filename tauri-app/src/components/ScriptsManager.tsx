@@ -54,6 +54,21 @@ import { RunInputsDialog } from './RunInputsDialog';
 
 import { useTheme } from "next-themes";
 import type { ScriptParameter } from '@/lib/types';
+
+// The Rust backend stores `parameters` as a JSON string; accept either the
+// parsed array or the serialized form.
+function normalizeScriptParameters(value: unknown): ScriptParameter[] {
+    if (Array.isArray(value)) return value as ScriptParameter[];
+    if (typeof value === 'string' && value.trim()) {
+        try {
+            const parsed = JSON.parse(value);
+            return Array.isArray(parsed) ? parsed as ScriptParameter[] : [];
+        } catch {
+            return [];
+        }
+    }
+    return [];
+}
 import {
     Select,
     SelectContent,
@@ -472,7 +487,7 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
             if (currentScript) {
                 setScriptLanguage(currentScript.language || 'python');
                 setCustomInterpreter(currentScript.interpreter || '');
-                setScriptParameters(currentScript.parameters || []);
+                setScriptParameters(normalizeScriptParameters(currentScript.parameters));
                 setTimeoutSecs(currentScript.timeout_ms ? String(currentScript.timeout_ms / 1000) : '');
             }
         }
@@ -566,7 +581,7 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
         if (activeScript) {
             setScriptLanguage(activeScript.language || 'python');
             setCustomInterpreter(activeScript.interpreter || '');
-            setScriptParameters(activeScript.parameters || []);
+            setScriptParameters(normalizeScriptParameters(activeScript.parameters));
             setTimeoutSecs(activeScript.timeout_ms ? String(activeScript.timeout_ms / 1000) : '');
         }
     }, [activeScript]);

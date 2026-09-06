@@ -14,6 +14,10 @@ export default defineConfig({
     alias: {
       '@': resolve(__dirname, './src'),
     },
+    // The repo root node_modules hosts a different React copy; without
+    // dedupe, deps resolved from there (e.g. react-resizable-panels)
+    // bind to the wrong React instance and crash with null-hook errors.
+    dedupe: ['react', 'react-dom'],
   },
   clearScreen: false,
   server: {

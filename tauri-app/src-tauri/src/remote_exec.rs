@@ -375,8 +375,16 @@ pub async fn list_audit_log(
         Some(p) => (p.limit.unwrap_or(100), p.offset.unwrap_or(0)),
         None => (100, 0),
     };
+    // Renderer audit trail consumes remote-execution records
+    // ({ total, executions: [...] } with 'pending_approval' status naming).
     let rows = sqlx::query(
-        "SELECT id, action, actor, resource, detail, created_at FROM audit_log ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        "SELECT r.id, COALESCE(r.script_id, ''), r.profile_id, COALESCE(s.name, ''), COALESCE(p.name, ''),
+                COALESCE(p.host, ''), r.status, 'manual', r.approved_by, NULL, r.exit_code, r.output,
+                '{}', r.created_at, r.finished_at
+         FROM remote_executions r
+         LEFT JOIN server_profiles p ON p.id = r.profile_id
+         LEFT JOIN scripts s ON s.id = r.script_id
+         ORDER BY r.created_at DESC LIMIT ? OFFSET ?",
     )
     .bind(limit)
     .bind(offset)
@@ -384,20 +392,41 @@ pub async fn list_audit_log(
     .await
     .map_err(|e| e.to_string())?;
 
-    let entries: Vec<Value> = rows
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM remote_executions")
+        .fetch_one(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let executions: Vec<Value> = rows
         .iter()
         .map(|row| {
+            let status: String = row.try_get::<String, _>(6).map_err(|e| e.to_string())?;
+            let status = match status.as_str() {
+                "pending" => "pending_approval",
+                "done" => "success",
+                other => other,
+            };
             Ok::<Value, String>(serde_json::json!({
                 "id": row.try_get::<String, _>(0).map_err(|e| e.to_string())?,
-                "action": row.try_get::<String, _>(1).map_err(|e| e.to_string())?,
-                "actor": row.try_get::<String, _>(2).map_err(|e| e.to_string())?,
-                "resource": row.try_get::<String, _>(3).map_err(|e| e.to_string())?,
-                "detail": row.try_get::<String, _>(4).map_err(|e| e.to_string())?,
-                "createdAt": row.try_get::<String, _>(5).map_err(|e| e.to_string())?,
+                "script_id": row.try_get::<String, _>(1).map_err(|e| e.to_string())?,
+                "profile_id": row.try_get::<String, _>(2).map_err(|e| e.to_string())?,
+                "script_name": row.try_get::<String, _>(3).map_err(|e| e.to_string())?,
+                "profile_name": row.try_get::<String, _>(4).map_err(|e| e.to_string())?,
+                "server_host": row.try_get::<String, _>(5).map_err(|e| e.to_string())?,
+                "status": status,
+                "triggered_by": row.try_get::<String, _>(7).map_err(|e| e.to_string())?,
+                "approved_by": row.try_get::<Option<String>, _>(8).map_err(|e| e.to_string())?,
+                "remote_path": row.try_get::<Option<String>, _>(9).map_err(|e| e.to_string())?,
+                "exit_code": row.try_get::<Option<i64>, _>(10).map_err(|e| e.to_string())?,
+                "log_output": row.try_get::<Option<String>, _>(11).map_err(|e| e.to_string())?,
+                "param_values": row.try_get::<String, _>(12).map_err(|e| e.to_string())?,
+                "requested_at": row.try_get::<String, _>(13).map_err(|e| e.to_string())?,
+                "approved_at": row.try_get::<Option<String>, _>(14).map_err(|e| e.to_string())?,
             }))
         })
         .collect::<Result<_, _>>()?;
-    Ok(serde_json::json!({ "entries": entries }))
+
+    Ok(serde_json::json!({ "total": total, "executions": executions }))
 }
 
 #[cfg(test)]
