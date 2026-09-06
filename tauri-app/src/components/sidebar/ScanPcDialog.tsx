@@ -84,9 +84,17 @@ export function ScanPcDialog({ open, onOpenChange }: ScanPcDialogProps) {
 
     const addFolder = async () => {
         setError('');
-        const selected = await window.scriptManagerDesktop?.selectFolder?.();
-        if (selected && !roots.includes(selected)) {
-            setRoots((prev) => [...prev, selected]);
+        try {
+            const selected = await window.scriptManagerDesktop?.selectFolder?.();
+            if (!selected) {
+                setError('Folder picker returned no selection.');
+                return;
+            }
+            if (!roots.includes(selected)) {
+                setRoots((prev) => [...prev, selected]);
+            }
+        } catch (folderError) {
+            setError(folderError instanceof Error ? folderError.message : String(folderError));
         }
     };
 

@@ -32,6 +32,7 @@ window.__TAURI__ = true
 window.__ELECTRON__ = true
 window.scriptManagerDesktop = {
   capabilities: desktopCapabilities,
+  selectFolder: async () => { const { open } = await import('@tauri-apps/plugin-dialog'); const picked = await open({ directory: true, multiple: false }); return typeof picked === 'string' ? picked : null; },
   runtime: {
     getBootstrapState: () => invokeTauri('get_bootstrap_state'),
     listScripts: () => invokeTauri('get_scripts'),
@@ -145,6 +146,9 @@ window.scriptManagerDesktop = {
     createWorkspaceInvitation: (payload: unknown) => invokeTauri('create_workspace_invitation', { payload: payload as Record<string, unknown> }),
     revokeWorkspaceGrants: (payload?: { actorId?: string }) => invokeTauri('revoke_workspace_grants', { payload: payload ?? {} }),
     createWorkspaceRole: (payload: unknown) => invokeTauri('create_workspace_role', { payload: payload as Record<string, unknown> }),
+    scanPcScripts: (payload: { roots: string[]; extensions: string[] }) => invokeTauri('scan_pc_scripts', { payload }),
+    importScannedScripts: (payload: { files: { path: string }[]; mode: 'misc' | 'by-folder'; rootForGrouping?: string }) =>
+      invokeTauri('import_scanned_scripts', { payload }),
     listProjects: () => invokeTauri('list_projects'),
     saveProject: (payload: unknown) => invokeTauri('save_project', { payload: payload as Record<string, unknown> }),
     deleteProject: (id: string) => invokeTauri('delete_project', { id }),

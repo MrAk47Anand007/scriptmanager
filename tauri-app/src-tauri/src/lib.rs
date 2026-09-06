@@ -17,6 +17,7 @@ mod plugins;
 mod remote_exec;
 mod schema;
 mod scheduler;
+mod scan;
 mod security;
 mod settings;
 mod state;
@@ -28,6 +29,7 @@ mod workspace_access;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_log::Builder::new().build())
         .manage(terminal::TerminalState::default())
         .setup(|app| {
@@ -185,7 +187,10 @@ pub fn run() {
             workspace_access::list_workspace_access,
             workspace_access::create_workspace_invitation,
             workspace_access::revoke_workspace_grants,
-            workspace_access::create_workspace_role
+            workspace_access::create_workspace_role,
+            scan::scan_pc_scripts,
+            scan::import_scanned_scripts,
+            scan::pick_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
