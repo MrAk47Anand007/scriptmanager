@@ -1,6 +1,11 @@
 use crate::models::{BootstrapState, Collection, Script, ScriptTemplate, Tag};
 use serde::Deserialize;
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::{Path, PathBuf},
+};
 use tauri::State;
 use uuid::Uuid;
 
@@ -125,6 +130,55 @@ pub struct DeleteCollectionResult {
     deleted_script_ids: Vec<String>,
     #[serde(rename = "deletedFolderPath")]
     deleted_folder_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OpenFolderPayload {
+    #[serde(rename = "folder_path")]
+    folder_path: String,
+    #[serde(rename = "folderPath")]
+    folder_path_camel: Option<String>,
+    mode: Option<String>,
+    #[serde(rename = "collection_name")]
+    collection_name: Option<String>,
+    #[serde(rename = "collectionName")]
+    collection_name_camel: Option<String>,
+    #[serde(rename = "runtime_preset")]
+    runtime_preset: Option<String>,
+    #[serde(rename = "runtimePreset")]
+    runtime_preset_camel: Option<String>,
+    #[serde(rename = "python_toolchain_enabled")]
+    python_toolchain_enabled: Option<bool>,
+    #[serde(rename = "pythonToolchainEnabled")]
+    python_toolchain_enabled_camel: Option<bool>,
+    #[allow(dead_code)]
+    #[serde(rename = "create_venv_if_missing")]
+    create_venv_if_missing: Option<bool>,
+    #[allow(dead_code)]
+    #[serde(rename = "createVenvIfMissing")]
+    create_venv_if_missing_camel: Option<bool>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct LinkedScriptSummary {
+    id: String,
+    name: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct OpenFolderResult {
+    collection: Collection,
+    scripts: Vec<LinkedScriptSummary>,
+    imported_count: usize,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderInspection {
+    has_venv: bool,
+    venv_path: Option<String>,
+    interpreter_path: Option<String>,
+    manifests: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -409,6 +463,266 @@ async fn read_collection_record(pool: &SqlitePool, id: &str) -> Result<Collectio
     .fetch_one(pool)
     .await
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn open_folder(
+    pool: State<'_, SqlitePool>,
+    payload: OpenFolderPayload,
+) -> Result<OpenFolderResult, String> {
+    open_folder_record(&pool, payload).await
+}
+
+#[tauri::command]
+pub async fn inspect_folder(folder_path: String) -> Result<FolderInspection, String> {
+    inspect_folder_record(&folder_path)
+}
+
+fn inspect_folder_record(folder_path: &str) -> Result<FolderInspection, String> {
+    let resolved_folder = fs::canonicalize(folder_path)
+        .map_err(|_| "Selected folder does not exist".to_string())?;
+    if !resolved_folder.is_dir() {
+        return Err("Selected folder does not exist".to_string());
+    }
+
+    let venv_path = resolved_folder.join(".venv");
+    let has_venv = venv_path.is_dir();
+    let interpreter_path = if has_venv {
+        let windows_python = venv_path.join("Scripts").join("python.exe");
+        let unix_python = venv_path.join("bin").join("python");
+        if windows_python.exists() {
+            Some(path_to_display_string(&windows_python))
+        } else if unix_python.exists() {
+            Some(path_to_display_string(&unix_python))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let manifests = [
+        "package.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "Cargo.toml",
+        "deno.json",
+    ]
+    .iter()
+    .filter(|name| resolved_folder.join(name).exists())
+    .map(|name| (*name).to_string())
+    .collect();
+
+    Ok(FolderInspection {
+        has_venv,
+        venv_path: has_venv.then(|| path_to_display_string(&venv_path)),
+        interpreter_path,
+        manifests,
+    })
+}
+
+async fn open_folder_record(
+    pool: &SqlitePool,
+    payload: OpenFolderPayload,
+) -> Result<OpenFolderResult, String> {
+    let folder_path = payload
+        .folder_path_camel
+        .as_deref()
+        .unwrap_or(&payload.folder_path)
+        .trim();
+    if folder_path.is_empty() {
+        return Err("Folder path is required".to_string());
+    }
+
+    let resolved_folder = fs::canonicalize(folder_path)
+        .map_err(|_| "Selected folder does not exist".to_string())?;
+    if !resolved_folder.is_dir() {
+        return Err("Selected folder does not exist".to_string());
+    }
+
+    let files = list_supported_folder_scripts(&resolved_folder)?;
+    if files.is_empty() {
+        return Err("No supported script files found in that folder".to_string());
+    }
+
+    let mode = payload.mode.unwrap_or_else(|| "temporary".to_string());
+    let is_temporary = mode != "collection";
+    let runtime_preset = payload
+        .runtime_preset
+        .or(payload.runtime_preset_camel)
+        .unwrap_or_else(|| "general".to_string());
+    let python_toolchain_enabled = payload
+        .python_toolchain_enabled
+        .or(payload.python_toolchain_enabled_camel)
+        .unwrap_or(false);
+    let folder_path_str = path_to_display_string(&resolved_folder);
+
+    if is_temporary {
+        let temp_ids: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM collections WHERE is_temporary = 1 AND folder_path IS NOT NULL",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+        for id in temp_ids {
+            sqlx::query("DELETE FROM scripts WHERE collection_id = ?")
+                .bind(&id)
+                .execute(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            sqlx::query("DELETE FROM collections WHERE id = ?")
+                .bind(&id)
+                .execute(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    let collection_id: Option<String> = if is_temporary {
+        None
+    } else {
+        sqlx::query_scalar(
+            "SELECT id FROM collections WHERE folder_path = ? ORDER BY created_at LIMIT 1",
+        )
+        .bind(&folder_path_str)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?
+    };
+
+    let collection_name = payload
+        .collection_name
+        .or(payload.collection_name_camel)
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| folder_display_name(&resolved_folder));
+    let collection_name = if is_temporary {
+        format!("{collection_name} (Temporary)")
+    } else {
+        collection_name
+    };
+
+    let collection_id = if let Some(id) = collection_id {
+        sqlx::query(
+            "UPDATE collections SET name = ?, is_temporary = ?, runtime_preset = ?, python_toolchain_enabled = ? WHERE id = ?",
+        )
+        .bind(&collection_name)
+        .bind(is_temporary)
+        .bind(&runtime_preset)
+        .bind(python_toolchain_enabled)
+        .bind(&id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        id
+    } else {
+        let id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO collections (id, name, folder_path, is_temporary, runtime_preset, python_toolchain_enabled) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&id)
+        .bind(&collection_name)
+        .bind(&folder_path_str)
+        .bind(is_temporary)
+        .bind(&runtime_preset)
+        .bind(python_toolchain_enabled)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        id
+    };
+
+    let existing_rows = sqlx::query(
+        "SELECT id, source_path FROM scripts WHERE collection_id = ? AND source_path IS NOT NULL",
+    )
+    .bind(&collection_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let existing_by_source = existing_rows
+        .iter()
+        .filter_map(|row| {
+            let id: String = row.try_get("id").ok()?;
+            let source_path: String = row.try_get("source_path").ok()?;
+            Some((normalize_source_path_key(&source_path), id))
+        })
+        .collect::<HashMap<_, _>>();
+
+    let mut active_source_paths = HashSet::new();
+    let mut linked_scripts = Vec::new();
+
+    for file_path in files {
+        let source_path = path_to_display_string(&file_path);
+        let source_key = normalize_source_path_key(&source_path);
+        active_source_paths.insert(source_key.clone());
+        let base_name = build_linked_script_name(&resolved_folder, &file_path);
+        let display_name = unique_script_name(
+            pool,
+            &format!("{}/{}", folder_display_name(&resolved_folder), base_name),
+            existing_by_source.get(&source_key).map(String::as_str),
+        )
+        .await?;
+        let filename = file_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("script")
+            .to_string();
+        let language = infer_script_language(&file_path);
+
+        let script_id = if let Some(existing_id) = existing_by_source.get(&source_key) {
+            sqlx::query(
+                "UPDATE scripts SET name = ?, filename = ?, source_path = ?, language = ?, collection_id = ? WHERE id = ?",
+            )
+            .bind(&display_name)
+            .bind(&filename)
+            .bind(&source_path)
+            .bind(language)
+            .bind(&collection_id)
+            .bind(existing_id)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            existing_id.clone()
+        } else {
+            let id = Uuid::new_v4().to_string();
+            sqlx::query(
+                "INSERT INTO scripts (id, name, filename, source_path, language, parameters, webhook_token, collection_id, description) VALUES (?, ?, ?, ?, ?, '[]', ?, ?, '')",
+            )
+            .bind(&id)
+            .bind(&display_name)
+            .bind(&filename)
+            .bind(&source_path)
+            .bind(language)
+            .bind(Uuid::new_v4().simple().to_string())
+            .bind(&collection_id)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            id
+        };
+
+        linked_scripts.push(LinkedScriptSummary {
+            id: script_id,
+            name: display_name,
+        });
+    }
+
+    for (source_key, script_id) in existing_by_source {
+        if !active_source_paths.contains(&source_key) {
+            sqlx::query("DELETE FROM scripts WHERE id = ?")
+                .bind(script_id)
+                .execute(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(OpenFolderResult {
+        collection: read_collection_record(pool, &collection_id).await?,
+        imported_count: linked_scripts.len(),
+        scripts: linked_scripts,
+    })
 }
 
 #[tauri::command]
@@ -702,6 +1016,119 @@ async fn delete_template_record(pool: &SqlitePool, id: &str) -> Result<(), Strin
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn supported_script_extension(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()).map(|ext| ext.to_ascii_lowercase()),
+        Some(ext) if matches!(ext.as_str(), "py" | "js" | "ts" | "sh" | "ps1" | "bat" | "cmd" | "rb")
+    )
+}
+
+fn path_to_display_string(path: &Path) -> String {
+    let raw = path.to_string_lossy().to_string();
+    raw.strip_prefix(r"\\?\").unwrap_or(&raw).to_string()
+}
+
+fn should_skip_folder(path: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(|name| name.to_str()),
+        Some("node_modules" | ".git" | ".hg" | ".svn" | "__pycache__" | ".venv" | "venv" | "env" | ".env" | "envs")
+    )
+}
+
+fn list_supported_folder_scripts(root: &Path) -> Result<Vec<PathBuf>, String> {
+    fn visit(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+        let entries = fs::read_dir(path).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_dir() {
+                if !should_skip_folder(&path) {
+                    visit(&path, files)?;
+                }
+            } else if path.is_file() && supported_script_extension(&path) {
+                files.push(path);
+            }
+        }
+        Ok(())
+    }
+
+    let mut files = Vec::new();
+    visit(root, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn folder_display_name(folder: &Path) -> String {
+    folder
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("Imported Folder")
+        .to_string()
+}
+
+fn build_linked_script_name(folder: &Path, file: &Path) -> String {
+    let relative = file.strip_prefix(folder).unwrap_or(file);
+    let mut without_ext = relative.to_path_buf();
+    without_ext.set_extension("");
+    without_ext
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn infer_script_language(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("py") => "python",
+        Some("js" | "ts") => "node",
+        Some("sh" | "ps1" | "bat" | "cmd") => "shell",
+        Some("rb") => "custom",
+        _ => "custom",
+    }
+}
+
+fn normalize_source_path_key(path: &str) -> String {
+    let resolved = fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
+    let raw = resolved.to_string_lossy().to_string();
+    if cfg!(windows) {
+        raw.to_ascii_lowercase()
+    } else {
+        raw
+    }
+}
+
+async fn unique_script_name(
+    pool: &SqlitePool,
+    base_name: &str,
+    current_script_id: Option<&str>,
+) -> Result<String, String> {
+    let mut candidate = base_name.to_string();
+    let mut suffix = 2;
+
+    loop {
+        let existing: Option<String> = sqlx::query_scalar("SELECT id FROM scripts WHERE name = ?")
+            .bind(&candidate)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        match (existing.as_deref(), current_script_id) {
+            (None, _) => return Ok(candidate),
+            (Some(existing_id), Some(current_id)) if existing_id == current_id => return Ok(candidate),
+            _ => {
+                candidate = format!("{base_name} ({suffix})");
+                suffix += 1;
+            }
+        }
+    }
 }
 
 // --- Env Vars ---
@@ -1216,6 +1643,68 @@ mod tests {
             .await
             .expect("script remains after collection delete");
         assert_eq!(moved_back.collection_id, None);
+    }
+
+    #[tokio::test]
+    async fn open_folder_links_supported_scripts_as_temporary_workspace() {
+        let pool = test_pool().await;
+        let root = std::env::temp_dir().join(format!("sm-open-folder-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("nested")).unwrap();
+        std::fs::write(root.join("main.py"), "print('ok')").unwrap();
+        std::fs::write(root.join("nested").join("tool.ps1"), "Write-Host ok").unwrap();
+        std::fs::write(root.join("notes.txt"), "not a script").unwrap();
+
+        let result = open_folder_record(
+            &pool,
+            OpenFolderPayload {
+                folder_path: root.to_string_lossy().to_string(),
+                folder_path_camel: None,
+                mode: Some("temporary".to_string()),
+                collection_name: None,
+                collection_name_camel: None,
+                runtime_preset: Some("python".to_string()),
+                runtime_preset_camel: None,
+                python_toolchain_enabled: Some(true),
+                python_toolchain_enabled_camel: None,
+                create_venv_if_missing: None,
+                create_venv_if_missing_camel: None,
+            },
+        )
+        .await
+        .expect("open folder");
+
+        assert!(result.collection.is_temporary);
+        assert_eq!(result.collection.folder_path.as_deref(), Some(root.to_string_lossy().as_ref()));
+        assert_eq!(result.collection.runtime_preset, "python");
+        assert!(result.collection.python_toolchain_enabled);
+        assert_eq!(result.imported_count, 2);
+        assert_eq!(result.scripts.len(), 2);
+
+        let stored = load_scripts(&pool).await.unwrap();
+        assert_eq!(stored.len(), 2);
+        assert!(stored.iter().all(|script| script.source_path.is_some()));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn inspect_folder_detects_python_workspace_state() {
+        let root = std::env::temp_dir().join(format!("sm-inspect-folder-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(root.join(".venv").join("Scripts")).unwrap();
+        std::fs::write(root.join(".venv").join("Scripts").join("python.exe"), "").unwrap();
+        std::fs::write(root.join("requirements.txt"), "pytest").unwrap();
+
+        let inspection = inspect_folder_record(&root.to_string_lossy()).expect("inspect folder");
+
+        assert!(inspection.has_venv);
+        assert_eq!(inspection.venv_path.as_deref(), Some(root.join(".venv").to_string_lossy().as_ref()));
+        assert_eq!(
+            inspection.interpreter_path.as_deref(),
+            Some(root.join(".venv").join("Scripts").join("python.exe").to_string_lossy().as_ref())
+        );
+        assert_eq!(inspection.manifests, vec!["requirements.txt".to_string()]);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[tokio::test]

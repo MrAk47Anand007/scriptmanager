@@ -60,6 +60,8 @@ pub fn run() {
             commands::duplicate_script,
             commands::get_collections,
             commands::create_collection,
+            commands::open_folder,
+            commands::inspect_folder,
             commands::update_collection,
             commands::delete_collection,
             commands::move_script,
