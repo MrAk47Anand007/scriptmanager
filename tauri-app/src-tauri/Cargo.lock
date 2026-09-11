@@ -4472,6 +4472,7 @@ dependencies = [
  "notify",
  "portable-pty",
  "rand 0.8.8",
+ "regex",
  "reqwest 0.12.28",
  "rfd 0.15.4",
  "serde",

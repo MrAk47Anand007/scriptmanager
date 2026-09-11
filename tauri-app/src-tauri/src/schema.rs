@@ -295,13 +295,22 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
             id TEXT PRIMARY KEY,
             profile_id TEXT NOT NULL REFERENCES server_profiles(id) ON DELETE CASCADE,
             script_id TEXT,
+            script_name TEXT NOT NULL DEFAULT '',
+            profile_name TEXT NOT NULL DEFAULT '',
+            server_host TEXT NOT NULL DEFAULT '',
             command TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'pending',
             requested_by TEXT NOT NULL DEFAULT 'local-admin',
+            triggered_by TEXT NOT NULL DEFAULT 'manual',
             approved_by TEXT,
             note TEXT NOT NULL DEFAULT '',
+            remote_path TEXT,
             output TEXT NOT NULL DEFAULT '',
+            log_output TEXT,
+            param_values TEXT NOT NULL DEFAULT '{}',
             exit_code INTEGER,
+            requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            approved_at TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             started_at TEXT,
             finished_at TEXT
@@ -514,6 +523,27 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
     .await?;
 
     sqlx::query(
+        "CREATE TABLE IF NOT EXISTS execution_events (
+            id TEXT PRIMARY KEY,
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            type TEXT NOT NULL,
+            execution_kind TEXT NOT NULL,
+            correlation_id TEXT NOT NULL,
+            occurred_at TEXT NOT NULL,
+            actor_type TEXT NOT NULL,
+            actor_id TEXT NOT NULL,
+            actor_name TEXT,
+            target_type TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            target_name TEXT,
+            data_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS workflows (
             id TEXT PRIMARY KEY,
             workspace_id TEXT NOT NULL DEFAULT 'default',
@@ -585,6 +615,22 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
     .await?;
 
     sqlx::query(
+        "CREATE TABLE IF NOT EXISTS workflow_triggers (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            type TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            config_json TEXT NOT NULL DEFAULT '{}',
+            webhook_token TEXT UNIQUE,
+            webhook_secret_encrypted TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS api_collection_runs (
             id TEXT PRIMARY KEY,
             collection_id TEXT NOT NULL REFERENCES api_collections(id) ON DELETE CASCADE,
@@ -600,6 +646,21 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
             finished_at TEXT,
             duration_ms INTEGER
         )",
+    )
+    .execute(pool)
+    .await?;
+
+    ensure_column(pool, "remote_executions", "script_name", "TEXT NOT NULL DEFAULT ''").await?;
+    ensure_column(pool, "remote_executions", "profile_name", "TEXT NOT NULL DEFAULT ''").await?;
+    ensure_column(pool, "remote_executions", "server_host", "TEXT NOT NULL DEFAULT ''").await?;
+    ensure_column(pool, "remote_executions", "triggered_by", "TEXT NOT NULL DEFAULT 'manual'").await?;
+    ensure_column(pool, "remote_executions", "remote_path", "TEXT").await?;
+    ensure_column(pool, "remote_executions", "log_output", "TEXT").await?;
+    ensure_column(pool, "remote_executions", "param_values", "TEXT NOT NULL DEFAULT '{}'").await?;
+    ensure_column(pool, "remote_executions", "requested_at", "TEXT NOT NULL DEFAULT ''").await?;
+    ensure_column(pool, "remote_executions", "approved_at", "TEXT").await?;
+    sqlx::query(
+        "UPDATE remote_executions SET requested_at = created_at WHERE requested_at = ''",
     )
     .execute(pool)
     .await?;
@@ -664,6 +725,24 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
 
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow_created ON workflow_runs(workflow_id, created_at)",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_execution_events_correlation ON execution_events(correlation_id, occurred_at)",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_triggers_workflow_enabled ON workflow_triggers(workflow_id, enabled)",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_remote_executions_requested ON remote_executions(requested_at)",
     )
     .execute(pool)
     .await?;

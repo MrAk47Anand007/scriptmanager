@@ -291,6 +291,7 @@ pub async fn run_script_in_terminal(
     window: Window,
     pool: State<'_, sqlx::SqlitePool>,
 ) -> Result<bool, String> {
+    log::info!("run_script_in_terminal invoked: session={session_id} script={script_id}");
     // Look up the script from the DB
     let script: Option<ScriptForTerminalExec> = sqlx::query_as(
         "SELECT id, language, interpreter, content, timeout_ms FROM scripts WHERE id = ?",

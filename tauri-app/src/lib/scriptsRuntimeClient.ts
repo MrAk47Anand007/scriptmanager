@@ -494,7 +494,7 @@ export async function cancelDesktopRun(buildId: string): Promise<{ ok: boolean }
 }
 
 export function subscribeToCanonicalFolderChanges(listener: (event: CanonicalFolderChange) => void): () => void {
-  window.scriptManagerDesktop?.runtime?.onCanonicalFolderChange?.(listener); return () => undefined;
+  return window.scriptManagerDesktop?.runtime?.onCanonicalFolderChange?.(listener) ?? (() => undefined)
 }
 
 export async function warmScriptsTerminal(sessionId = DEFAULT_TERMINAL_SESSION_ID): Promise<void> {
@@ -527,11 +527,11 @@ export async function startDesktopLocalRun(scriptId: string, paramValues?: Recor
 }
 
 export function subscribeToDesktopTerminal(listener: (event: ScriptManagerDesktopTerminalEvent) => void) {
-  window.scriptManagerDesktop?.runtime?.onTerminalEvent(listener); return () => undefined;
+  return window.scriptManagerDesktop?.runtime?.onTerminalEvent(listener) ?? (() => undefined)
 }
 
 export function subscribeToDesktopBuildEvents(listener: (event: ScriptManagerDesktopBuildEvent) => void) {
-  window.scriptManagerDesktop?.runtime?.onBuildEvent(listener); return () => undefined;
+  return window.scriptManagerDesktop?.runtime?.onBuildEvent(listener) ?? (() => undefined)
 }
 
 export async function sendDesktopTerminalInput(data: string, sessionId = DEFAULT_TERMINAL_SESSION_ID) {

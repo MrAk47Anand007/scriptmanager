@@ -168,20 +168,30 @@
   }
 
   .desktop-titlebar {
-    -webkit-app-region: drag;
     position: relative;
-    backdrop-filter: blur(18px);
   }
 
-  .desktop-titlebar::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: -1px;
-    height: 1px;
-    background: linear-gradient(90deg, rgba(59, 130, 246, 0.16), rgba(56, 189, 248, 0.55), rgba(59, 130, 246, 0.08));
-    pointer-events: none;
+  .window-control {
+    display: flex;
+    width: 46px;
+    align-items: center;
+    justify-content: center;
+    color: hsl(var(--muted-foreground));
+    transition: background-color 130ms ease-out, color 130ms ease-out;
+  }
+
+  .window-control:hover {
+    background: hsl(var(--foreground) / 0.08);
+    color: hsl(var(--foreground));
+  }
+
+  .window-control:focus-visible {
+    outline-offset: -3px;
+  }
+
+  .window-control-close:hover {
+    background: #c42b1c;
+    color: white;
   }
 
   .desktop-no-drag,
