@@ -1,10 +1,11 @@
-# ScriptManager Tauri Rewrite Handoff — Updated 2026-09-05
+# ScriptManager Tauri Rewrite Handoff — Updated 2026-09-12
 
 ## Branch Truth
 
 - Repository: `scriptmanager`
 - Branch: `feat/tauri-rewrite`
 - Remote tracking branch: `origin/feat/tauri-rewrite`
+- Current pushed head: `d05dff8` (`feat(tauri): add native window controls and observability parity`)
 - Migration status: **feature-complete for the planned milestone** (see `docs/superpowers/plans/2026-09-05-tauri-migration-completion-plan.md` and `docs/releases/tauri-smoke-2026-09-05.md`).
 
 ## Migration Progress (all slices committed)
@@ -23,24 +24,26 @@ Completed since the 2026-09-02 handoff:
 - S9: agent profiles/run history/discovery (allowlist-only) + plugin management shell; provider execution and plugin host deliberately gated (`agents.rs`, `plugins.rs`).
 - W1: local-owner workspace model (RBAC retired per decision D1) + `npm run guard:no-api-fallback` guard against desktop `/api` fallbacks (`workspace_access.rs`, `scripts/check-no-desktop-api-fallback.mjs`).
 - W2: smoke evidence recorded in `docs/releases/tauri-smoke-2026-09-05.md`.
+- Follow-up polish: native frameless Tauri window controls, corrected desktop event unsubscription behavior, richer observability parity/redaction, and idempotent remote execution schema backfill.
 
 ## Verification At Handoff
 
 - `npx tsc --noEmit` — clean.
-- `cargo test` — 92 passed / 0 failed.
+- `cargo test` — 107 passed / 0 failed.
+- `npx vitest run tests/WindowControls.test.tsx tests/scriptsRuntimeClient.test.ts --config vitest.config.ts` — 18 passed / 0 failed.
 - `npm run build` — passes.
 - `npm run guard:no-api-fallback` — OK.
 - `npm run tauri:build:no-bundle` — release exe built.
 - Release exe process-start smoke — alive after 10s, stopped deliberately.
+- Visible `npx tauri dev` tab click-through — passed and recorded in `docs/releases/tauri-smoke-2026-09-05.md`.
 
 ## Remaining (explicitly out of the completed milestone)
 
-1. Visible interactive tab click-through in `npx tauri dev` (human/UI-automation step).
-2. Live Gist sync with a real GitHub token.
-3. SSH transport (russh) for remote exec/SCP.
-4. Agent ACP provider execution; plugin execution host.
-5. OS-native notifications (Tauri-event delivery works).
-6. Installer packaging (`npm run tauri:build`) — run on request now that dev-mode gates pass.
+1. Live Gist sync with a real GitHub token.
+2. SSH transport (russh) for remote exec/SCP.
+3. Agent ACP provider execution; plugin execution host.
+4. OS-native notifications (Tauri-event delivery works).
+5. Installer packaging (`npm run tauri:build`) — run on request now that dev-mode gates pass.
 
 ## Files To Read First Next Session
 
