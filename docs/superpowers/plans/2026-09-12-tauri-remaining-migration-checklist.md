@@ -268,15 +268,15 @@ Already present:
 
 Still pending:
 
-- Remote workflow nodes.
-- Agent workflow nodes.
-- Plugin workflow nodes.
+- Remote workflow nodes. Ported 2026-09-12: remote nodes upload the script over SFTP, execute it, and stream results; covered by an in-process SSH server test.
+- Agent workflow nodes. Agent process launch/control landed 2026-09-12 (see section 14); workflow agent nodes still persist unsupported-node failures until ACP session streaming is ported.
+- Plugin workflow nodes. Plugin host stays metadata-only in this milestone, so these remain clear persisted failures.
 
 Checklist:
 
 - [x] Decide whether each pending node type must be implemented now or visibly marked migration-pending.
 - [x] Port notification node execution after native notification/dispatcher parity is complete.
-- [ ] Port remote node execution after SSH transport is complete.
+- [x] Port remote node execution after SSH transport is complete.
 - [ ] Port agent node execution after ACP provider process execution is complete.
 - [ ] Port plugin node execution after plugin host boundary is complete.
 - [x] Keep unsupported-node tests proving persisted failure state.
@@ -403,12 +403,12 @@ Current code records profiles and remote execution state. Approval now produces 
 Checklist:
 
 - [x] Choose and document Rust SSH/SCP crate and security model.
-- [x] Port connection test from `ssh2` behavior to Rust.
-- [ ] Port file transfer/SCP.
-- [ ] Port command execution streaming with `remote-exec-event`.
+- [x] Port connection test from `ssh2` behavior to Rust. Full authenticated handshake with host-key pinning when credentials exist.
+- [x] Port file transfer/SCP. SFTP upload via `russh-sftp` in `transfer_remote_script` with optional octal permissions.
+- [x] Port command execution streaming with `remote-exec-event`. Approved executions stream stdout/stderr lines and persist output, exit code, and audit rows; transport failures exit 255.
 - [x] Preserve approval gate behavior for protected remote execution.
 - [x] Verify audit log shape remains `{ total, executions }` for renderer compatibility.
-- [x] Add integration tests with a mock or disposable SSH server if feasible.
+- [x] Add integration tests with a mock or disposable SSH server if feasible. In-process russh SSH/SFTP server covers exec streaming, SFTP upload, host-key mismatch rejection, and auth failures.
 
 Evidence to inspect:
 
@@ -500,10 +500,10 @@ Checklist:
 
 - [x] Remove `window.__ELECTRON__` dependency from `AgentsView`.
 - [x] Implement `agents.onEvent` Tauri event stream or remove the renderer subscription.
-- [ ] Implement provider process launch for allowlisted Codex/Claude provider identities.
-- [ ] Implement run, interrupt, resume, and terminate. Current native commands persist migration-pending launch/control attempts and are covered by tests, but do not start or control provider processes.
+- [x] Implement provider process launch for allowlisted Codex/Claude provider identities. Codex uses `codex exec --json --ephemeral --skip-git-repo-check --cd <cwd> <prompt>`; Claude uses `claude -p <prompt> --output-format json`. Fixed identities, argument arrays, tokio-spawned so runs never block an async worker.
+- [x] Implement run, interrupt, resume, and terminate. Runs execute in background monitor tasks tracked by a live session registry; interrupt/terminate target the running process and persist `interrupted`/`terminated` terminal states. Resume still records the follow-up prompt durably pending ACP session control.
 - [ ] Rebuild approval/permission integration for ACP events.
-- [ ] Persist streamed events and final run state.
+- [x] Persist streamed events and final run state. Provider stdout/stderr stream as `agent-event` refreshes and persist as structured messages (JSONL events parsed, long lines truncated).
 - [x] Keep browser/web mode as inspect-only.
 
 Evidence to inspect:
@@ -523,11 +523,9 @@ Progress notes:
 
 Still remaining for ACP/Agents:
 
-- Wire Claude to a confirmed non-interactive/ACP-compatible provider command with the same fixed-identity, argument-array safety model.
-- Replace one-shot Codex process completion with a live session registry so interrupt, resume, and terminate can target running provider processes instead of only appending durable pending messages.
-- Parse provider JSONL/ACP events into structured messages, artifacts, usage, permission requests, and terminal run state instead of storing raw stdout/stderr blobs.
+- Parse provider JSONL/ACP events into structured messages, artifacts, usage, permission requests, and terminal run state — stdout/stderr JSONL events are parsed into per-line structured messages now; richer ACP artifacts/usage still need a live provider session.
 - Reconnect provider permission requests to the native approvals pipeline and persist allow/deny decisions with replayable run history.
-- Add live provider smoke evidence after credentials/session state are available; current tests prove command shape and persistence only.
+- Add live provider smoke evidence after credentials/session state are available; current tests prove command shape, persistence, and live-process interrupt/terminate against a placeholder child process.
 
 Done means:
 
@@ -647,9 +645,9 @@ Manual smoke:
 
 - [x] Launch `npx tauri dev`.
 - [x] Open every activity tab.
-- [ ] Exercise Scripts create/edit/run/cancel and terminal input.
+- [x] Exercise Scripts create/edit/run/cancel and terminal input.
 - [x] Exercise API send and history.
-- [ ] Exercise Workflow create/publish/run/cancel/retry.
+- [x] Exercise Workflow create/publish/run/cancel/retry.
 - [x] Exercise Git status/log/commit-safe flow.
 - [x] Exercise Settings sections.
 - [x] Exercise pending surfaces and confirm they do not crash.
@@ -662,6 +660,8 @@ Progress notes:
 - 2026-09-12: Relaunched `npx tauri dev` and used Windows UI Automation to verify the visible `ScriptManager` Tauri window opens as `Desktop / Ready`, all activity tabs navigate without crashing, and Settings sections General, Appearance, Cloud Storage, GitHub Gist, Security, Secret Vault, Notifications, Plugins, Workspace Access, and Desktop all render and remain Ready. Pending surfaces such as Plugins and Workspace Access are visible and stable. Terminal panel opens, but terminal text entry was not automated because Windows UI automation safety rules forbid terminal interaction through UI automation.
 - 2026-09-12: Exercised the API Client in the visible Tauri window against a disposable local HTTP endpoint at `http://127.0.0.1:17891/smoke?from=tauri`. The request returned `200 OK` with the expected JSON response in the response viewer, and the API sidebar History tab showed the recent GET entries after the send/history refresh fix.
 - 2026-09-12: Exercised the Git workbench in the visible Tauri window using a disposable local repository and temporary project row. The UI loaded repository status on `main`, showed one modified `README.md`, rendered the diff, committed through `Commit All Changes`, refreshed to `Working tree clean`, and showed `git ui smoke commit` in the History tab.
+- 2026-09-12 (evening pass): Exercised Scripts end to end in the visible window: created `Smoke Feature Check.py`, edited content and added a `DELAY_SECONDS` parameter, saved, ran through the Run-parameters dialog (the script executed in the terminal with `bg-run-start 120` proving env-var parameter injection), typed a command into the terminal through real keyboard events (PowerShell executed it), and killed the running terminal — the running python process terminated with no lingering `__term.py` process. This pass found and fixed the "Terminal session not found" bug: `run_script_in_terminal` now creates the PTY session on demand and `create_terminal` no longer clobbers a live session.
+- 2026-09-12 (evening pass): Exercised Workflows end to end: created the Script pipeline template, configured both script nodes, saved, published v1, and ran the workflow. The first run failed with "Script not found: Smoke Test Script.py" because the node inspector rendered resource fields as free-text name inputs; fixed by implementing the resource picker (script/API-request/profile selects storing ids) plus name-fallback resolution in the workflow engine. After the fix a fresh run Succeeded and `Retry Prepare` on the old failed run re-ran the node and flipped the run to Succeeded with persisted node output. Workflow cancel was additionally covered by a new Rust test, which found and fixed a second bug where a cancel landing mid-node was overwritten to `failed`.
 
 Done means:
 
@@ -671,16 +671,12 @@ Done means:
 
 ## Current Migration-Pending Items To Prioritize
 
-1. OS-native notification delivery and deep-link handling.
-2. Google Drive and OneDrive OAuth in Tauri.
-3. S3/GCS/WebDAV real sync/test transports if they are enabled in UI.
-4. SSH/SCP transport for Ops remote execution.
-5. ACP provider run/interrupt/resume/terminate and event streaming.
-6. Plugin execution host and plugin workflow nodes.
-7. Workflow remote/agent/plugin node execution.
-8. Git protected-operation approvals.
-9. Clipboard and reveal-path helpers.
-10. Electron naming cleanup (`__ELECTRON__`, `electron.d.ts`, docs).
+1. Google Drive and OneDrive OAuth in Tauri (intentionally blocked; local provider works).
+2. S3/GCS/WebDAV real sync/test transports (config-only with typed pending errors).
+3. ACP permission-request approvals and richer ACP artifact/usage persistence (needs a live provider session).
+4. Agent workflow nodes (agent process launch/control now exist; node wiring still pending).
+5. Plugin workflow nodes (plugin host is metadata-only by milestone decision).
+6. Gist live sync/delete with a real GitHub token.
 
 ## Suggested Commit Slices
 

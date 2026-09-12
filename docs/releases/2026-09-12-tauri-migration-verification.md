@@ -1,6 +1,45 @@
 # Tauri Migration Verification - 2026-09-12
 
-## Source And Build Evidence
+## Source And Build Evidence (Evening Pass)
+
+- `npx tsc --noEmit` passed.
+- `npm run guard:no-api-fallback` passed.
+- `npm run guard:desktop-bridge` passed.
+- `npm run build` passed.
+- `cargo test` passed: 149 lib tests, 0 failed (up from 140 at the start of this pass).
+- `npm run tauri:build:no-bundle` passed and built `tauri-app/src-tauri/target/release/scriptmanager.exe`.
+
+## Features Completed In The Evening Pass
+
+### SSH/SFTP remote execution transport (russh + russh-sftp)
+
+- New `ssh_transport.rs`: SSH connect with host-key pinning (SHA-256 fingerprints stored per profile, trust-on-first-use, hard rejection on mismatch), password and key-file auth, command execution with streamed stdout/stderr line callbacks, SFTP upload/download, absolute-path validation.
+- Profile secrets are now encrypted at rest (`server_profiles.encrypted_secret`, AES-256-GCM via the vault master key) and decrypted only at connection time; the renderer `secret` field is no longer silently dropped.
+- Connection tests perform a full authenticated SSH handshake when credentials exist and report `authenticated` plus the pinned `hostKeyFingerprint`.
+- Approved remote executions stream real output through `remote-exec-event` line/done/error events and persist output, exit code, and audit rows (exit 255 for transport failures).
+- `transfer_remote_script` uploads script content over SFTP with optional octal permissions via SETSTAT.
+- Integration tests run against a disposable in-process russh SSH/SFTP server (`ssh_test_server.rs`) with password auth, canned exec behavior, and an in-memory SFTP filesystem.
+- Workflow remote nodes execute over SSH/SFTP: upload the script to a generated `/tmp/scriptmanager-wf-*` path, run it with the resolved interpreter, capture stdout/stderr, then remove the uploaded file.
+
+### Agent live session control
+
+- Provider processes now launch through tokio (`tokio::process`) with piped streams; the previous blocking `std::process::Command::output()` call stalled an async worker for the whole provider run.
+- Runs execute in background monitor tasks tracked by a live session registry; interrupt/terminate target the live process and persist `interrupted`/`terminated` terminal states with audit messages.
+- Provider stdout/stderr stream to the renderer as `agent-event` refreshes and persist as structured messages (JSONL lines keep their parsed event; long lines are truncated).
+- Claude is wired to its documented non-interactive print mode (`claude -p <prompt> --output-format json`) with the same fixed-identity argument-array safety model as Codex.
+
+### Bug fixes found by the visible-app smoke
+
+- `run_script_in_terminal` failed with "Terminal session not found" when the desktop Run button fired before the terminal panel mounted. The command now creates the PTY session on demand, and `create_terminal` no longer clobbers an existing live session (which would have killed a running script). A comctl32 delay-load linker change keeps `cargo test` binaries loadable now that rfd/tao objects link comctl32 v6 imports.
+- The workflow node inspector rendered resource fields (script/API request/profile/agent profile) as free-text inputs, so users stored display names where the engine expected ids and runs failed with "Script not found". The inspector now renders resource selects storing ids, and the engine resolves scripts, API requests, and profiles by id first with a display-name fallback for previously saved workflows.
+- Cancelling a workflow run while a node was executing was overwritten to `failed` by the driver's node error path; the driver now records cancelled runs and nodes as cancelled. A new regression test (`workflow_run_cancel_marks_run_and_nodes_cancelled`) covers it.
+
+### Visible-app smoke evidence (evening pass)
+
+- Scripts: created `Smoke Feature Check.py` through the New Script dialog, edited content, added a `DELAY_SECONDS` parameter, saved, ran through the Run-parameters dialog — the script executed in the terminal with `bg-run-start 120` (parameter injected as env var). Typed `echo …` into the terminal via real keyboard events and PowerShell executed it. Killed the running terminal: the python process terminated with no lingering `__term.py` process.
+- Workflows: created the Script pipeline template, configured both script nodes through the new resource picker, saved, published v1, ran (Succeeded), and used `Retry Prepare` on the earlier failed run — the node re-ran and the run flipped to Succeeded with persisted node output `{"exitCode": 0, "stdout": "Hello World"}`.
+
+## Source And Build Evidence (Earlier Pass)
 
 - `npx tsc --noEmit` passed.
 - `npm run guard:no-api-fallback` passed.
@@ -45,13 +84,11 @@
 
 ## Remaining Manual Or External Verification
 
-- Visual Tauri smoke is partially complete: the desktop window opens, all activity tabs navigate, all Settings sections render, visible pending surfaces such as Plugins and Workspace Access do not crash, the Scripts open-folder dialog opens after restart, the API Client can send a GET request to a disposable local HTTP endpoint, render a `200 OK` JSON response, and show recent entries in History, and the Git workbench can load status, render a diff, commit all changes, refresh clean, and show the new commit in History against a disposable local repository. Scripts create/edit/run/cancel and Workflow create/publish/run/cancel/retry still need hands-on UI proof. Terminal panel opens, but terminal text entry was not automated because Windows UI automation safety rules forbid terminal interaction through UI automation.
 - Gist live sync/delete still needs a real GitHub token.
-- API live send with bearer/basic/API key/no-auth is source-verified against a loopback HTTP server; visual Tauri UI API smoke is verified for a GET request and History refresh against `http://127.0.0.1:17891/smoke?from=tauri`.
-- Remote SSH/SFTP transport remains a deliberate migration-pending runtime. Current code supports profiles, SSH identification-banner connection checks with disposable local server coverage, renderer-compatible approval/audit records, approval-finalization events, and persisted typed pending transfer/execution failures.
-- ACP provider process control remains partially migration-pending. Profiles/history/discovery are native, Codex has a source-verified allowlisted process-launch/persistence path, but Claude launch, interrupt/resume/terminate against live sessions, approval/permission events, and streamed ACP event persistence still need full provider-session control.
-- ACP follow-up checklist is now explicit in the remaining migration plan: wire Claude launch, add a live provider session registry for controls, parse JSONL/ACP events into durable structured records, reconnect approval/permission decisions, and collect live provider smoke evidence once a usable session is available.
-- Workflow remote/agent/plugin nodes remain pending behind clear persisted failure states until their underlying SSH, ACP, and plugin-host runtimes exist. Notification nodes now execute through native persisted deliveries.
+- Remote SSH/SFTP transport is implemented and covered by in-process SSH-server integration tests; a live run against a real network SSH host still needs external credentials.
+- ACP permission-request approvals and richer ACP artifact/usage persistence need a live provider session; Codex/Claude launch, streaming, and interrupt/terminate are implemented and test-covered.
+- Agent workflow nodes and plugin workflow nodes remain pending behind clear persisted failure states (agent process control exists; node wiring and plugin host are milestone-pending).
+- Workflow cancel/retry are covered by Rust tests and the visible Retry UI pass; a visible Cancel click needs a long-running workflow in the UI.
 - Protected Git approval consumption is source-complete for matching protected Git action requests; local Git workbench status/log/commit-safe UI smoke is verified, while protected remote fetch/pull/push approval retry remains source-level only.
 
 ## Known Non-Blocking Warnings
