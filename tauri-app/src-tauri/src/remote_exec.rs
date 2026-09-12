@@ -199,12 +199,17 @@ pub async fn test_connection_core(pool: &SqlitePool, profile_id: &str) -> Result
     match result {
         Ok(_) => Ok(serde_json::json!({
             "ok": true,
+            "success": true,
             "latencyMs": latency,
+            "latency_ms": latency,
             "message": format!("TCP connection to {host}:{port} succeeded in {latency}ms"),
         })),
         Err(e) => Ok(serde_json::json!({
             "ok": false,
+            "success": false,
             "latencyMs": latency,
+            "latency_ms": latency,
+            "error": e.to_string(),
             "message": format!("TCP connection to {host}:{port} failed: {e}"),
         })),
     }
@@ -235,14 +240,17 @@ pub async fn start_remote_exec_core(
     if payload.command.trim().is_empty() {
         return Err("Remote command is required".to_string());
     }
-    let exists: Option<String> = sqlx::query_scalar("SELECT id FROM server_profiles WHERE id = ?")
+    let profile_row = sqlx::query(
+        "SELECT p.id, COALESCE(pr.environment, 'production') FROM server_profiles p
+         LEFT JOIN projects pr ON pr.id = p.project_id
+         WHERE p.id = ?",
+    )
         .bind(&payload.profile_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| e.to_string())?;
-    if exists.is_none() {
-        return Err("Server profile not found".to_string());
-    }
+    let profile_row = profile_row.ok_or_else(|| "Server profile not found".to_string())?;
+    let environment: String = profile_row.try_get(1).map_err(|e| e.to_string())?;
 
     let id = Uuid::new_v4().to_string();
     sqlx::query(
@@ -258,7 +266,12 @@ pub async fn start_remote_exec_core(
     .map_err(|e| e.to_string())?;
     record_audit(pool, "remote_exec.start", "local-admin", &id, payload.command.trim()).await?;
 
-    Ok(serde_json::json!({ "remote_exec_id": id, "status": "pending" }))
+    Ok(serde_json::json!({
+        "remote_exec_id": id,
+        "status": "pending",
+        "requires_approval": true,
+        "environment": environment,
+    }))
 }
 
 #[tauri::command]
@@ -533,6 +546,41 @@ mod tests {
 
         let audit = audit_entries(&pool).await.unwrap();
         assert!(audit.iter().any(|e| e["action"] == "remote_exec.reject"));
+    }
+
+    #[tokio::test]
+    async fn remote_exec_start_returns_renderer_approval_contract() {
+        let pool = test_pool().await;
+        let profile = save_profile_core(&pool, payload("web-approval")).await.unwrap();
+
+        let started = start_remote_exec_core(
+            &pool,
+            StartRemoteExecPayload {
+                profile_id: profile.id,
+                script_id: None,
+                command: "deploy".to_string(),
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(started["status"], "pending");
+        assert_eq!(started["requires_approval"], true);
+        assert!(started["remote_exec_id"].as_str().unwrap().len() > 8);
+        assert_eq!(started["environment"], "production");
+    }
+
+    #[tokio::test]
+    async fn connection_test_returns_legacy_and_renderer_keys() {
+        let pool = test_pool().await;
+        let profile = save_profile_core(&pool, payload("web-connection")).await.unwrap();
+        let result = test_connection_core(&pool, &profile.id).await.unwrap();
+
+        assert_eq!(result["ok"], result["success"]);
+        assert!(result.get("latencyMs").is_some());
+        assert!(result.get("latency_ms").is_some());
+        assert!(result["message"].as_str().unwrap().contains("127.0.0.1"));
     }
 
     #[tokio::test]

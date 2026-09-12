@@ -187,7 +187,7 @@ declare global {
         transferRemoteScript: (payload: unknown) => Promise<unknown>
         startRemoteExecution: (payload: unknown) => Promise<unknown>
         approveRemoteExecution: (payload: { id: string; note?: string }) => Promise<{ ok: true; remoteExecId: string }>
-        rejectRemoteExecution: (id: string) => Promise<{ ok: true; remoteExecId: string }>
+        rejectRemoteExecution: (payload: { id: string }) => Promise<{ ok: true; remoteExecId: string }>
         listAuditLog: (payload?: unknown) => Promise<unknown>
         listStorageProviders?: () => Promise<unknown[]>
         saveStorageProvider?: (payload: unknown) => Promise<unknown>

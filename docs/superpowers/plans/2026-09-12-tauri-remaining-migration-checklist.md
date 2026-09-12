@@ -401,7 +401,7 @@ Checklist:
 - [ ] Port connection test from `ssh2` behavior to Rust.
 - [ ] Port file transfer/SCP.
 - [ ] Port command execution streaming with `remote-exec-event`.
-- [ ] Preserve approval gate behavior for protected remote execution.
+- [x] Preserve approval gate behavior for protected remote execution.
 - [x] Verify audit log shape remains `{ total, executions }` for renderer compatibility.
 - [ ] Add integration tests with a mock or disposable SSH server if feasible.
 
@@ -416,6 +416,7 @@ Evidence to inspect:
 Progress notes:
 
 - 2026-09-12: Chose `russh` plus `russh-sftp` for the future Tauri SSH/SFTP transport and documented host-key, secret, containment, event, and approval requirements.
+- 2026-09-12: Native remote execution start now returns renderer-compatible approval metadata (`requires_approval`, `environment`, `remote_exec_id`) and keeps the immutable pending -> approved/rejected audit state machine covered by Rust tests. Connection tests also return both legacy (`ok`, `latencyMs`) and renderer (`success`, `latency_ms`) keys.
 
 Done means:
 

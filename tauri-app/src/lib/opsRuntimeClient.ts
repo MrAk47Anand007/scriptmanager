@@ -111,7 +111,7 @@ export async function approveRemoteExecutionRuntime(id: string, note?: string) {
 
 export async function rejectRemoteExecutionRuntime(id: string) {
   if (window.scriptManagerDesktop?.runtime?.rejectRemoteExecution) {
-    return window.scriptManagerDesktop.runtime.rejectRemoteExecution(id)
+    return window.scriptManagerDesktop.runtime.rejectRemoteExecution({ id })
   }
   throw new Error('Desktop runtime unavailable')
 }
