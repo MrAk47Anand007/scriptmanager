@@ -403,7 +403,7 @@ Current code records profiles and remote execution state, but dedicated SSH/SCP 
 Checklist:
 
 - [x] Choose and document Rust SSH/SCP crate and security model.
-- [ ] Port connection test from `ssh2` behavior to Rust.
+- [x] Port connection test from `ssh2` behavior to Rust.
 - [ ] Port file transfer/SCP.
 - [ ] Port command execution streaming with `remote-exec-event`.
 - [x] Preserve approval gate behavior for protected remote execution.
@@ -422,6 +422,7 @@ Progress notes:
 
 - 2026-09-12: Chose `russh` plus `russh-sftp` for the future Tauri SSH/SFTP transport and documented host-key, secret, containment, event, and approval requirements.
 - 2026-09-12: Native remote execution start now returns renderer-compatible approval metadata (`requires_approval`, `environment`, `remote_exec_id`) and keeps the immutable pending -> approved/rejected audit state machine covered by Rust tests. Connection tests also return both legacy (`ok`, `latencyMs`) and renderer (`success`, `latency_ms`) keys.
+- 2026-09-12: Replaced the TCP-only profile connection check with a Rust SSH identification probe. The test now requires an `SSH-` server banner, sends a ScriptManager client identification string, rejects non-SSH open ports, and keeps legacy/renderer response keys. Full SSH authentication, host-key trust, file transfer, and command streaming remain pending.
 
 Done means:
 

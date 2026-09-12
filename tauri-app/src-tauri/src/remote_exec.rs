@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{Row, SqlitePool};
 use tauri::{AppHandle, Emitter, State};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
 /// SSH transport decision (recorded in the migration completion plan, S7.2):
@@ -181,6 +182,44 @@ async fn record_audit(
     Ok(())
 }
 
+async fn probe_ssh_identification(host: &str, port: i64) -> (bool, i64, Option<String>, String) {
+    let started = std::time::Instant::now();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        async {
+            let mut stream = tokio::net::TcpStream::connect((host, port as u16)).await?;
+            let mut banner = Vec::new();
+            let mut byte = [0u8; 1];
+            while banner.len() < 255 {
+                let read = stream.read(&mut byte).await?;
+                if read == 0 {
+                    break;
+                }
+                banner.push(byte[0]);
+                if byte[0] == b'\n' {
+                    break;
+                }
+            }
+            let banner_text = String::from_utf8_lossy(&banner).trim().to_string();
+            if banner_text.starts_with("SSH-") {
+                let _ = stream.write_all(b"SSH-2.0-ScriptManager_Tauri\r\n").await;
+                Ok::<_, std::io::Error>((true, Some(banner_text), "SSH identification succeeded".to_string()))
+            } else if banner_text.is_empty() {
+                Ok((false, None, "Connection opened but no SSH identification banner was received".to_string()))
+            } else {
+                Ok((false, Some(banner_text.clone()), format!("Remote service is not SSH: {banner_text}")))
+            }
+        },
+    )
+    .await;
+    let latency = started.elapsed().as_millis() as i64;
+    match result {
+        Ok(Ok((ok, banner, message))) => (ok, latency, banner, message),
+        Ok(Err(error)) => (false, latency, None, format!("SSH connection failed: {error}")),
+        Err(_) => (false, latency, None, "SSH connection timed out".to_string()),
+    }
+}
+
 pub async fn test_connection_core(pool: &SqlitePool, profile_id: &str) -> Result<Value, String> {
     let row = sqlx::query("SELECT host, port FROM server_profiles WHERE id = ?")
         .bind(profile_id)
@@ -191,28 +230,19 @@ pub async fn test_connection_core(pool: &SqlitePool, profile_id: &str) -> Result
     let host: String = row.try_get(0).map_err(|e| e.to_string())?;
     let port: i64 = row.try_get(1).map_err(|e| e.to_string())?;
 
-    let started = std::time::Instant::now();
-    let result = std::net::TcpStream::connect((host.as_str(), port as u16));
-    let latency = started.elapsed().as_millis() as i64;
+    let (ok, latency, banner, message) = probe_ssh_identification(&host, port).await;
     record_audit(pool, "server_profile.test_connection", "local-admin", profile_id, &format!("{host}:{port}")).await?;
 
-    match result {
-        Ok(_) => Ok(serde_json::json!({
-            "ok": true,
-            "success": true,
-            "latencyMs": latency,
-            "latency_ms": latency,
-            "message": format!("TCP connection to {host}:{port} succeeded in {latency}ms"),
-        })),
-        Err(e) => Ok(serde_json::json!({
-            "ok": false,
-            "success": false,
-            "latencyMs": latency,
-            "latency_ms": latency,
-            "error": e.to_string(),
-            "message": format!("TCP connection to {host}:{port} failed: {e}"),
-        })),
-    }
+    Ok(serde_json::json!({
+        "ok": ok,
+        "success": ok,
+        "latencyMs": latency,
+        "latency_ms": latency,
+        "transport": "ssh",
+        "banner": banner,
+        "error": if ok { Value::Null } else { Value::String(message.clone()) },
+        "message": format!("{message} for {host}:{port} in {latency}ms"),
+    }))
 }
 
 #[tauri::command]
@@ -473,6 +503,21 @@ mod tests {
         }
     }
 
+    async fn spawn_banner_server(banner: &'static str) -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test listener");
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let _ = socket.write_all(banner.as_bytes()).await;
+                let mut client_identification = [0u8; 128];
+                let _ = socket.read(&mut client_identification).await;
+            }
+        });
+        port
+    }
+
     #[tokio::test]
     async fn profile_crud_round_trip() {
         let pool = test_pool().await;
@@ -574,13 +619,35 @@ mod tests {
     #[tokio::test]
     async fn connection_test_returns_legacy_and_renderer_keys() {
         let pool = test_pool().await;
-        let profile = save_profile_core(&pool, payload("web-connection")).await.unwrap();
+        let port = spawn_banner_server("SSH-2.0-scriptmanager-test\r\n").await;
+        let mut payload = payload("web-connection");
+        payload.port = Some(port as i64);
+        let profile = save_profile_core(&pool, payload).await.unwrap();
         let result = test_connection_core(&pool, &profile.id).await.unwrap();
 
-        assert_eq!(result["ok"], result["success"]);
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["success"], true);
         assert!(result.get("latencyMs").is_some());
         assert!(result.get("latency_ms").is_some());
+        assert_eq!(result["transport"], "ssh");
+        assert!(result["banner"].as_str().unwrap().starts_with("SSH-"));
         assert!(result["message"].as_str().unwrap().contains("127.0.0.1"));
+    }
+
+    #[tokio::test]
+    async fn connection_test_rejects_non_ssh_services() {
+        let pool = test_pool().await;
+        let port = spawn_banner_server("HTTP/1.1 200 OK\r\n").await;
+        let mut payload = payload("web-non-ssh");
+        payload.port = Some(port as i64);
+        let profile = save_profile_core(&pool, payload).await.unwrap();
+
+        let result = test_connection_core(&pool, &profile.id).await.unwrap();
+
+        assert_eq!(result["ok"], false);
+        assert_eq!(result["success"], false);
+        assert_eq!(result["transport"], "ssh");
+        assert!(result["error"].as_str().unwrap().contains("not SSH"));
     }
 
     #[tokio::test]
