@@ -317,7 +317,7 @@ export const deleteApiRequest = createAsyncThunk(
 )
 
 export const sendApiRequest = createAsyncThunk<
-  { response: ApiResponse; refreshedRequest?: ApiRequest; refreshedGlobals?: KeyValueRow[]; refreshedEnvironments?: ApiEnvironment[] },
+  { response: ApiResponse; refreshedRequest?: ApiRequest; refreshedGlobals?: KeyValueRow[]; refreshedEnvironments?: ApiEnvironment[]; refreshedHistory?: ApiHistoryEntry[] },
   ApiRequestDraft,
   { state: { api: ApiState }; rejectValue: { message: string; unresolved?: string[] } }
 >(
@@ -412,6 +412,7 @@ export const sendApiRequest = createAsyncThunk<
           ? toClientRows(parseVariableRows(desktopResult.refreshedGlobals.variables))
           : undefined,
         refreshedEnvironments: desktopResult.refreshedEnvironments,
+        refreshedHistory: await listApiHistoryRuntime() as ApiHistoryEntry[],
       }
     } catch (error) {
       if (axios.isAxiosError(error)) {
@@ -659,6 +660,9 @@ const apiSlice = createSlice({
         }
         if (action.payload.refreshedEnvironments) {
           state.environments = action.payload.refreshedEnvironments
+        }
+        if (action.payload.refreshedHistory) {
+          state.history = action.payload.refreshedHistory
         }
         if (action.payload.refreshedRequest) {
           state.activeRequest = requestToDraft(action.payload.refreshedRequest)
