@@ -5,8 +5,25 @@ export type AgentProviderDiscovery = {
   provider: AgentProvider
   available: boolean
   executable?: string
+  /** Where the CLI was found: 'path' | 'well-known' | 'override'. */
+  source?: string
+  /** First line of `--version` for a discovered CLI. */
   version?: string
+  /** Path of a detected desktop (GUI) install, which cannot be automated. */
+  desktopDetected?: string
+  installHint?: string
   error?: string
+}
+
+export type McpStatusRuntime = {
+  exePath: string
+  args: string[]
+  claudeDesktopConfigPath?: string | null
+  claudeDesktopInstalled: boolean
+  codexConfigPath?: string | null
+  codexInstalled: boolean
+  claudeDesktopSnippet: { mcpServers: Record<string, { command: string; args: string[] }> }
+  codexSnippetToml: string
 }
 
 export type AgentProfileRuntime = {
@@ -108,5 +125,33 @@ export async function readAgentRunRuntime(id: string): Promise<AgentRunDetailRun
 export async function updateAgentRunRuntime(id: string, status: 'interrupted' | 'running' | 'failed') {
   if (status === 'failed') throw new Error('Failed agent runs require the desktop runtime')
   const path = status === 'interrupted' ? 'interrupt' : 'resume'
+  throw new Error('Desktop runtime unavailable')
+}
+
+export async function setAgentProviderPathRuntime(provider: AgentProvider, path: string): Promise<{ message: string; version?: string | null }> {
+  if (window.scriptManagerDesktop?.agents?.setProviderPath) {
+    return window.scriptManagerDesktop.agents.setProviderPath({ provider, path }) as Promise<{ message: string; version?: string | null }>
+  }
+  throw new Error('Desktop runtime unavailable')
+}
+
+export async function getAgentProviderPathsRuntime(): Promise<Record<string, string>> {
+  if (window.scriptManagerDesktop?.agents?.getProviderPaths) {
+    return window.scriptManagerDesktop.agents.getProviderPaths() as Promise<Record<string, string>>
+  }
+  return {}
+}
+
+export async function getMcpStatusRuntime(): Promise<McpStatusRuntime> {
+  if (window.scriptManagerDesktop?.getMcpStatus) {
+    return window.scriptManagerDesktop.getMcpStatus() as Promise<McpStatusRuntime>
+  }
+  throw new Error('Desktop runtime unavailable')
+}
+
+export async function installMcpConfigRuntime(target: 'claude-desktop' | 'codex'): Promise<{ message: string; path: string }> {
+  if (window.scriptManagerDesktop?.installMcpConfig) {
+    return window.scriptManagerDesktop.installMcpConfig({ target }) as Promise<{ message: string; path: string }>
+  }
   throw new Error('Desktop runtime unavailable')
 }

@@ -184,3 +184,55 @@ export async function cancelWorkflowRunRuntime(runId: string) {
   }
   return normalizeWorkflowRunDetail(await response.json())
 }
+
+export async function resolveWorkflowApprovalRuntime(payload: { runId: string; nodeId: string; approved: boolean; decidedBy?: string }) {
+  if (isTauri()) {
+    const response = await invokeTauri<Record<string, any>>('resolve_workflow_approval', { payload })
+    return normalizeWorkflowRunDetail(response)
+  }
+  if (window.scriptManagerDesktop?.runtime?.resolveWorkflowApproval) {
+    const response = await window.scriptManagerDesktop.runtime.resolveWorkflowApproval(payload)
+    return normalizeWorkflowRunDetail(response as Record<string, any>)
+  }
+  throw new Error('Desktop runtime unavailable')
+}
+
+export type WorkflowTriggerRuntime = {
+  id: string
+  workflowId: string
+  triggerType: string
+  enabled: boolean
+  config: Record<string, unknown> | null
+  createdAt: string
+  updatedAt: string
+}
+
+export async function listWorkflowTriggersRuntime(workflowId: string): Promise<WorkflowTriggerRuntime[]> {
+  if (isTauri()) {
+    return invokeTauri<WorkflowTriggerRuntime[]>('list_workflow_triggers', { workflowId })
+  }
+  if (window.scriptManagerDesktop?.runtime?.listWorkflowTriggers) {
+    return window.scriptManagerDesktop.runtime.listWorkflowTriggers(workflowId) as Promise<WorkflowTriggerRuntime[]>
+  }
+  return []
+}
+
+export async function saveWorkflowTriggerRuntime(payload: { workflowId: string; type?: string; cron?: string; enabled: boolean }): Promise<WorkflowTriggerRuntime> {
+  if (isTauri()) {
+    return invokeTauri<WorkflowTriggerRuntime>('save_workflow_trigger', { payload })
+  }
+  if (window.scriptManagerDesktop?.runtime?.saveWorkflowTrigger) {
+    return window.scriptManagerDesktop.runtime.saveWorkflowTrigger(payload) as Promise<WorkflowTriggerRuntime>
+  }
+  throw new Error('Desktop runtime unavailable')
+}
+
+export async function deleteWorkflowTriggerRuntime(triggerId: string): Promise<boolean> {
+  if (isTauri()) {
+    return invokeTauri<boolean>('delete_workflow_trigger', { triggerId })
+  }
+  if (window.scriptManagerDesktop?.runtime?.deleteWorkflowTrigger) {
+    return window.scriptManagerDesktop.runtime.deleteWorkflowTrigger(triggerId)
+  }
+  return false
+}

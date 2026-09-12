@@ -8,16 +8,19 @@ import {
 import {
   createAgentProfileRuntime,
   discoverAgentProvidersRuntime,
+  getAgentProviderPathsRuntime,
   interruptAgentRuntime,
   launchAgentRuntime,
   listAgentProfilesRuntime,
   listAgentRunsRuntime,
   readAgentRunRuntime,
   resumeAgentRuntime,
+  setAgentProviderPathRuntime,
   type AgentProviderDiscovery,
 } from '@/lib/agentRuntimeClient'
 import { listProjectsRuntime } from '@/lib/opsRuntimeClient'
 import { isDesktopRenderer } from '@/lib/runtime/desktopMode'
+import { McpAccessCard } from './McpAccessCard'
 
 type Profile = {
   id: string
@@ -82,6 +85,11 @@ export function AgentsView() {
   const [error, setError] = useState('')
   const [isLaunching, setIsLaunching] = useState(false)
 
+  // Provider CLI path overrides
+  const [pathEditorProvider, setPathEditorProvider] = useState<'codex' | 'claude' | null>(null)
+  const [pathEditorValue, setPathEditorValue] = useState('')
+  const [pathSaving, setPathSaving] = useState(false)
+
   const chatBottomRef = useRef<HTMLDivElement | null>(null)
 
   // Load profiles, runs, and projects
@@ -119,6 +127,30 @@ export function AgentsView() {
       // ignore
     }
   }, [])
+
+  const openPathEditor = useCallback(async (provider: 'codex' | 'claude') => {
+    setPathEditorProvider(provider)
+    setPathEditorValue('')
+    try {
+      const paths = await getAgentProviderPathsRuntime()
+      setPathEditorValue(paths?.[provider] ?? '')
+    } catch {
+      // leave the editor empty
+    }
+  }, [])
+
+  const saveProviderPath = useCallback(async (provider: 'codex' | 'claude', path: string) => {
+    setPathSaving(true)
+    try {
+      await setAgentProviderPathRuntime(provider, path)
+      await discoverProviders()
+      setPathEditorProvider(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save CLI path')
+    } finally {
+      setPathSaving(false)
+    }
+  }, [discoverProviders])
 
   useEffect(() => {
     void load()
@@ -300,26 +332,120 @@ export function AgentsView() {
           </div>
 
           {/* Provider Discovery Chips */}
-          <div className="mt-3 flex items-center gap-2">
-            {['codex', 'claude'].map((p) => {
-              const d = discoveries.find((item) => item.provider === p)
-              const isAvail = d?.available ?? desktop
-              return (
-                <div
-                  key={p}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium border ${
-                    isAvail
-                      ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400'
-                      : 'border-muted bg-muted/30 text-muted-foreground'
-                  }`}
-                  title={d?.version ? `${p} (${d.version})` : `${p} executable`}
-                >
-                  <span className={`h-1.5 w-1.5 rounded-full ${isAvail ? 'bg-emerald-500' : 'bg-muted-foreground'}`} />
-                  <span className="capitalize">{p}</span>
-                  <span>{isAvail ? 'Ready' : 'Not found'}</span>
+          <div className="mt-3 space-y-1.5">
+            <div className="flex items-center gap-2">
+              {(['codex', 'claude'] as const).map((p) => {
+                const d = discoveries.find((item) => item.provider === p)
+                const isAvail = d?.available ?? false
+                const desktopApp = d?.desktopDetected
+                const hint = d?.installHint
+                return (
+                  <div
+                    key={p}
+                    className={`flex flex-1 flex-col gap-0.5 rounded-md border px-2 py-1 ${
+                      isAvail
+                        ? 'border-emerald-500/30 bg-emerald-500/5'
+                        : desktopApp
+                        ? 'border-amber-500/40 bg-amber-500/10'
+                        : 'border-muted bg-muted/30'
+                    }`}
+                    title={
+                      isAvail
+                        ? `${p} CLI ready${d?.version ? ` · ${d.version}` : ''}\n${d?.executable ?? ''}`
+                        : desktopApp
+                        ? `${p} desktop app detected — desktop apps cannot be automated headlessly. Install the CLI instead.\n${hint ?? ''}`
+                        : hint ?? `${p} CLI not found`
+                    }
+                  >
+                    <div className="flex items-center justify-center gap-1.5 text-[10px] font-medium">
+                      <span className={`h-1.5 w-1.5 rounded-full ${
+                        isAvail ? 'bg-emerald-500' : desktopApp ? 'bg-amber-500' : 'bg-muted-foreground'
+                      }`} />
+                      <span className="capitalize">{p}</span>
+                      <span className={isAvail
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : desktopApp
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-muted-foreground'}>
+                        {isAvail ? 'Ready' : desktopApp ? 'Desktop app only' : 'Not found'}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => void openPathEditor(p)}
+                      className="text-center text-[9px] text-muted-foreground hover:text-accent-brand"
+                    >
+                      {isAvail && d?.source === 'override' ? 'custom path ✓ · edit' : 'set CLI path'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Actionable guidance when a CLI is missing */}
+            {discoveries.some((d) => !d.available) && (
+              <div className="rounded-md border border-wb-border bg-muted/30 p-2 text-[10px] leading-relaxed text-muted-foreground">
+                <span className="font-semibold text-foreground">Runs need the CLI, not the desktop app.</span>{' '}
+                Desktop installs (Claude Desktop, Codex app) cannot be driven headlessly. Install the CLI once:
+                {discoveries.filter((d) => !d.available && d.installHint).map((d) => (
+                  <div key={d.provider} className="mt-1 flex items-center justify-between gap-1.5">
+                    <code className="truncate rounded bg-background px-1.5 py-0.5 font-mono text-[9.5px]">{d.installHint}</code>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(d.installHint!)
+                        setCopiedText(d.installHint!)
+                        setTimeout(() => setCopiedText(null), 1500)
+                      }}
+                      className="shrink-0 text-[9px] hover:text-foreground"
+                    >
+                      {copiedText === d.installHint ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Inline CLI path editor */}
+            {pathEditorProvider && (
+              <div className="space-y-1 rounded-md border border-wb-border bg-card p-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {pathEditorProvider} CLI path
                 </div>
-              )
-            })}
+                <input
+                  value={pathEditorValue}
+                  onChange={(e) => setPathEditorValue(e.target.value)}
+                  placeholder={`Full path to ${pathEditorProvider} executable…`}
+                  className="h-7 w-full rounded-md border border-wb-border bg-background px-2 font-mono text-[10px] outline-none focus:border-accent-brand"
+                />
+                <div className="flex gap-1.5">
+                  <button
+                    disabled={pathSaving}
+                    onClick={() => void saveProviderPath(pathEditorProvider, pathEditorValue)}
+                    className="flex-1 rounded-md bg-accent-brand px-2 py-1 text-[10px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                  {pathEditorValue && (
+                    <button
+                      disabled={pathSaving}
+                      onClick={() => void saveProviderPath(pathEditorProvider, '')}
+                      className="rounded-md border border-wb-border px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground"
+                    >
+                      Clear
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setPathEditorProvider(null)}
+                    className="rounded-md px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-2.5">
+            <McpAccessCard />
           </div>
 
           {!desktop && (
@@ -705,7 +831,8 @@ export function AgentsView() {
             <div>
               <h2 className="text-base font-semibold">Autonomous AI Coding Agents</h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Run Codex or Claude agent sessions locally with ACP protocol governance, approval gates, and workspace telemetry.
+                Run Codex or Claude agent sessions locally with approval gates and workspace telemetry.
+                Connect the built-in MCP server and your AI apps can also call your saved workflows, scripts, and API requests — only when you ask.
               </p>
             </div>
 

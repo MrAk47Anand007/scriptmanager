@@ -6,6 +6,7 @@ import {
   fetchWorkflowRunsRuntime,
   listWorkflowsRuntime,
   publishWorkflowRuntime,
+  resolveWorkflowApprovalRuntime,
   retryWorkflowNodeRuntime,
   runWorkflowRuntime,
   saveWorkflowRuntime,
@@ -85,6 +86,9 @@ export const retryWorkflowNode = createAsyncThunk('workflows/retryNode', async (
 })
 export const cancelWorkflowRun = createAsyncThunk('workflows/cancelRun', async (runId:string) => {
   return cancelWorkflowRunRuntime(runId)
+})
+export const resolveWorkflowApproval = createAsyncThunk('workflows/resolveApproval', async ({runId,nodeId,approved}:{runId:string;nodeId:string;approved:boolean}) => {
+  return resolveWorkflowApprovalRuntime({ runId, nodeId, approved, decidedBy: 'local-user' })
 })
 
 const slice = createSlice({
@@ -249,6 +253,7 @@ const slice = createSlice({
       .addCase(fetchWorkflowRun.fulfilled, (state, action) => { state.executionDetails[action.payload.id] = action.payload })
       .addCase(retryWorkflowNode.fulfilled, (state, action) => { state.executionDetails[action.payload.id] = action.payload })
       .addCase(cancelWorkflowRun.fulfilled, (state, action) => { state.executionDetails[action.payload.id] = action.payload })
+      .addCase(resolveWorkflowApproval.fulfilled, (state, action) => { state.executionDetails[action.payload.id] = action.payload })
   },
 })
 

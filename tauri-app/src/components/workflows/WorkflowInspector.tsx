@@ -38,7 +38,7 @@ function ResourceField({ resource, field, value, onChange }: { resource: NonNull
       case 'remoteProfiles':
         return remoteProfiles.map((profile) => ({ value: profile.id, label: profile.name }))
       case 'agentProfiles':
-        return agentProfiles
+        return agentProfiles.map((profile) => ({ value: profile.id, label: profile.name }))
       default:
         return []
     }

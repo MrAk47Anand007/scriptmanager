@@ -131,7 +131,6 @@ window.scriptManagerDesktop = {
     clearApiHistory: () => invokeTauri('clear_api_history'),
     runApiCollection: (payload: { collectionId: string; environmentId: string | null }) => invokeTauri('run_api_collection', { payload }),
     listApiCollectionRuns: () => invokeTauri('list_api_collection_runs'),
-    readSettings: () => invokeTauri('read_settings'),
     saveSettings: (payload: Record<string, string>) => invokeTauri('save_settings', { payload }),
     readGithubGistSettings: () => invokeTauri('read_github_gist_settings'),
     saveGithubGistSettings: (payload: { token?: string; syncEnabled: boolean }) => invokeTauri('save_github_gist_settings', { payload }),
@@ -191,9 +190,13 @@ window.scriptManagerDesktop = {
       interruptRun: (id: string) => invokeTauri('interrupt_agent_run', { id }),
       resumeRun: (payload: unknown) => invokeTauri('resume_agent_run', { payload: payload as Record<string, unknown> }),
       terminateRun: (id: string) => invokeTauri('terminate_agent_run', { id }),
+      setProviderPath: (payload: { provider: string; path: string }) => invokeTauri('set_agent_provider_path', { payload }),
+      getProviderPaths: () => invokeTauri('get_agent_provider_paths'),
       onEvent: (listener: DesktopListener<{ sessionId: string; event: unknown }>) =>
         subscribe('agent-event', listener),
     },
+    getMcpStatus: () => invokeTauri('get_mcp_status'),
+    installMcpConfig: (payload: { target: string }) => invokeTauri('install_mcp_config', { payload }),
     listPlugins: () => invokeTauri('list_plugins'),
     updatePlugin: (payload: { id: string; action: string; settings?: unknown }) =>
       invokeTauri('update_plugin', { payload: payload as Record<string, unknown> }),
@@ -221,6 +224,12 @@ window.scriptManagerDesktop = {
     readWorkflowRun: (runId: string) => invokeTauri('read_workflow_run', { runId }),
     retryWorkflowNode: (payload: { runId: string; nodeId: string }) => invokeTauri('retry_workflow_node', { payload }),
     cancelWorkflowRun: (runId: string) => invokeTauri('cancel_workflow_run', { runId }),
+    resolveWorkflowApproval: (payload: { runId: string; nodeId: string; approved: boolean; decidedBy?: string }) =>
+      invokeTauri('resolve_workflow_approval', { payload }),
+    listWorkflowTriggers: (workflowId: string) => invokeTauri('list_workflow_triggers', { workflowId }),
+    saveWorkflowTrigger: (payload: { workflowId: string; type?: string; cron?: string; enabled: boolean }) =>
+      invokeTauri('save_workflow_trigger', { payload }),
+    deleteWorkflowTrigger: (triggerId: string) => invokeTauri('delete_workflow_trigger', { triggerId }),
     readSettings: () => invokeTauri('get_settings'),
     warmTerminal: (payload?: { sessionId?: string }) =>
       invokeTauri('create_terminal', { sessionId: payload?.sessionId ?? 'default' }),

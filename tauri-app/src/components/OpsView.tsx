@@ -1,7 +1,7 @@
 import dynamic from '@/lib/dynamic';
 
 
-import { lazy,  useEffect, useState  } from 'react'
+import { lazy,  useCallback, useEffect, useState  } from 'react'
 
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { fetchServerProfiles, fetchProjects, fetchAuditLog } from '@/features/ops/opsSlice'
@@ -13,6 +13,9 @@ import {
     selectAuditLogTotal,
     selectConnectionTestResult,
 } from '@/features/ops/selectors'
+import { listApprovalsRuntime } from '@/lib/approvalsRuntimeClient'
+import { getObservabilityDashboardRuntime } from '@/lib/observabilityRuntimeClient'
+import type { ExecutionDashboard as ExecutionDashboardData } from '@/lib/observability/types'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Server, ShieldAlert, History, PlayCircle, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -28,6 +31,9 @@ const ServerProfilesPanel = dynamic(
 const AuditTrailPanel = dynamic(
     () => import('./AuditTrailPanel').then((mod) => mod.AuditTrailPanel),
     { loading: () => <PaneSkeleton label="Loading audit trail" /> }
+)
+const ExecutionDashboard = lazy(
+    () => import('@/components/observability/ExecutionDashboard').then((mod) => ({ default: mod.ExecutionDashboard }))
 )
 
 function PaneSkeleton({ label }: { label: string }) {
@@ -77,8 +83,10 @@ function SummaryCard({ icon: Icon, label, value, hint, tone }: {
 /**
  * Ops deploy console — full editor-area view for the 'ops' activity.
  * Recomposes the existing self-contained panels (remote execution, server
- * profiles, audit trail) that previously lived in ScriptsManager's cramped
- * right column.
+ * profiles, audit trail) plus a live cross-domain execution dashboard.
+ * Summary cards pull real numbers: server profiles, every pending approval
+ * (workflow gates + remote-execution), active executions, and the
+ * success/failure ratio from the observability dashboard.
  */
 export function OpsView() {
     const dispatch = useAppDispatch()
@@ -89,6 +97,8 @@ export function OpsView() {
     const auditLogTotal = useAppSelector(selectAuditLogTotal)
     const connectionTestResult = useAppSelector(selectConnectionTestResult)
     const [activeTab, setActiveTab] = useState('execute')
+    const [pendingApprovals, setPendingApprovals] = useState<number>(0)
+    const [dashboard, setDashboard] = useState<ExecutionDashboardData | null>(null)
 
     useEffect(() => {
         if (serverProfilesStatus === 'idle') {
@@ -98,14 +108,38 @@ export function OpsView() {
         void dispatch(fetchAuditLog({ limit: 25, offset: 0 }))
     }, [dispatch, serverProfilesStatus])
 
+    const refreshSummary = useCallback(async () => {
+        try {
+            const [approvals, dashboardData] = await Promise.all([
+                listApprovalsRuntime('pending').catch(() => [] as unknown[]),
+                getObservabilityDashboardRuntime().catch(() => null),
+            ])
+            setPendingApprovals(Array.isArray(approvals) ? approvals.length : 0)
+            setDashboard(dashboardData)
+        } catch {
+            // Summary metrics are best-effort; panels surface their own errors.
+        }
+    }, [])
+
+    useEffect(() => {
+        void refreshSummary()
+        const timer = window.setInterval(() => void refreshSummary(), 15_000)
+        return () => window.clearInterval(timer)
+    }, [refreshSummary])
+
     const isExecuting = remoteExecStatus === 'running' || remoteExecStatus === 'connecting'
+    const activeRuns = dashboard?.metrics.active ?? 0
+    const succeeded = dashboard?.metrics.succeeded ?? 0
+    const failed = (dashboard?.metrics.failed ?? 0) + (dashboard?.metrics.timedOut ?? 0)
+    const successRate = succeeded + failed > 0 ? Math.round((succeeded / (succeeded + failed)) * 100) : null
+    const totalPendingApprovals = pendingApprovals + (requiresApproval ? 1 : 0)
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background">
             <div className="shrink-0 border-b border-wb-border px-5 pb-4 pt-5">
                 <h1 className="text-sm font-semibold text-foreground">Ops Console</h1>
                 <p className="mt-0.5 text-[11px] text-muted-foreground">
-                    Remote execution, server profiles, and the audit trail in one place.
+                    Remote execution, server profiles, live run health, and the audit trail in one place.
                 </p>
                 <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
                     <SummaryCard
@@ -117,16 +151,22 @@ export function OpsView() {
                     <SummaryCard
                         icon={ShieldAlert}
                         label="Pending approvals"
-                        value={requiresApproval ? '1' : '0'}
-                        tone={requiresApproval ? 'warning' : 'default'}
+                        value={String(totalPendingApprovals)}
+                        tone={totalPendingApprovals > 0 ? 'warning' : 'default'}
                     />
                     <SummaryCard
                         icon={PlayCircle}
-                        label="Execution"
-                        value={isExecuting ? 'Running' : 'Idle'}
-                        tone={isExecuting ? 'running' : 'default'}
+                        label="Active executions"
+                        value={isExecuting ? 'Running' : String(activeRuns)}
+                        hint={isExecuting ? 'remote job' : activeRuns > 0 ? 'across the workspace' : undefined}
+                        tone={isExecuting || activeRuns > 0 ? 'running' : 'default'}
                     />
-                    <SummaryCard icon={History} label="Audit entries" value={String(auditLogTotal)} />
+                    <SummaryCard
+                        icon={History}
+                        label="Success rate"
+                        value={successRate === null ? '—' : `${successRate}%`}
+                        hint={succeeded + failed > 0 ? `${succeeded} ok · ${failed} failed` : 'no finished runs yet'}
+                    />
                 </div>
             </div>
 
@@ -134,6 +174,7 @@ export function OpsView() {
                 <TabsList className="mx-5 mt-3 w-fit shrink-0">
                     <TabsTrigger value="execute" className="text-xs">Execute</TabsTrigger>
                     <TabsTrigger value="servers" className="text-xs">Servers</TabsTrigger>
+                    <TabsTrigger value="runs" className="text-xs">Runs</TabsTrigger>
                     <TabsTrigger value="audit" className="text-xs">Audit</TabsTrigger>
                 </TabsList>
                 <TabsContent value="execute" className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
@@ -146,6 +187,11 @@ export function OpsView() {
                         <ServerProfilesPanel />
                     </div>
                 </TabsContent>
+                <TabsContent value="runs" className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
+                    <div className="mx-auto max-w-5xl">
+                        <ExecutionDashboard />
+                    </div>
+                </TabsContent>
                 <TabsContent value="audit" className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
                     <div className="mx-auto max-w-4xl">
                         <AuditTrailPanel />
@@ -155,4 +201,3 @@ export function OpsView() {
         </div>
     )
 }
-

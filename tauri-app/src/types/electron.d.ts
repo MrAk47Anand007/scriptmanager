@@ -45,8 +45,12 @@ declare global {
         interruptRun: (runId: string) => Promise<unknown>
         resumeRun: (payload: { runId: string; prompt: string }) => Promise<unknown>
         terminateRun: (runId: string) => Promise<unknown>
+        setProviderPath: (payload: { provider: string; path: string }) => Promise<unknown>
+        getProviderPaths: () => Promise<unknown>
         onEvent: (listener: (payload: { sessionId: string; event: unknown }) => void) => () => void
       }
+      getMcpStatus?: () => Promise<unknown>
+      installMcpConfig?: (payload: { target: string }) => Promise<unknown>
       runtime?: {
         getBootstrapState: () => Promise<{ scripts: unknown[]; collections: unknown[]; settings: Record<string, string> }>
         readSettings: () => Promise<Record<string, string>>
@@ -73,6 +77,10 @@ declare global {
         readWorkflowRun: (runId: string) => Promise<unknown>
         retryWorkflowNode: (payload: { runId: string; nodeId: string }) => Promise<unknown>
         cancelWorkflowRun: (runId: string) => Promise<unknown>
+        resolveWorkflowApproval: (payload: { runId: string; nodeId: string; approved: boolean; decidedBy?: string }) => Promise<unknown>
+        listWorkflowTriggers: (workflowId: string) => Promise<unknown[]>
+        saveWorkflowTrigger: (payload: { workflowId: string; type?: string; cron?: string; enabled: boolean }) => Promise<unknown>
+        deleteWorkflowTrigger: (triggerId: string) => Promise<boolean>
         listNotificationChannels: () => Promise<unknown[]>
         createNotificationChannel: (payload: { name: string; kind: string; config?: unknown }) => Promise<unknown>
         listNotificationRules: () => Promise<unknown[]>
