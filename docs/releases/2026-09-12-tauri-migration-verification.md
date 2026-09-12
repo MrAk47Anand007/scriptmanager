@@ -35,11 +35,12 @@
 - Documented the remote execution SSH/SFTP target architecture: `russh` plus `russh-sftp`.
 - Added native protected-Git approval integration: protected Git actions create/reuse approval requests, block while pending, honor rejected decisions, and proceed after an approved matching request.
 - Added native Git dispatcher verification for status, log, branches, diff, add/stage, reset/unstage, commit, push, fetch, and pull using a temporary local repo and bare origin.
+- Added visible and source-level proof for Tauri open-folder restart behavior: the dialog opens after restart, accepts the renderer camelCase `folderPath` payload, and linked-folder scripts read/save/run against their canonical source files with containment checks.
 - Updated operator/troubleshooting/docs language from Electron-hosted assumptions to Tauri-hosted behavior.
 
 ## Remaining Manual Or External Verification
 
-- Visual Tauri smoke is partially complete: the desktop window opens, all activity tabs navigate, all Settings sections render, and visible pending surfaces such as Plugins and Workspace Access do not crash. Scripts create/edit/run/cancel, API UI send/history, Workflow create/publish/run/cancel/retry, and Git UI status/log/commit-safe flow still need hands-on UI proof. Terminal panel opens, but terminal text entry was not automated because Windows UI automation safety rules forbid terminal interaction through UI automation.
+- Visual Tauri smoke is partially complete: the desktop window opens, all activity tabs navigate, all Settings sections render, visible pending surfaces such as Plugins and Workspace Access do not crash, and the Scripts open-folder dialog opens after restart. Scripts create/edit/run/cancel, API UI send/history, Workflow create/publish/run/cancel/retry, and Git UI status/log/commit-safe flow still need hands-on UI proof. Terminal panel opens, but terminal text entry was not automated because Windows UI automation safety rules forbid terminal interaction through UI automation.
 - Gist live sync/delete still needs a real GitHub token.
 - API live send with bearer/basic/API key/no-auth is source-verified against a loopback HTTP server; visual Tauri UI API smoke remains pending with the broader manual pass.
 - Remote SSH/SFTP transport remains a deliberate migration-pending runtime. Current code supports profiles, TCP reachability checks, renderer-compatible approval/audit records, and typed pending transfer/execution errors.

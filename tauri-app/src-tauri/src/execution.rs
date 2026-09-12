@@ -138,6 +138,22 @@ struct ScriptForExec {
     interpreter: Option<String>,
     content: Option<String>,
     timeout_ms: Option<i64>,
+    source_path: Option<String>,
+    collection_id: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct ScriptCollectionForExec {
+    folder_path: Option<String>,
+    python_toolchain_enabled: bool,
+    python_interpreter_path: Option<String>,
+}
+
+#[derive(Debug)]
+struct ScriptExecutionTarget {
+    script_path: PathBuf,
+    working_dir: PathBuf,
+    interpreter_override: Option<String>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -148,11 +164,74 @@ struct EnvVarRowForExec {
     is_secret: i64,
 }
 
+/// Linked-folder scripts execute their canonical source file inside the linked
+/// folder; managed scripts are materialized into a scratch build directory.
+async fn resolve_script_execution_target(
+    pool: &sqlx::SqlitePool,
+    script: &ScriptForExec,
+    builds_dir: &Path,
+    build_id: &str,
+) -> Result<ScriptExecutionTarget, String> {
+    if let Some(source_path) = script.source_path.as_deref() {
+        let path = PathBuf::from(source_path);
+        if !path.is_file() {
+            return Err(format!("Script file not found: {}", path.display()));
+        }
+        let mut interpreter_override = None;
+        if let Some(collection_id) = script.collection_id.as_deref() {
+            let collection: Option<ScriptCollectionForExec> = sqlx::query_as(
+                "SELECT folder_path, python_toolchain_enabled, python_interpreter_path FROM collections WHERE id = ?",
+            )
+            .bind(collection_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            if let Some(collection) = collection {
+                if let Some(folder) = collection
+                    .folder_path
+                    .as_deref()
+                    .filter(|folder| !folder.trim().is_empty())
+                {
+                    crate::commands::assert_canonical_source_inside(Path::new(folder), &path)?;
+                }
+                if collection.python_toolchain_enabled {
+                    interpreter_override = collection.python_interpreter_path;
+                }
+            }
+        }
+        let working_dir = path
+            .parent()
+            .map(|parent| parent.to_path_buf())
+            .unwrap_or_else(|| builds_dir.to_path_buf());
+        return Ok(ScriptExecutionTarget {
+            script_path: path,
+            working_dir,
+            interpreter_override,
+        });
+    }
+
+    let script_dir = builds_dir.join(build_id);
+    std::fs::create_dir_all(&script_dir).map_err(|e| e.to_string())?;
+    let script_path = script_dir.join(&script.filename);
+    std::fs::write(
+        &script_path,
+        script.content.as_deref().unwrap_or_default(),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(ScriptExecutionTarget {
+        script_path,
+        working_dir: script_dir,
+        interpreter_override: None,
+    })
+}
+
 fn resolve_interpreter(language: &str, interpreter: Option<&str>) -> (String, Vec<String>) {
     let is_windows = cfg!(target_os = "windows");
     match language {
         "python" => {
-            let cmd = if is_windows { "python" } else { "python3" }.to_string();
+            let cmd = interpreter
+                .map(str::to_string)
+                .unwrap_or_else(|| if is_windows { "python" } else { "python3" }.to_string());
             (cmd, vec!["-u".to_string()])
         }
         "node" | "javascript" | "typescript" => ("node".to_string(), vec![]),
@@ -266,7 +345,7 @@ where
 
     // Look up the script
     let script: Option<ScriptForExec> = sqlx::query_as(
-        "SELECT id, name, filename, language, interpreter, content, timeout_ms FROM scripts WHERE id = ?",
+        "SELECT id, name, filename, language, interpreter, content, timeout_ms, source_path, collection_id FROM scripts WHERE id = ?",
     )
     .bind(&script_id)
     .fetch_optional(&pool)
@@ -291,16 +370,32 @@ where
         }
     };
 
-    // Write script content to a file
-    let script_content = script.content.unwrap_or_default();
-    let script_filename = script.filename.clone();
-    let script_dir = builds_dir.join(&build_id);
-    std::fs::create_dir_all(&script_dir).map_err(|e| e.to_string())?;
-    let script_path = script_dir.join(&script_filename);
-    std::fs::write(&script_path, &script_content).map_err(|e| e.to_string())?;
+    // Resolve the execution target: linked scripts run their canonical file in
+    // the linked folder; managed scripts run from a scratch build directory.
+    let target = match resolve_script_execution_target(&pool, &script, &builds_dir, &build_id).await
+    {
+        Ok(target) => target,
+        Err(message) => {
+            let _ = sqlx::query(
+                "UPDATE builds SET status = 'failure', exit_code = 1, finished_at = CURRENT_TIMESTAMP WHERE id = ?",
+            )
+            .bind(&build_id)
+            .execute(&pool)
+            .await;
+            emit_error_event(&window, &build_id, &message);
+            emit_done_event(&window, &build_id, "failure", Some(1));
+            return Ok(RunScriptResult {
+                build_id,
+                status: "failed".to_string(),
+            });
+        }
+    };
+    let script_path = target.script_path.clone();
 
-    // Set up log file
-    let log_file_path = script_dir.join(format!("{}.log", &build_id));
+    // Set up log file in the scratch build directory (never inside a linked folder)
+    let log_dir = builds_dir.join(&build_id);
+    std::fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
+    let log_file_path = log_dir.join(format!("{}.log", &build_id));
     let log_file = log_file_path.to_string_lossy().to_string();
 
     // Store log file path in build record
@@ -310,8 +405,14 @@ where
         .execute(&pool)
         .await;
 
-    // Resolve interpreter
-    let (interpreter, base_args) = resolve_interpreter(&script.language, script.interpreter.as_deref());
+    // Resolve interpreter (collection venv interpreter wins for python toolchains)
+    let (interpreter, base_args) = resolve_interpreter(
+        &script.language,
+        target
+            .interpreter_override
+            .as_deref()
+            .or(script.interpreter.as_deref()),
+    );
     let mut args = base_args.clone();
     args.push(script_path.to_string_lossy().to_string());
 
@@ -352,7 +453,7 @@ where
     let timeout_ms = script.timeout_ms.unwrap_or(30_000);
     let mut child = match Command::new(&interpreter)
         .args(&args)
-        .current_dir(&script_dir)
+        .current_dir(&target.working_dir)
         .envs(&env)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -536,6 +637,139 @@ pub async fn cancel_run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::ensure_schema;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn test_pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("create in-memory sqlite pool");
+        ensure_schema(&pool).await.expect("ensure schema");
+        pool
+    }
+
+    fn exec_script(
+        source_path: Option<String>,
+        collection_id: Option<String>,
+        content: Option<&str>,
+    ) -> ScriptForExec {
+        ScriptForExec {
+            id: "script-1".to_string(),
+            name: "demo".to_string(),
+            filename: "demo.py".to_string(),
+            language: "python".to_string(),
+            interpreter: None,
+            content: content.map(str::to_string),
+            timeout_ms: None,
+            source_path,
+            collection_id,
+        }
+    }
+
+    #[tokio::test]
+    async fn execution_target_runs_linked_source_in_its_folder() {
+        let pool = test_pool().await;
+        let root = std::env::temp_dir().join(format!("sm-exec-target-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("linked.py");
+        std::fs::write(&source, "print('canonical')").unwrap();
+
+        let collection_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO collections (id, name, runtime_preset, python_toolchain_enabled, folder_path) VALUES (?, ?, 'general', 1, ?)",
+        )
+        .bind(&collection_id)
+        .bind("Linked")
+        .bind(root.to_string_lossy().to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let builds_dir = std::env::temp_dir().join("sm-exec-target-builds");
+        let target = resolve_script_execution_target(
+            &pool,
+            &exec_script(
+                Some(source.to_string_lossy().to_string()),
+                Some(collection_id.clone()),
+                None,
+            ),
+            &builds_dir,
+            "build-1",
+        )
+        .await
+        .expect("resolve linked target");
+
+        assert_eq!(target.script_path, source);
+        assert_eq!(target.working_dir, root);
+
+        // Python toolchain collections surface their recorded venv interpreter.
+        let venv_python = root.join(".venv").join("Scripts").join("python.exe");
+        sqlx::query("UPDATE collections SET python_interpreter_path = ? WHERE id = ?")
+            .bind(venv_python.to_string_lossy().to_string())
+            .bind(&collection_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let target = resolve_script_execution_target(
+            &pool,
+            &exec_script(
+                Some(source.to_string_lossy().to_string()),
+                Some(collection_id),
+                None,
+            ),
+            &builds_dir,
+            "build-2",
+        )
+        .await
+        .expect("resolve linked target with venv");
+        assert_eq!(target.interpreter_override.as_deref(), Some(venv_python.to_string_lossy().as_ref()));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn execution_target_materializes_managed_scripts_in_builds_dir() {
+        let pool = test_pool().await;
+        let builds_dir = std::env::temp_dir().join(format!("sm-exec-managed-{}", uuid::Uuid::new_v4()));
+
+        let target = resolve_script_execution_target(
+            &pool,
+            &exec_script(None, None, Some("print('managed')")),
+            &builds_dir,
+            "build-3",
+        )
+        .await
+        .expect("resolve managed target");
+
+        assert_eq!(target.script_path, builds_dir.join("build-3").join("demo.py"));
+        assert_eq!(target.working_dir, builds_dir.join("build-3"));
+        assert_eq!(
+            std::fs::read_to_string(&target.script_path).unwrap(),
+            "print('managed')"
+        );
+
+        let _ = std::fs::remove_dir_all(&builds_dir);
+    }
+
+    #[tokio::test]
+    async fn execution_target_rejects_missing_linked_source() {
+        let pool = test_pool().await;
+        let missing = std::env::temp_dir()
+            .join(format!("sm-exec-missing-{}", uuid::Uuid::new_v4()))
+            .join("gone.py");
+
+        let error = resolve_script_execution_target(
+            &pool,
+            &exec_script(Some(missing.to_string_lossy().to_string()), None, None),
+            Path::new("builds"),
+            "build-4",
+        )
+        .await
+        .expect_err("missing source must fail");
+        assert!(error.contains("Script file not found"));
+    }
 
     #[test]
     fn resolve_interpreter_matches_server_behavior() {

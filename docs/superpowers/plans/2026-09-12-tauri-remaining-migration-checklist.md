@@ -169,7 +169,7 @@ Already present in Tauri:
 
 Checklist:
 
-- [ ] Verify current `open_folder` fix in a visible Tauri app after restart.
+- [x] Verify current `open_folder` fix in a visible Tauri app after restart.
 - [x] Verify Python venv workspace management paths. `inspectCollectionWorkspace` and `manageCollectionPythonEnv` now exist in the Tauri bridge and native command handler.
 - [x] Decide whether Python venv management must be ported to Rust or disabled. It is ported to Rust for linked local workspaces.
 - [x] Check canonical-folder recovery methods still listed in types but absent from the bridge: `rescanCanonicalFolder`, `listCanonicalRecoveryDrafts`, `saveCanonicalRecoveryDraft`, `discardCanonicalRecoveryDraft`.
@@ -192,6 +192,8 @@ Progress notes:
 - 2026-09-12: Added Tauri-native collection workspace inspection and Python `.venv` management, bridged it through `window.scriptManagerDesktop.runtime`, and covered linked-folder status plus metadata update paths with focused Rust tests.
 - 2026-09-12: Added Tauri-native webhook token rotation, webhook secret rotation, and signature toggle commands, then covered the persisted security fields with a focused Rust test.
 - 2026-09-12: Added Tauri-native canonical folder rescan plus recovery draft save/list/discard storage and covered both with focused Rust tests.
+- 2026-09-12: Re-tested the visible Tauri `Open Local Folder` dialog after restart. The dialog opens from the Scripts sidebar, accepts a manually typed local path, and the native command now accepts the renderer's camelCase `folderPath` payload. Added focused Rust coverage for camelCase open-folder payloads.
+- 2026-09-12: Linked-folder scripts now read editor content from the canonical source file, save editor changes back to that file with containment checks, and execute the canonical file from its linked folder instead of a stale DB copy. Focused Rust tests cover read, save, path escape rejection, managed-script materialization, linked execution target resolution, and missing linked source handling.
 
 Done means:
 

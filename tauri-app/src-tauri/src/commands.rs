@@ -358,6 +358,9 @@ async fn read_script_record(pool: &SqlitePool, script_id: &str) -> Result<Script
     .await
     .map_err(|e| e.to_string())?;
     script.tags = load_script_tags(pool, &script.id).await?;
+    if script.source_path.is_some() {
+        script.content = resolve_script_source_content(pool, &script).await?;
+    }
     Ok(script)
 }
 
@@ -468,21 +471,62 @@ async fn save_script_record(
     pool: &SqlitePool,
     payload: SaveScriptPayload,
 ) -> Result<Script, String> {
-    sqlx::query(
-        "UPDATE scripts SET name = ?, content = ?, sync_to_gist = ?, language = COALESCE(?, language), interpreter = ?, parameters = COALESCE(?, parameters), timeout_ms = ?, collection_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    let existing = sqlx::query_as::<_, Script>(
+        "SELECT id, name, filename, description, language, interpreter, content, parameters, created_at, updated_at, last_run, schedule_cron, schedule_enabled, collection_id, gist_id, gist_url, sync_to_gist, timeout_ms, require_webhook_signature, webhook_secret IS NOT NULL AS webhook_secret_set, source_path, source_available, json('[]') AS tags FROM scripts WHERE id = ?",
     )
-    .bind(&payload.name)
-    .bind(&payload.content)
-    .bind(payload.sync_to_gist.unwrap_or(false))
-    .bind(payload.language)
-    .bind(payload.interpreter)
-    .bind(payload.parameters.map(|value| value.to_string()))
-    .bind(payload.timeout_ms)
-    .bind(payload.collection_id)
     .bind(&payload.id)
-    .execute(pool)
+    .fetch_one(pool)
     .await
     .map_err(|e| e.to_string())?;
+
+    if existing.source_path.is_some() {
+        // Linked-folder scripts persist canonical content to the source file;
+        // the DB content column stays NULL so the file remains the source of truth.
+        if !existing.source_available {
+            return Err("Canonical script source is unavailable".to_string());
+        }
+        let source_path = PathBuf::from(existing.source_path.as_deref().unwrap_or_default());
+        if let Some(folder) =
+            load_script_collection_folder(pool, existing.collection_id.as_deref()).await?
+        {
+            assert_canonical_source_inside(Path::new(&folder), &source_path)?;
+        }
+        if let Some(parent) = source_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        fs::write(&source_path, &payload.content).map_err(|e| e.to_string())?;
+
+        sqlx::query(
+            "UPDATE scripts SET name = ?, sync_to_gist = ?, language = COALESCE(?, language), interpreter = ?, parameters = COALESCE(?, parameters), timeout_ms = ?, collection_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        )
+        .bind(&payload.name)
+        .bind(payload.sync_to_gist.unwrap_or(false))
+        .bind(&payload.language)
+        .bind(&payload.interpreter)
+        .bind(payload.parameters.map(|value| value.to_string()))
+        .bind(payload.timeout_ms)
+        .bind(&payload.collection_id)
+        .bind(&payload.id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    } else {
+        sqlx::query(
+            "UPDATE scripts SET name = ?, content = ?, sync_to_gist = ?, language = COALESCE(?, language), interpreter = ?, parameters = COALESCE(?, parameters), timeout_ms = ?, collection_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        )
+        .bind(&payload.name)
+        .bind(&payload.content)
+        .bind(payload.sync_to_gist.unwrap_or(false))
+        .bind(&payload.language)
+        .bind(&payload.interpreter)
+        .bind(payload.parameters.map(|value| value.to_string()))
+        .bind(payload.timeout_ms)
+        .bind(&payload.collection_id)
+        .bind(&payload.id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
 
     create_version_snapshot(&pool, &payload.id, &payload.content).await?;
 
@@ -1505,6 +1549,69 @@ fn normalize_source_path_key(path: &str) -> String {
     }
 }
 
+pub(crate) fn assert_canonical_source_inside(folder: &Path, file: &Path) -> Result<(), String> {
+    let resolved_folder = fs::canonicalize(folder)
+        .map_err(|e| format!("Linked collection folder is unavailable: {e}"))?;
+    // The file may not exist yet when saving new content; canonicalize the
+    // parent instead so containment still holds for fresh files.
+    let resolved_file = fs::canonicalize(file).or_else(|_| {
+        let parent = file.parent().unwrap_or(Path::new("."));
+        let resolved_parent = fs::canonicalize(parent)?;
+        let file_name = file.file_name().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing file name")
+        })?;
+        Ok::<PathBuf, std::io::Error>(resolved_parent.join(file_name))
+    })
+    .map_err(|e| format!("Canonical script source is unavailable: {e}"))?;
+    if !resolved_file.starts_with(&resolved_folder) {
+        return Err(
+            "Canonical script source must stay inside the linked collection folder".to_string(),
+        );
+    }
+    Ok(())
+}
+
+async fn load_script_collection_folder(
+    pool: &SqlitePool,
+    collection_id: Option<&str>,
+) -> Result<Option<String>, String> {
+    let Some(collection_id) = collection_id else {
+        return Ok(None);
+    };
+    let folder: Option<Option<String>> =
+        sqlx::query_scalar("SELECT folder_path FROM collections WHERE id = ?")
+            .bind(collection_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(folder.flatten().filter(|path| !path.trim().is_empty()))
+}
+
+/// Linked-folder scripts keep their canonical content on disk; the DB content
+/// column stays NULL. Resolve the file content with a containment check
+/// against the linked collection folder, mirroring the old desktop runtime.
+async fn resolve_script_source_content(
+    pool: &SqlitePool,
+    script: &Script,
+) -> Result<Option<String>, String> {
+    let Some(source_path) = script.source_path.as_deref() else {
+        return Ok(None);
+    };
+    if !script.source_available {
+        return Err("Canonical script source is unavailable".to_string());
+    }
+    let path = PathBuf::from(source_path);
+    if !path.is_file() {
+        return Ok(Some(String::new()));
+    }
+    if let Some(folder) = load_script_collection_folder(pool, script.collection_id.as_deref()).await? {
+        assert_canonical_source_inside(Path::new(&folder), &path)?;
+    }
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| format!("Failed to read canonical script source: {e}"))
+}
+
 async fn unique_script_name(
     pool: &SqlitePool,
     base_name: &str,
@@ -2188,6 +2295,133 @@ mod tests {
         assert_eq!(result.scripts[0].name, format!("{}/hello-smoke", folder_display));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    async fn link_single_script_folder(file_content: &str) -> (SqlitePool, PathBuf, String) {
+        let pool = test_pool().await;
+        let root = std::env::temp_dir().join(format!("sm-linked-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("linked.py"), file_content).unwrap();
+
+        let result = open_folder_record(
+            &pool,
+            OpenFolderPayload {
+                folder_path: Some(root.to_string_lossy().to_string()),
+                folder_path_camel: None,
+                mode: Some("temporary".to_string()),
+                collection_name: None,
+                collection_name_camel: None,
+                runtime_preset: None,
+                runtime_preset_camel: None,
+                python_toolchain_enabled: None,
+                python_toolchain_enabled_camel: None,
+                create_venv_if_missing: None,
+                create_venv_if_missing_camel: None,
+            },
+        )
+        .await
+        .expect("open folder");
+
+        (pool, root, result.scripts[0].id.clone())
+    }
+
+    #[tokio::test]
+    async fn read_script_resolves_linked_source_content() {
+        let (pool, root, script_id) =
+            link_single_script_folder("print('from canonical file')\n").await;
+
+        let script = read_script_record(&pool, &script_id).await.expect("read script");
+        assert_eq!(script.content.as_deref(), Some("print('from canonical file')\n"));
+
+        // The DB content column stays empty: the file is the source of truth.
+        let stored: Option<Option<String>> =
+            sqlx::query_scalar("SELECT content FROM scripts WHERE id = ?")
+                .bind(&script_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored.flatten().as_deref(), Some(""));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn save_script_writes_linked_source_file() {
+        let (pool, root, script_id) = link_single_script_folder("print('v1')\n").await;
+
+        let updated = save_script_record(
+            &pool,
+            SaveScriptPayload {
+                id: script_id.clone(),
+                name: "renamed linked".to_string(),
+                content: "print('v2 from editor')\n".to_string(),
+                sync_to_gist: Some(false),
+                language: None,
+                interpreter: None,
+                parameters: None,
+                timeout_ms: None,
+                collection_id: None,
+            },
+        )
+        .await
+        .expect("save linked script");
+
+        assert_eq!(updated.content.as_deref(), Some("print('v2 from editor')\n"));
+        assert_eq!(
+            std::fs::read_to_string(root.join("linked.py")).unwrap(),
+            "print('v2 from editor')\n"
+        );
+        let stored: Option<Option<String>> =
+            sqlx::query_scalar("SELECT content FROM scripts WHERE id = ?")
+                .bind(&script_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored.flatten().as_deref(), Some(""));
+        let snapshots: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM script_versions WHERE script_id = ?")
+                .bind(&script_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(snapshots, 1);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn save_script_rejects_source_outside_linked_folder() {
+        let (pool, root, script_id) = link_single_script_folder("print('v1')\n").await;
+        let outside = std::env::temp_dir().join(format!("sm-outside-{}.py", Uuid::new_v4()));
+        std::fs::write(&outside, "print('outside')").unwrap();
+
+        sqlx::query("UPDATE scripts SET source_path = ? WHERE id = ?")
+            .bind(outside.to_string_lossy().to_string())
+            .bind(&script_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let error = save_script_record(
+            &pool,
+            SaveScriptPayload {
+                id: script_id,
+                name: "escape attempt".to_string(),
+                content: "print('nope')".to_string(),
+                sync_to_gist: None,
+                language: None,
+                interpreter: None,
+                parameters: None,
+                timeout_ms: None,
+                collection_id: None,
+            },
+        )
+        .await
+        .expect_err("save must reject source outside the linked folder");
+        assert!(error.contains("inside the linked collection folder"));
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
     }
 
     #[tokio::test]
