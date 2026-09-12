@@ -24,10 +24,11 @@ npm run db:studio                    # open Prisma Studio
 npm run db:reset:clean               # reset DB only
 npm run db:reset:clean:files         # reset DB + wipe scripts/builds dirs
 
-# Electron desktop
-npm run electron:dev   # Next.js dev server + Electron window concurrently
-npm run electron:build # full distributable (NSIS/DMG/AppImage)
-npm run electron:pack  # package without installer (for testing)
+# Tauri desktop
+cd tauri-app
+npm run tauri:dev      # Vite renderer + Tauri shell
+npm run tauri:build    # desktop bundle
+npm run build          # renderer-only production build
 ```
 
 There is no linter configured. Tests run with Vitest: `npm test` (all), `npm run test:unit`, `npm run test:integration`, or targeted via `npx vitest run <file>`. Workflow engine tests live in `tests/unit/workflow*.test.ts` and `tests/integration/workflow*.test.ts`.
@@ -46,23 +47,23 @@ The entry point is a custom HTTP server that wraps Next.js and adds four long-li
 
 ### Deployment modes
 
-The same Next.js codebase runs in three modes:
+The legacy Next.js codebase runs as the web/server product. The active desktop product is the Tauri app under `tauri-app/`, which uses Vite + React for the renderer and Rust commands for privileged local capabilities.
 
 | Mode | Entry | Auth |
 |---|---|---|
 | Web server | `server.ts` | Session cookie or Bearer API token |
 | Docker | `server.ts` via `docker-compose.yml` | Same as web |
-| Electron desktop | `electron/main.ts` spawns `server.ts` on port 3141 | Ephemeral `DESKTOP_AUTH_SECRET` cookie bypasses login |
+| Tauri desktop | `tauri-app/src-tauri/src/lib.rs` + `tauri-app/src/main.tsx` | Local desktop runtime, no embedded Next server |
 
-The Electron process stores its database and scripts in `app.getPath('userData')`. In dev mode it uses `./data/` like the web server.
+The Tauri app initializes its own SQLite store through Rust (`tauri-app/src-tauri/src/db.rs`) and exposes local features through typed `window.scriptManagerDesktop` bridge methods.
 
 ### Runtime client abstraction
 
-Several files in `src/lib/` act as routing layers that switch between the web API and Electron IPC:
+Several files in `tauri-app/src/lib/` act as routing layers for the Tauri bridge:
 
-- `src/lib/scriptsRuntimeClient.ts` — checks `window.scriptManagerDesktop?.runtime`; if present, calls Electron IPC handlers in `electron/desktopRuntime.ts` instead of HTTP.
-- `src/lib/opsRuntimeClient.ts` — same pattern for the Ops feature.
-- `src/lib/storageRuntimeClient.ts` — same pattern for cloud storage.
+- `tauri-app/src/lib/scriptsRuntimeClient.ts` — calls native script/collection/runtime commands through `window.scriptManagerDesktop.runtime`.
+- `tauri-app/src/lib/opsRuntimeClient.ts` — same pattern for the Ops feature.
+- `tauri-app/src/lib/storageRuntimeClient.ts` — same pattern for cloud storage.
 
 This is why API calls in the frontend never go directly to `fetch('/api/...')` for script operations — they always go through these clients.
 
@@ -87,7 +88,7 @@ Provider abstraction with a uniform `StorageProviderClient` interface. Supported
 
 Collections can be bound to a storage provider + remote prefix. On every script run, `syncService.ts` does a pull-on-run; on every save it does a push. A `remoteEtag` field on `Script` tracks sync state to detect conflicts.
 
-OAuth for Google Drive and OneDrive runs through `electron/oauthFlow.ts` in desktop mode (opens the system browser via Electron's `shell.openExternal`).
+In the current Tauri desktop milestone, the local filesystem provider is supported. Google Drive and OneDrive OAuth are explicitly blocked until a Tauri OAuth flow is ported; S3/GCS/WebDAV configs are saved but test/sync return typed migration-pending statuses.
 
 ### Redux state (`src/features/`)
 
@@ -111,7 +112,7 @@ Separate from the script manager: `ApiCollection`, `ApiRequest`, `ApiEnvironment
 
 ### Ops mode
 
-A separate execution path for running scripts on remote SSH servers. `ServerProfile` records store encrypted SSH credentials. `RemoteExecution` records have an approval workflow (`pending_approval` → `approved` → `running` → done). Separate IPC path in `electron/opsRuntime.ts`.
+A separate execution path for running scripts on remote SSH servers. `ServerProfile` records store SSH credentials. `RemoteExecution` records have an approval workflow (`pending_approval` -> `approved` -> `running` -> done). In Tauri this is exposed through Rust commands in `tauri-app/src-tauri/src/remote_exec.rs`.
 
 ## Environment Variables
 
@@ -120,7 +121,6 @@ A separate execution path for running scripts on remote SSH servers. `ServerProf
 | `DATABASE_URL` | `file:./data/scriptmanager.db` | Prisma connection string |
 | `PORT` | `3000` | HTTP port |
 | `SESSION_SECRET` | `scriptmanager-dev-secret-change-me` | HMAC key for session cookies |
-| `DESKTOP_AUTH_SECRET` | _(generated)_ | Electron bypass token |
 | `SCRIPTS_DIR` | `./user_scripts` | Script file storage directory |
 | `BUILDS_DIR` | `./builds` | Build log directory |
 
@@ -134,6 +134,8 @@ A separate execution path for running scripts on remote SSH servers. `ServerProf
 - `src/lib/buildSocketService.ts` — build output streaming WebSocket
 - `src/lib/storage/syncService.ts` — cloud pull-on-run / push-on-save logic
 - `src/lib/executionSafety.ts` — filename sanitization guard
-- `electron/desktopRuntime.ts` — IPC handlers for all script operations in desktop mode
-- `electron/oauthFlow.ts` — OAuth PKCE flow for cloud providers
+- `tauri-app/src-tauri/src/commands.rs` — native script, collection, env, version, folder, and webhook commands
+- `tauri-app/src-tauri/src/lib.rs` — Tauri command registration and application setup
+- `tauri-app/src/main.tsx` — desktop bridge exposed to the renderer
+- `electron/desktopRuntime.ts` — legacy behavior reference only
 - `prisma/schema.prisma` — full DB schema

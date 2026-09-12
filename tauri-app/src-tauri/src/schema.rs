@@ -65,6 +65,19 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
     ensure_column(pool, "scripts", "schedule_next_run_at", "TEXT").await?;
 
     sqlx::query(
+        "CREATE TABLE IF NOT EXISTS canonical_recovery_drafts (
+            id TEXT PRIMARY KEY,
+            script_id TEXT NOT NULL REFERENCES scripts(id) ON DELETE CASCADE,
+            source_path TEXT NOT NULL,
+            source_revision TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS tags (
             id TEXT PRIMARY KEY,
             workspace_id TEXT NOT NULL DEFAULT 'default',

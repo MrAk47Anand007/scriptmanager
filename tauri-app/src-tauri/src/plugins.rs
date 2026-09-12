@@ -229,4 +229,12 @@ mod tests {
         remove_plugin_core(&pool, &installed.id).await.unwrap();
         assert!(list_plugins_core(&pool).await.unwrap().is_empty());
     }
+
+    #[tokio::test]
+    async fn plugin_execution_host_is_disabled() {
+        assert!(run_plugin()
+            .await
+            .unwrap_err()
+            .contains("execution host is disabled"));
+    }
 }

@@ -2,7 +2,7 @@
 
 ## Deployment modes
 
-Desktop installs run the Next.js application inside Electron and keep filesystem, terminal, OAuth, secure storage, and ACP process spawning behind typed preload APIs. Self-hosted installs run the web/server surface; they can inspect durable agent history but cannot spawn a user's local ACP provider.
+Desktop installs run the Tauri application and keep filesystem, terminal, local storage, notifications, and other privileged operations behind typed bridge APIs backed by Rust commands. Self-hosted installs run the web/server surface; they can inspect durable agent history but cannot spawn a user's local ACP provider. ACP provider process execution is still migration-pending in the current Tauri milestone.
 
 Self-hosted production requires Node.js 22+, persistent storage for the SQLite database and workspace files, TLS at the reverse proxy, and unique `AUTH_SECRET`, `SESSION_SECRET`, and 32-byte `SCRIPTMANAGER_MASTER_KEY` values. Never bake these values into an image.
 

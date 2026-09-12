@@ -8,7 +8,7 @@ export const desktopCapabilities = {
   observability: true,
   approvals: true,
   secrets: true,
-  notifications: false,
+  notifications: true,
   git: true,
   ops: true,
   storage: true,

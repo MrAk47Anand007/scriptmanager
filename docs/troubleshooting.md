@@ -14,12 +14,12 @@ Inspect the run timeline and node declaration. Resume only explicitly resumable 
 
 ## Desktop agent is unavailable
 
-Confirm the app is running in Electron, the provider executable is allowlisted and installed, and the profile root exists. The web build intentionally cannot spawn local ACP providers.
+Confirm the app is running in Tauri desktop mode and that the provider is one of the allowlisted identities. In the current Tauri milestone, profile/history management and provider discovery are available, but ACP provider process execution is intentionally migration-pending. The web build cannot spawn local ACP providers.
 
 ## Plugin is unhealthy
 
-Disable it, inspect declared capabilities and signature/trust state, then run its health check. Plugins cannot receive Prisma, Electron internals, or raw vault plaintext; requests for those interfaces indicate an incompatible plugin.
+Disable it, inspect declared capabilities and signature/trust state, then run its health check. Plugins cannot receive Prisma, legacy Electron internals, unrestricted Tauri desktop APIs, or raw vault plaintext; requests for those interfaces indicate an incompatible plugin.
 
-## Windows Electron packaging fails with MSB8040
+## Windows desktop packaging fails with native rebuild errors
 
-Electron Builder rebuilds `node-pty` for Electron. Install the Visual Studio C++ Spectre-mitigated libraries for the active MSVC toolset and x64 architecture, then rerun `npm run electron:pack`. Do not publish a package produced by disabling native rebuilds; terminal ABI compatibility would be unverified.
+Older Electron packaging paths rebuilt `node-pty` and could fail with MSB8040 when Visual Studio Spectre-mitigated libraries were missing. The active desktop path is Tauri; run packaging from `tauri-app` and treat any native dependency failure as a release blocker until the matching toolchain is installed and a packaged smoke test passes.

@@ -762,6 +762,8 @@ pub(crate) struct PreparedRequest {
     pub(crate) headers: HashMap<String, String>,
     pub(crate) body: String,
     pub(crate) request_id: Option<String>,
+    pub(crate) has_pre_request_script: bool,
+    pub(crate) has_test_script: bool,
 }
 
 pub(crate) async fn prepare_request(
@@ -847,7 +849,8 @@ pub(crate) async fn prepare_request(
         }
     }
 
-    // Auth: none | bearer | basic (subset of web behavior; api keys via headers already covered).
+    // Auth: none | bearer | basic | apikey | oauth2. OAuth2 here uses a manually
+    // supplied access token; provider authorization flows remain storage/OAuth work.
     let auth_type = payload.auth_type.as_deref().unwrap_or("none");
     if auth_type == "bearer" {
         if let Some(cfg) = payload.auth_config.as_ref() {
@@ -876,6 +879,55 @@ pub(crate) async fn prepare_request(
                 .encode(format!("{}:{}", username, password));
             headers.insert("Authorization".to_string(), format!("Basic {}", encoded));
         }
+    } else if auth_type == "apikey" {
+        if let Some(cfg) = payload.auth_config.as_ref() {
+            let key_name = cfg
+                .get("keyName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let key_value = cfg
+                .get("keyValue")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let key_name = substitute_variables(key_name, &vars);
+            let key_value = substitute_variables(key_value, &vars);
+            let key_location = cfg
+                .get("keyLocation")
+                .and_then(|v| v.as_str())
+                .unwrap_or("header");
+            if !key_name.is_empty() && !key_value.is_empty() {
+                if key_location == "query" {
+                    let sep = if url.contains('?') { "&" } else { "?" };
+                    url.push_str(sep);
+                    url.push_str(&format!(
+                        "{}={}",
+                        urlencoding::encode(&key_name),
+                        urlencoding::encode(&key_value)
+                    ));
+                } else {
+                    headers.insert(key_name, key_value);
+                }
+            }
+        }
+    } else if auth_type == "oauth2" {
+        if let Some(cfg) = payload.auth_config.as_ref() {
+            let access_token = cfg
+                .get("accessToken")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let token_type = cfg
+                .get("tokenType")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Bearer");
+            let access_token = substitute_variables(access_token, &vars);
+            let token_type = substitute_variables(token_type, &vars);
+            if !access_token.is_empty() {
+                headers.insert(
+                    "Authorization".to_string(),
+                    format!("{} {}", token_type.trim(), access_token),
+                );
+            }
+        }
     }
 
     let raw_body = payload.body.clone().unwrap_or_default();
@@ -887,7 +939,46 @@ pub(crate) async fn prepare_request(
         headers,
         body,
         request_id: payload.request_id.clone(),
+        has_pre_request_script: payload
+            .pre_request_script
+            .as_deref()
+            .map(|script| !script.trim().is_empty())
+            .unwrap_or(false),
+        has_test_script: payload
+            .test_script
+            .as_deref()
+            .map(|script| !script.trim().is_empty())
+            .unwrap_or(false),
     })
+}
+
+fn migration_pending_script_results(
+    prepared: &PreparedRequest,
+) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
+    let mut console_logs = Vec::new();
+    let mut test_results = Vec::new();
+
+    if prepared.has_pre_request_script {
+        console_logs.push(serde_json::json!({
+            "phase": "pre-request",
+            "level": "warn",
+            "message": "Pre-request scripts are migration-pending in the Tauri desktop app."
+        }));
+    }
+    if prepared.has_test_script {
+        console_logs.push(serde_json::json!({
+            "phase": "test",
+            "level": "warn",
+            "message": "Post-request test scripts are migration-pending in the Tauri desktop app."
+        }));
+        test_results.push(serde_json::json!({
+            "name": "Post-request script",
+            "passed": false,
+            "message": "Post-request test scripts are migration-pending in the Tauri desktop app."
+        }));
+    }
+
+    (console_logs, test_results)
 }
 
 pub(crate) async fn execute_prepared(prepared: &PreparedRequest) -> Result<ApiSendResponse, String> {
@@ -936,6 +1027,8 @@ pub(crate) async fn execute_prepared(prepared: &PreparedRequest) -> Result<ApiSe
     // History is persisted by the caller so collection runs can skip per-request rows.
     let _ = request_headers_json;
 
+    let (console_logs, test_results) = migration_pending_script_results(prepared);
+
     Ok(ApiSendResponse {
         status,
         status_text,
@@ -946,10 +1039,8 @@ pub(crate) async fn execute_prepared(prepared: &PreparedRequest) -> Result<ApiSe
         error: None,
         truncated: false,
         cookie_jar_host: None,
-        // Pre-request / test script execution via boa is migration-pending;
-        // return stable empty results instead of pretending scripts ran.
-        console_logs: Vec::new(),
-        test_results: Vec::new(),
+        console_logs,
+        test_results,
         mapping_results: Vec::new(),
         timestamp: chrono::Utc::now().timestamp_millis(),
     })
@@ -966,6 +1057,10 @@ async fn insert_history_record(
         serde_json::to_string(&prepared.headers).unwrap_or_else(|_| "{}".to_string());
     let response_headers =
         serde_json::to_string(&response.headers).unwrap_or_else(|_| "{}".to_string());
+    let console_logs =
+        serde_json::to_string(&response.console_logs).unwrap_or_else(|_| "[]".to_string());
+    let test_results =
+        serde_json::to_string(&response.test_results).unwrap_or_else(|_| "[]".to_string());
     sqlx::query(
         "INSERT INTO api_history (id, workspace_id, request_id, method, url, request_headers,
             request_body, status, status_text, duration, size, response_headers, response_body,
@@ -985,8 +1080,8 @@ async fn insert_history_record(
     .bind(response.size)
     .bind(&response_headers)
     .bind(&response.body)
-    .bind("[]")
-    .bind("[]")
+    .bind(&console_logs)
+    .bind(&test_results)
     .bind(&now)
     .execute(pool)
     .await
@@ -1315,6 +1410,7 @@ pub async fn run_api_collection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::Row;
     use sqlx::sqlite::SqlitePoolOptions;
 
     async fn test_pool() -> SqlitePool {
@@ -1534,6 +1630,8 @@ mod tests {
             headers: HashMap::new(),
             body: String::new(),
             request_id: None,
+            has_pre_request_script: false,
+            has_test_script: false,
         };
         let response = ApiSendResponse {
             status: 200,
@@ -1568,6 +1666,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn api_history_persists_script_pending_results() {
+        let pool = test_pool().await;
+        let prepared = PreparedRequest {
+            method: "GET".to_string(),
+            url: "https://example.com".to_string(),
+            headers: HashMap::new(),
+            body: String::new(),
+            request_id: None,
+            has_pre_request_script: true,
+            has_test_script: true,
+        };
+        let (console_logs, test_results) = migration_pending_script_results(&prepared);
+        let response = ApiSendResponse {
+            status: 200,
+            status_text: "OK".to_string(),
+            headers: HashMap::new(),
+            body: "hi".to_string(),
+            duration: 5,
+            size: 2,
+            error: None,
+            truncated: false,
+            cookie_jar_host: None,
+            console_logs,
+            test_results,
+            mapping_results: Vec::new(),
+            timestamp: 0,
+        };
+        insert_history_record(&pool, &prepared, &response)
+            .await
+            .unwrap();
+        let row = sqlx::query(
+            "SELECT console_logs, test_results FROM api_history WHERE workspace_id = ?",
+        )
+        .bind(WORKSPACE_ID)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let console_logs: String = row.try_get(0).unwrap();
+        let test_results: String = row.try_get(1).unwrap();
+        assert!(console_logs.contains("pre-request"));
+        assert!(console_logs.contains("migration-pending"));
+        assert!(test_results.contains("Post-request script"));
+        assert!(test_results.contains("\"passed\":false"));
+    }
+
+    #[tokio::test]
     async fn api_prepare_rejects_missing_url() {
         let pool = test_pool().await;
         let payload = SendApiRequestPayload {
@@ -1589,6 +1733,151 @@ mod tests {
             auth_config: None,
         };
         assert!(prepare_request(&pool, &payload).await.is_err());
+    }
+
+    fn send_payload_with_auth(
+        auth_type: &str,
+        auth_config: serde_json::Value,
+    ) -> SendApiRequestPayload {
+        SendApiRequestPayload {
+            request_id: None,
+            collection_id: None,
+            environment_id: None,
+            method: Some("GET".to_string()),
+            url: Some("https://api.example.test/items".to_string()),
+            headers: None,
+            query_params: None,
+            variables: None,
+            request_options: None,
+            pre_request_script: None,
+            test_script: None,
+            response_mappings: None,
+            body_type: None,
+            body: None,
+            auth_type: Some(auth_type.to_string()),
+            auth_config: Some(auth_config),
+        }
+    }
+
+    #[tokio::test]
+    async fn api_prepare_applies_supported_auth_shapes() {
+        let pool = test_pool().await;
+
+        let bearer = prepare_request(
+            &pool,
+            &send_payload_with_auth("bearer", serde_json::json!({ "token": "t-123" })),
+        )
+        .await
+        .expect("bearer auth");
+        assert_eq!(
+            bearer.headers.get("Authorization").map(String::as_str),
+            Some("Bearer t-123")
+        );
+
+        let basic = prepare_request(
+            &pool,
+            &send_payload_with_auth(
+                "basic",
+                serde_json::json!({ "username": "alice", "password": "secret" }),
+            ),
+        )
+        .await
+        .expect("basic auth");
+        assert_eq!(
+            basic.headers.get("Authorization").map(String::as_str),
+            Some("Basic YWxpY2U6c2VjcmV0")
+        );
+
+        let api_key_header = prepare_request(
+            &pool,
+            &send_payload_with_auth(
+                "apikey",
+                serde_json::json!({
+                    "keyName": "X-Api-Key",
+                    "keyValue": "key-123",
+                    "keyLocation": "header"
+                }),
+            ),
+        )
+        .await
+        .expect("api key header");
+        assert_eq!(
+            api_key_header.headers.get("X-Api-Key").map(String::as_str),
+            Some("key-123")
+        );
+
+        let api_key_query = prepare_request(
+            &pool,
+            &send_payload_with_auth(
+                "apikey",
+                serde_json::json!({
+                    "keyName": "api_key",
+                    "keyValue": "query secret",
+                    "keyLocation": "query"
+                }),
+            ),
+        )
+        .await
+        .expect("api key query");
+        assert!(api_key_query.url.ends_with("?api_key=query%20secret"));
+
+        let oauth2 = prepare_request(
+            &pool,
+            &send_payload_with_auth(
+                "oauth2",
+                serde_json::json!({ "accessToken": "oauth-token", "tokenType": "Bearer" }),
+            ),
+        )
+        .await
+        .expect("oauth2 manual token");
+        assert_eq!(
+            oauth2.headers.get("Authorization").map(String::as_str),
+            Some("Bearer oauth-token")
+        );
+    }
+
+    #[tokio::test]
+    async fn api_prepare_substitutes_auth_variables() {
+        let pool = test_pool().await;
+        let mut payload = send_payload_with_auth(
+            "apikey",
+            serde_json::json!({
+                "keyName": "{{api_key_name}}",
+                "keyValue": "{{api_key_value}}",
+                "keyLocation": "header"
+            }),
+        );
+        payload.variables = Some(serde_json::json!([
+            { "key": "api_key_name", "value": "X-Workspace-Key", "enabled": true },
+            { "key": "api_key_value", "value": "workspace-secret", "enabled": true }
+        ]));
+
+        let prepared = prepare_request(&pool, &payload)
+            .await
+            .expect("api key variables");
+        assert_eq!(
+            prepared.headers.get("X-Workspace-Key").map(String::as_str),
+            Some("workspace-secret")
+        );
+    }
+
+    #[tokio::test]
+    async fn api_prepare_flags_script_execution_as_pending() {
+        let pool = test_pool().await;
+        let mut payload = send_payload_with_auth("none", serde_json::json!({}));
+        payload.pre_request_script = Some("console.log('before')".to_string());
+        payload.test_script = Some("test('status', () => expect(response.status).toBe(200))".to_string());
+
+        let prepared = prepare_request(&pool, &payload)
+            .await
+            .expect("prepare request");
+        assert!(prepared.has_pre_request_script);
+        assert!(prepared.has_test_script);
+
+        let (console_logs, test_results) = migration_pending_script_results(&prepared);
+        assert_eq!(console_logs.len(), 2);
+        assert_eq!(test_results.len(), 1);
+        assert_eq!(test_results[0]["passed"], false);
     }
 
     #[tokio::test]

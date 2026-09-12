@@ -19,15 +19,14 @@ declare global {
     | { type: 'error'; remoteExecId: string; message: string }
 
   interface Window {
-    __ELECTRON__?: boolean
     __TAURI__?: boolean
     scriptManagerDesktop?: {
       capabilities?: Record<string, boolean>
       selectFolder: () => Promise<string | null>
       setTitleBarTheme?: (theme: 'light' | 'dark') => Promise<boolean>
-      revealPath: (targetPath: string) => Promise<boolean>
-      copyText: (value: string) => Promise<boolean>
-      readClipboardText: () => Promise<string>
+      revealPath?: (targetPath: string) => Promise<boolean>
+      copyText?: (value: string) => Promise<boolean>
+      readClipboardText?: () => Promise<string>
       setNotificationsEnabled?: (enabled: boolean) => Promise<boolean>
       showNotification?: (payload: { title: string; body: string; deepLink?: string }) => Promise<boolean>
       onNotificationDeepLink?: (listener: (deepLink: string) => void) => () => void
@@ -125,10 +124,10 @@ declare global {
         deleteScript: (payload: { id: string }) => Promise<string>
         duplicateScript: (scriptId: string) => Promise<unknown>
         openFolder: (payload: unknown) => Promise<unknown>
-        rescanCanonicalFolder?: (collectionId: string) => Promise<unknown>
-        listCanonicalRecoveryDrafts?: (scriptId: string) => Promise<unknown[]>
-        saveCanonicalRecoveryDraft?: (payload: { scriptId: string; sourcePath: string; sourceRevision: string; content: string }) => Promise<unknown>
-        discardCanonicalRecoveryDraft?: (draftId: string) => Promise<void>
+        rescanCanonicalFolder: (collectionId: string) => Promise<unknown>
+        listCanonicalRecoveryDrafts: (scriptId: string) => Promise<unknown[]>
+        saveCanonicalRecoveryDraft: (payload: { scriptId: string; sourcePath: string; sourceRevision: string; content: string }) => Promise<unknown>
+        discardCanonicalRecoveryDraft: (draftId: string) => Promise<void>
         onCanonicalFolderChange?: (listener: (event: {
           type: 'changed' | 'deleted'
           collectionId: string

@@ -1,8 +1,10 @@
 export * from '@/lib/scriptsRuntimeClient'
 export * from '@/lib/apiRuntimeClient'
 export * from '@/lib/opsRuntimeClient'
+import { isDesktopRenderer } from '@/lib/runtime/desktopMode'
+export { isDesktopRenderer, isPackagedDesktop } from '@/lib/runtime/desktopMode'
 
-/** true when running inside the Electron shell */
+/** true when running inside the Tauri desktop shell */
 export function isDesktop(): boolean {
-  return typeof window !== 'undefined' && Boolean(window.__ELECTRON__)
+  return isDesktopRenderer()
 }

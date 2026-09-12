@@ -38,6 +38,7 @@ import { BottomDock } from '@/components/workbench/BottomDock'
 import { DesktopNotificationHost } from '@/components/notifications/DesktopNotificationHost'
 import { MigrationBoundary } from '@/components/MigrationBoundary'
 import { desktopCapabilities } from '@/lib/desktopCapabilities'
+import { isDesktopRenderer } from '@/lib/runtime/desktopMode'
 
 function dynamic(importFn: any, options: any) {
   const LazyComponent = React.lazy(() => importFn().then((comp: any) => ({ default: comp })));
@@ -180,12 +181,12 @@ export default function Home() {
   })
 
   useEffect(() => {
-    const desktop = typeof window !== 'undefined' && Boolean(window.__ELECTRON__ || window.__TAURI__)
+    const desktop = isDesktopRenderer()
     if (typeof document !== 'undefined') {
       if (desktop) {
-        document.body.dataset.electron = 'true'
+        document.body.dataset.desktopShell = 'true'
       } else {
-        delete document.body.dataset.electron
+        delete document.body.dataset.desktopShell
       }
     }
   }, [])

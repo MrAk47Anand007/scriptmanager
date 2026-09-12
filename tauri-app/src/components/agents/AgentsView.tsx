@@ -17,6 +17,7 @@ import {
   type AgentProviderDiscovery,
 } from '@/lib/agentRuntimeClient'
 import { listProjectsRuntime } from '@/lib/opsRuntimeClient'
+import { isDesktopRenderer } from '@/lib/runtime/desktopMode'
 
 type Profile = {
   id: string
@@ -57,7 +58,7 @@ const PRESET_PROMPTS = [
 ]
 
 export function AgentsView() {
-  const desktop = typeof window !== 'undefined' && Boolean(window.__ELECTRON__ && window.scriptManagerDesktop?.agents)
+  const desktop = isDesktopRenderer() && Boolean(window.scriptManagerDesktop?.agents)
   
   // Core State
   const [profiles, setProfiles] = useState<Profile[]>([])
@@ -99,7 +100,7 @@ export function AgentsView() {
     }
   }, [])
 
-  // Discover local agent providers via Electron
+  // Discover local agent providers via the desktop bridge.
   const discoverProviders = useCallback(async () => {
     if (typeof window !== 'undefined' && window.scriptManagerDesktop?.agents?.discover) {
       try {
@@ -131,7 +132,7 @@ export function AgentsView() {
     }
   }, [detail?.messages, activeTab])
 
-  // Listen to live agent events from Electron IPC
+  // Listen to live agent events when the native bridge exposes them.
   useEffect(() => {
     if (!window.scriptManagerDesktop?.agents?.onEvent) return
 

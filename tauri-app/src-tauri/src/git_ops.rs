@@ -1,6 +1,6 @@
 use git2::Repository;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
 use std::path::{Component, Path, PathBuf};
 use tauri::command;
 
@@ -500,7 +500,95 @@ fn action_args(action: &GitActionPayload) -> Result<Vec<String>, String> {
     }
 }
 
-fn policy_allows(policy: &serde_json::Value, action: &GitActionPayload) -> Result<(), String> {
+fn protected_git_reason(policy: &serde_json::Value, action: &GitActionPayload) -> Option<&'static str> {
+    let get = |key: &str, fallback: bool| {
+        policy.get(key).and_then(|v| v.as_bool()).unwrap_or(fallback)
+    };
+    if action.action == "push" && get("requireApprovalForPush", true) {
+        return Some("Push requires approval by workspace policy");
+    }
+    if action.force.unwrap_or(false) && get("requireApprovalForForce", true) {
+        return Some("Force Git operation requires approval by workspace policy");
+    }
+    if action.action == "clean" && get("requireApprovalForCleanup", true) {
+        return Some("Cleanup requires approval by workspace policy");
+    }
+    None
+}
+
+fn git_approval_resource(project_id: &str, action: &GitActionPayload) -> String {
+    let branch = action.branch.as_deref().unwrap_or("");
+    let remote = action.remote.as_deref().unwrap_or("");
+    let path = action.path.as_deref().unwrap_or("");
+    format!(
+        "project:{project_id}:action:{}:branch:{branch}:remote:{remote}:path:{path}:force:{}",
+        action.action,
+        action.force.unwrap_or(false)
+    )
+}
+
+async fn ensure_protected_git_approval(
+    pool: &SqlitePool,
+    project_id: &str,
+    root: &str,
+    action: &GitActionPayload,
+    reason: &str,
+) -> Result<(), String> {
+    let operation = format!("git.{}", action.action);
+    let resource = git_approval_resource(project_id, action);
+    let existing = sqlx::query(
+        "SELECT id, status FROM approval_requests
+         WHERE operation = ? AND resource = ?
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(&operation)
+    .bind(&resource)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if let Some(row) = existing {
+        let id: String = row.try_get(0).map_err(|e| e.to_string())?;
+        let status: String = row.try_get(1).map_err(|e| e.to_string())?;
+        return match status.as_str() {
+            "approved" => Ok(()),
+            "rejected" => Err(format!("Git {} was rejected by approval request {}", action.action, id)),
+            _ => Err(format!(
+                "This Git operation requires approval. Approval request {id} is pending."
+            )),
+        };
+    }
+
+    let preview = serde_json::json!({
+        "projectId": project_id,
+        "repositoryRoot": root,
+        "action": action.action,
+        "branch": action.branch,
+        "remote": action.remote,
+        "path": action.path,
+        "force": action.force.unwrap_or(false),
+    });
+    let request_id = crate::approvals::create_request(
+        pool,
+        &operation,
+        &resource,
+        "high",
+        reason,
+        preview,
+    )
+    .await?;
+    Err(format!(
+        "This Git operation requires approval. Approval request {request_id} is pending."
+    ))
+}
+
+async fn policy_allows(
+    pool: &SqlitePool,
+    project_id: &str,
+    root: &str,
+    policy: &serde_json::Value,
+    action: &GitActionPayload,
+) -> Result<(), String> {
     let get = |key: &str, fallback: bool| {
         policy.get(key).and_then(|v| v.as_bool()).unwrap_or(fallback)
     };
@@ -510,13 +598,8 @@ fn policy_allows(policy: &serde_json::Value, action: &GitActionPayload) -> Resul
     if action.action == "pull" && !get("allowPull", true) {
         return Err("Pull is disabled by workspace policy".to_string());
     }
-    let protected = (action.action == "push" && get("requireApprovalForPush", true))
-        || (action.force.unwrap_or(false) && get("requireApprovalForForce", true))
-        || (action.action == "clean" && get("requireApprovalForCleanup", true));
-    if protected {
-        // Approvals inbox is Task 11; surface a stable typed error instead of
-        // pretending the operation ran or crashing the workbench.
-        return Err("This Git operation requires approval, which is not migrated yet".to_string());
+    if let Some(reason) = protected_git_reason(policy, action) {
+        ensure_protected_git_approval(pool, project_id, root, action, reason).await?;
     }
     Ok(())
 }
@@ -541,7 +624,7 @@ async fn dispatch_git_action(
         resolve_repository_path(&root, p)?;
     }
     let policy = project.workspace_policy.clone();
-    policy_allows(&policy, &action)?;
+    policy_allows(pool, project_id, &root, &policy, &action).await?;
 
     let args = action_args(&action)?;
     if args.iter().any(|a| a.is_empty()) {
@@ -801,6 +884,9 @@ pub async fn git_clone_project(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::approvals::{decide_approval_core, DecideApprovalPayload};
+    use crate::schema::ensure_schema;
+    use sqlx::sqlite::SqlitePoolOptions;
 
     #[test]
     fn git_action_validation_rejects_bad_input() {
@@ -925,6 +1011,32 @@ mod tests {
         dir
     }
 
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("create in-memory sqlite pool");
+        ensure_schema(&pool).await.expect("ensure schema");
+        pool
+    }
+
+    async fn insert_git_project(pool: &SqlitePool, repository_root: &str) -> String {
+        let id = uuid::Uuid::new_v4().to_string();
+        let policy = crate::projects::default_workspace_policy().to_string();
+        sqlx::query(
+            "INSERT INTO projects (id, workspace_id, name, repository_root, workspace_policy)
+             VALUES (?, 'default', 'Git Test', ?, ?)",
+        )
+        .bind(&id)
+        .bind(repository_root)
+        .bind(policy)
+        .execute(pool)
+        .await
+        .unwrap();
+        id
+    }
+
     #[test]
     fn temp_repo_status_log_branches_round_trip() {
         let dir = init_temp_repo("roundtrip");
@@ -948,6 +1060,59 @@ mod tests {
         let files = parse_diff_output(&diff);
         assert_eq!(files.len(), 1);
         assert_eq!(files[0]["path"], serde_json::Value::String("f.txt".to_string()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn protected_git_action_creates_and_consumes_approval_request() {
+        let pool = test_pool().await;
+        let dir = init_temp_repo("approval");
+        let dir_str = dir.to_string_lossy().to_string();
+        let project_id = insert_git_project(&pool, &dir_str).await;
+
+        let action = GitActionPayload {
+            action: "push".to_string(),
+            path: None,
+            branch: None,
+            message: None,
+            remote: Some("origin".to_string()),
+            force: None,
+        };
+
+        let first = dispatch_git_action(&pool, &project_id, action.clone())
+            .await
+            .unwrap_err();
+        assert!(first.contains("requires approval"));
+
+        let request_id: String = sqlx::query_scalar(
+            "SELECT id FROM approval_requests WHERE operation = 'git.push' LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let second = dispatch_git_action(&pool, &project_id, action.clone())
+            .await
+            .unwrap_err();
+        assert!(second.contains(&request_id));
+
+        let approved = decide_approval_core(
+            &pool,
+            DecideApprovalPayload {
+                id: request_id,
+                decision: "allow_once".to_string(),
+                note: Some("ok".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(approved.status, "approved");
+
+        let after_approval = dispatch_git_action(&pool, &project_id, action)
+            .await
+            .unwrap_err();
+        assert!(!after_approval.contains("requires approval"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

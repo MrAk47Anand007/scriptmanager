@@ -5,6 +5,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
+    process::Command,
 };
 use tauri::State;
 use uuid::Uuid;
@@ -182,6 +183,68 @@ pub struct FolderInspection {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManageCollectionPythonEnvPayload {
+    collection_id: String,
+    recreate: Option<bool>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionWorkspaceStatus {
+    collection: Collection,
+    workspace_path: Option<String>,
+    has_venv: bool,
+    venv_path: Option<String>,
+    interpreter_path: Option<String>,
+    manifests: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToggleWebhookSignaturePayload {
+    script_id: String,
+    require_signature: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RegenerateWebhookResult {
+    webhook_token: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RegenerateWebhookSecretResult {
+    webhook_secret: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct ToggleWebhookSignatureResult {
+    require_webhook_signature: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    webhook_secret: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveCanonicalRecoveryDraftPayload {
+    script_id: String,
+    source_path: String,
+    source_revision: String,
+    content: String,
+}
+
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct CanonicalRecoveryDraft {
+    id: String,
+    script_id: String,
+    source_path: String,
+    source_revision: String,
+    content: String,
+    created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct AddTagPayload {
     #[serde(rename = "scriptId")]
     script_id: String,
@@ -296,6 +359,101 @@ async fn read_script_record(pool: &SqlitePool, script_id: &str) -> Result<Script
     .map_err(|e| e.to_string())?;
     script.tags = load_script_tags(pool, &script.id).await?;
     Ok(script)
+}
+
+#[tauri::command]
+pub async fn regenerate_webhook(
+    pool: State<'_, SqlitePool>,
+    script_id: String,
+) -> Result<RegenerateWebhookResult, String> {
+    regenerate_webhook_record(&pool, &script_id).await
+}
+
+async fn regenerate_webhook_record(
+    pool: &SqlitePool,
+    script_id: &str,
+) -> Result<RegenerateWebhookResult, String> {
+    read_script_record(pool, script_id).await?;
+    let token = Uuid::new_v4().simple().to_string();
+    sqlx::query("UPDATE scripts SET webhook_token = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind(&token)
+        .bind(script_id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(RegenerateWebhookResult {
+        webhook_token: token,
+    })
+}
+
+#[tauri::command]
+pub async fn regenerate_webhook_secret(
+    pool: State<'_, SqlitePool>,
+    script_id: String,
+) -> Result<RegenerateWebhookSecretResult, String> {
+    regenerate_webhook_secret_record(&pool, &script_id).await
+}
+
+async fn regenerate_webhook_secret_record(
+    pool: &SqlitePool,
+    script_id: &str,
+) -> Result<RegenerateWebhookSecretResult, String> {
+    read_script_record(pool, script_id).await?;
+    let secret = Uuid::new_v4().simple().to_string();
+    sqlx::query("UPDATE scripts SET webhook_secret = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind(&secret)
+        .bind(script_id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(RegenerateWebhookSecretResult {
+        webhook_secret: secret,
+    })
+}
+
+#[tauri::command]
+pub async fn toggle_webhook_signature(
+    pool: State<'_, SqlitePool>,
+    payload: ToggleWebhookSignaturePayload,
+) -> Result<ToggleWebhookSignatureResult, String> {
+    toggle_webhook_signature_record(&pool, payload).await
+}
+
+async fn toggle_webhook_signature_record(
+    pool: &SqlitePool,
+    payload: ToggleWebhookSignaturePayload,
+) -> Result<ToggleWebhookSignatureResult, String> {
+    read_script_record(pool, &payload.script_id).await?;
+    let existing_secret: Option<String> =
+        sqlx::query_scalar("SELECT webhook_secret FROM scripts WHERE id = ?")
+            .bind(&payload.script_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?
+            .flatten();
+    let generated_secret = if payload.require_signature && existing_secret.is_none() {
+        Some(Uuid::new_v4().simple().to_string())
+    } else {
+        None
+    };
+    let stored_secret = generated_secret.as_ref().or(existing_secret.as_ref());
+
+    sqlx::query(
+        "UPDATE scripts SET require_webhook_signature = ?, webhook_secret = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    )
+    .bind(payload.require_signature)
+    .bind(stored_secret)
+    .bind(&payload.script_id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(ToggleWebhookSignatureResult {
+        require_webhook_signature: payload.require_signature,
+        webhook_secret: generated_secret,
+    })
 }
 
 #[tauri::command]
@@ -478,6 +636,54 @@ pub async fn inspect_folder(folder_path: String) -> Result<FolderInspection, Str
     inspect_folder_record(&folder_path)
 }
 
+#[tauri::command]
+pub async fn inspect_collection_workspace(
+    pool: State<'_, SqlitePool>,
+    collection_id: String,
+) -> Result<CollectionWorkspaceStatus, String> {
+    inspect_collection_workspace_record(&pool, &collection_id).await
+}
+
+#[tauri::command]
+pub async fn manage_collection_python_env(
+    pool: State<'_, SqlitePool>,
+    payload: ManageCollectionPythonEnvPayload,
+) -> Result<CollectionWorkspaceStatus, String> {
+    manage_collection_python_env_record(&pool, payload).await
+}
+
+#[tauri::command]
+pub async fn rescan_canonical_folder(
+    pool: State<'_, SqlitePool>,
+    collection_id: String,
+) -> Result<OpenFolderResult, String> {
+    rescan_canonical_folder_record(&pool, &collection_id).await
+}
+
+#[tauri::command]
+pub async fn list_canonical_recovery_drafts(
+    pool: State<'_, SqlitePool>,
+    script_id: String,
+) -> Result<Vec<CanonicalRecoveryDraft>, String> {
+    list_canonical_recovery_drafts_record(&pool, &script_id).await
+}
+
+#[tauri::command]
+pub async fn save_canonical_recovery_draft(
+    pool: State<'_, SqlitePool>,
+    payload: SaveCanonicalRecoveryDraftPayload,
+) -> Result<CanonicalRecoveryDraft, String> {
+    save_canonical_recovery_draft_record(&pool, payload).await
+}
+
+#[tauri::command]
+pub async fn discard_canonical_recovery_draft(
+    pool: State<'_, SqlitePool>,
+    draft_id: String,
+) -> Result<(), String> {
+    discard_canonical_recovery_draft_record(&pool, &draft_id).await
+}
+
 fn inspect_folder_record(folder_path: &str) -> Result<FolderInspection, String> {
     let resolved_folder = fs::canonicalize(folder_path)
         .map_err(|_| "Selected folder does not exist".to_string())?;
@@ -519,6 +725,199 @@ fn inspect_folder_record(folder_path: &str) -> Result<FolderInspection, String> 
         interpreter_path,
         manifests,
     })
+}
+
+async fn inspect_collection_workspace_record(
+    pool: &SqlitePool,
+    collection_id: &str,
+) -> Result<CollectionWorkspaceStatus, String> {
+    let collection = read_collection_record(pool, collection_id).await?;
+    let Some(folder_path) = collection.folder_path.clone() else {
+        return Ok(CollectionWorkspaceStatus {
+            collection,
+            workspace_path: None,
+            has_venv: false,
+            venv_path: None,
+            interpreter_path: None,
+            manifests: Vec::new(),
+        });
+    };
+
+    let inspection = inspect_folder_record(&folder_path)?;
+    Ok(CollectionWorkspaceStatus {
+        collection,
+        workspace_path: Some(folder_path),
+        has_venv: inspection.has_venv,
+        venv_path: inspection.venv_path,
+        interpreter_path: inspection.interpreter_path,
+        manifests: inspection.manifests,
+    })
+}
+
+async fn manage_collection_python_env_record(
+    pool: &SqlitePool,
+    payload: ManageCollectionPythonEnvPayload,
+) -> Result<CollectionWorkspaceStatus, String> {
+    let collection = read_collection_record(pool, &payload.collection_id).await?;
+    let folder_path = collection
+        .folder_path
+        .clone()
+        .ok_or_else(|| "Collection is not linked to a local workspace".to_string())?;
+    let resolved_folder = fs::canonicalize(&folder_path)
+        .map_err(|_| "Collection workspace folder does not exist".to_string())?;
+    if !resolved_folder.is_dir() {
+        return Err("Collection workspace folder does not exist".to_string());
+    }
+
+    let venv_path = resolved_folder.join(".venv");
+    if payload.recreate.unwrap_or(false) && venv_path.exists() {
+        fs::remove_dir_all(&venv_path)
+            .map_err(|e| format!("Failed to remove existing .venv: {e}"))?;
+    }
+
+    if !venv_path.exists() {
+        create_python_venv(&resolved_folder, &venv_path)?;
+    }
+
+    let inspection = inspect_folder_record(&folder_path)?;
+    sqlx::query(
+        "UPDATE collections SET python_toolchain_enabled = 1, python_venv_path = ?, python_interpreter_path = ? WHERE id = ?",
+    )
+    .bind(&inspection.venv_path)
+    .bind(&inspection.interpreter_path)
+    .bind(&payload.collection_id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    inspect_collection_workspace_record(pool, &payload.collection_id).await
+}
+
+async fn rescan_canonical_folder_record(
+    pool: &SqlitePool,
+    collection_id: &str,
+) -> Result<OpenFolderResult, String> {
+    let collection = read_collection_record(pool, collection_id).await?;
+    let folder_path = collection
+        .folder_path
+        .clone()
+        .ok_or_else(|| "Collection is not linked to a canonical folder".to_string())?;
+
+    open_folder_record(
+        pool,
+        OpenFolderPayload {
+            folder_path,
+            folder_path_camel: None,
+            mode: Some("collection".to_string()),
+            collection_name: Some(collection.name),
+            collection_name_camel: None,
+            runtime_preset: Some(collection.runtime_preset),
+            runtime_preset_camel: None,
+            python_toolchain_enabled: Some(collection.python_toolchain_enabled),
+            python_toolchain_enabled_camel: None,
+            create_venv_if_missing: None,
+            create_venv_if_missing_camel: None,
+        },
+    )
+    .await
+}
+
+async fn list_canonical_recovery_drafts_record(
+    pool: &SqlitePool,
+    script_id: &str,
+) -> Result<Vec<CanonicalRecoveryDraft>, String> {
+    sqlx::query_as::<_, CanonicalRecoveryDraft>(
+        "SELECT id, script_id, source_path, source_revision, content, created_at FROM canonical_recovery_drafts WHERE script_id = ? ORDER BY created_at DESC",
+    )
+    .bind(script_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+async fn save_canonical_recovery_draft_record(
+    pool: &SqlitePool,
+    payload: SaveCanonicalRecoveryDraftPayload,
+) -> Result<CanonicalRecoveryDraft, String> {
+    let script = read_script_record(pool, &payload.script_id).await?;
+    let Some(source_path) = script.source_path else {
+        return Err("Script is not linked to a canonical source file".to_string());
+    };
+    if normalize_source_path_key(&source_path) != normalize_source_path_key(&payload.source_path) {
+        return Err("Recovery draft canonical source path does not match the linked script".to_string());
+    }
+
+    let id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO canonical_recovery_drafts (id, script_id, source_path, source_revision, content) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(&payload.script_id)
+    .bind(&payload.source_path)
+    .bind(&payload.source_revision)
+    .bind(&payload.content)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    sqlx::query_as::<_, CanonicalRecoveryDraft>(
+        "SELECT id, script_id, source_path, source_revision, content, created_at FROM canonical_recovery_drafts WHERE id = ?",
+    )
+    .bind(&id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+async fn discard_canonical_recovery_draft_record(
+    pool: &SqlitePool,
+    draft_id: &str,
+) -> Result<(), String> {
+    sqlx::query("DELETE FROM canonical_recovery_drafts WHERE id = ?")
+        .bind(draft_id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn create_python_venv(workspace_path: &Path, venv_path: &Path) -> Result<(), String> {
+    let candidates: &[(&str, &[&str])] = if cfg!(windows) {
+        &[("py", &["-3", "-m", "venv"]), ("python", &["-m", "venv"])]
+    } else {
+        &[("python3", &["-m", "venv"]), ("python", &["-m", "venv"])]
+    };
+
+    let mut failures = Vec::new();
+    for (program, args) in candidates {
+        let output = Command::new(program)
+            .args(*args)
+            .arg(venv_path)
+            .current_dir(workspace_path)
+            .output();
+
+        match output {
+            Ok(output) if output.status.success() => return Ok(()),
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let details = if !stderr.is_empty() {
+                    stderr
+                } else if !stdout.is_empty() {
+                    stdout
+                } else {
+                    format!("exit code {:?}", output.status.code())
+                };
+                failures.push(format!("{program}: {details}"));
+            }
+            Err(error) => failures.push(format!("{program}: {error}")),
+        }
+    }
+
+    Err(format!(
+        "Failed to create Python virtual environment. Install Python 3 and ensure it is on PATH. Attempts: {}",
+        failures.join("; ")
+    ))
 }
 
 async fn open_folder_record(
@@ -1570,6 +1969,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn webhook_controls_update_script_security_fields() {
+        let pool = test_pool().await;
+        let script = create_script_record(
+            &pool,
+            CreateScriptPayload {
+                name: "Webhooked".to_string(),
+                description: None,
+                sync_to_gist: None,
+                sync_to_gist_camel: None,
+                content: Some("print('webhook')".to_string()),
+                language: Some("python".to_string()),
+                interpreter: None,
+                parameters: None,
+                collection_id: None,
+                collection_id_camel: None,
+            },
+        )
+        .await
+        .expect("create script");
+
+        let token = regenerate_webhook_record(&pool, &script.id)
+            .await
+            .expect("regenerate webhook")
+            .webhook_token;
+        assert_eq!(token.len(), 32);
+
+        let stored_token: Option<String> =
+            sqlx::query_scalar("SELECT webhook_token FROM scripts WHERE id = ?")
+                .bind(&script.id)
+                .fetch_one(&pool)
+                .await
+                .expect("read webhook token");
+        assert_eq!(stored_token.as_deref(), Some(token.as_str()));
+
+        let secret = regenerate_webhook_secret_record(&pool, &script.id)
+            .await
+            .expect("regenerate webhook secret")
+            .webhook_secret;
+        let toggle = toggle_webhook_signature_record(
+            &pool,
+            ToggleWebhookSignaturePayload {
+                script_id: script.id.clone(),
+                require_signature: true,
+            },
+        )
+        .await
+        .expect("toggle signature");
+        assert!(toggle.require_webhook_signature);
+        assert_eq!(toggle.webhook_secret, None);
+
+        let read_back = read_script_record(&pool, &script.id)
+            .await
+            .expect("read script");
+        assert!(read_back.require_webhook_signature);
+        assert!(read_back.webhook_secret_set);
+
+        let stored_secret: Option<String> =
+            sqlx::query_scalar("SELECT webhook_secret FROM scripts WHERE id = ?")
+                .bind(&script.id)
+                .fetch_one(&pool)
+                .await
+                .expect("read webhook secret");
+        assert_eq!(stored_secret.as_deref(), Some(secret.as_str()));
+    }
+
+    #[tokio::test]
     async fn collection_crud_and_move_script_round_trip() {
         let pool = test_pool().await;
 
@@ -1683,6 +2148,197 @@ mod tests {
         let stored = load_scripts(&pool).await.unwrap();
         assert_eq!(stored.len(), 2);
         assert!(stored.iter().all(|script| script.source_path.is_some()));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn inspect_collection_workspace_returns_linked_folder_state() {
+        let pool = test_pool().await;
+        let root = std::env::temp_dir().join(format!("sm-collection-workspace-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(root.join(".venv").join("Scripts")).unwrap();
+        std::fs::write(root.join(".venv").join("Scripts").join("python.exe"), "").unwrap();
+        std::fs::write(root.join("main.py"), "print('ok')").unwrap();
+        std::fs::write(root.join("pyproject.toml"), "[project]\nname = \"demo\"").unwrap();
+
+        let result = open_folder_record(
+            &pool,
+            OpenFolderPayload {
+                folder_path: root.to_string_lossy().to_string(),
+                folder_path_camel: None,
+                mode: Some("collection".to_string()),
+                collection_name: Some("Workspace".to_string()),
+                collection_name_camel: None,
+                runtime_preset: Some("python".to_string()),
+                runtime_preset_camel: None,
+                python_toolchain_enabled: Some(true),
+                python_toolchain_enabled_camel: None,
+                create_venv_if_missing: None,
+                create_venv_if_missing_camel: None,
+            },
+        )
+        .await
+        .expect("open folder");
+
+        let status = inspect_collection_workspace_record(&pool, &result.collection.id)
+            .await
+            .expect("inspect collection workspace");
+
+        assert_eq!(status.collection.id, result.collection.id);
+        assert_eq!(status.workspace_path.as_deref(), Some(root.to_string_lossy().as_ref()));
+        assert!(status.has_venv);
+        assert_eq!(status.manifests, vec!["pyproject.toml".to_string()]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn canonical_recovery_drafts_save_list_and_discard() {
+        let pool = test_pool().await;
+        let root = std::env::temp_dir().join(format!("sm-canonical-drafts-{}", Uuid::new_v4()));
+        let source = root.join("main.py");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&source, "print('canonical')").unwrap();
+
+        let result = open_folder_record(
+            &pool,
+            OpenFolderPayload {
+                folder_path: root.to_string_lossy().to_string(),
+                folder_path_camel: None,
+                mode: Some("collection".to_string()),
+                collection_name: Some("Canonical".to_string()),
+                collection_name_camel: None,
+                runtime_preset: Some("python".to_string()),
+                runtime_preset_camel: None,
+                python_toolchain_enabled: Some(false),
+                python_toolchain_enabled_camel: None,
+                create_venv_if_missing: None,
+                create_venv_if_missing_camel: None,
+            },
+        )
+        .await
+        .expect("open folder");
+        let script_id = result.scripts[0].id.clone();
+
+        let saved = save_canonical_recovery_draft_record(
+            &pool,
+            SaveCanonicalRecoveryDraftPayload {
+                script_id: script_id.clone(),
+                source_path: source.to_string_lossy().to_string(),
+                source_revision: "rev-1".to_string(),
+                content: "print('unsaved')".to_string(),
+            },
+        )
+        .await
+        .expect("save draft");
+        assert_eq!(saved.script_id, script_id);
+        assert_eq!(saved.content, "print('unsaved')");
+
+        let drafts = list_canonical_recovery_drafts_record(&pool, &saved.script_id)
+            .await
+            .expect("list drafts");
+        assert_eq!(drafts.len(), 1);
+        assert_eq!(drafts[0].id, saved.id);
+
+        discard_canonical_recovery_draft_record(&pool, &saved.id)
+            .await
+            .expect("discard draft");
+        assert!(list_canonical_recovery_drafts_record(&pool, &saved.script_id)
+            .await
+            .expect("list drafts")
+            .is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn rescan_canonical_folder_refreshes_linked_scripts() {
+        let pool = test_pool().await;
+        let root = std::env::temp_dir().join(format!("sm-rescan-folder-{}", Uuid::new_v4()));
+        let first = root.join("first.py");
+        let second = root.join("second.py");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&first, "print('first')").unwrap();
+
+        let result = open_folder_record(
+            &pool,
+            OpenFolderPayload {
+                folder_path: root.to_string_lossy().to_string(),
+                folder_path_camel: None,
+                mode: Some("collection".to_string()),
+                collection_name: Some("Rescan".to_string()),
+                collection_name_camel: None,
+                runtime_preset: Some("python".to_string()),
+                runtime_preset_camel: None,
+                python_toolchain_enabled: Some(false),
+                python_toolchain_enabled_camel: None,
+                create_venv_if_missing: None,
+                create_venv_if_missing_camel: None,
+            },
+        )
+        .await
+        .expect("open folder");
+        std::fs::remove_file(&first).unwrap();
+        std::fs::write(&second, "print('second')").unwrap();
+
+        let rescanned = rescan_canonical_folder_record(&pool, &result.collection.id)
+            .await
+            .expect("rescan folder");
+        assert_eq!(rescanned.imported_count, 1);
+        assert_eq!(rescanned.scripts.len(), 1);
+
+        let stored = load_scripts(&pool).await.expect("load scripts");
+        assert_eq!(stored.len(), 1);
+        assert!(stored[0]
+            .source_path
+            .as_deref()
+            .expect("source path")
+            .ends_with("second.py"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn manage_collection_python_env_updates_existing_venv_metadata() {
+        let pool = test_pool().await;
+        let root = std::env::temp_dir().join(format!("sm-manage-venv-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(root.join(".venv").join("Scripts")).unwrap();
+        std::fs::write(root.join(".venv").join("Scripts").join("python.exe"), "").unwrap();
+        std::fs::write(root.join("main.py"), "print('ok')").unwrap();
+
+        let result = open_folder_record(
+            &pool,
+            OpenFolderPayload {
+                folder_path: root.to_string_lossy().to_string(),
+                folder_path_camel: None,
+                mode: Some("collection".to_string()),
+                collection_name: Some("Python Workspace".to_string()),
+                collection_name_camel: None,
+                runtime_preset: Some("python".to_string()),
+                runtime_preset_camel: None,
+                python_toolchain_enabled: Some(false),
+                python_toolchain_enabled_camel: None,
+                create_venv_if_missing: None,
+                create_venv_if_missing_camel: None,
+            },
+        )
+        .await
+        .expect("open folder");
+
+        let status = manage_collection_python_env_record(
+            &pool,
+            ManageCollectionPythonEnvPayload {
+                collection_id: result.collection.id,
+                recreate: Some(false),
+            },
+        )
+        .await
+        .expect("manage python env");
+
+        assert!(status.has_venv);
+        assert!(status.collection.python_toolchain_enabled);
+        assert_eq!(status.collection.python_venv_path, status.venv_path);
+        assert_eq!(status.collection.python_interpreter_path, status.interpreter_path);
 
         let _ = std::fs::remove_dir_all(&root);
     }

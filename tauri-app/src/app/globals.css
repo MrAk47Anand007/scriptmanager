@@ -145,7 +145,7 @@
     letter-spacing: 0;
   }
 
-  body[data-electron='true'] {
+  body[data-desktop-shell='true'] {
     background:
       linear-gradient(180deg, rgba(11, 16, 32, 0.98) 0%, rgba(7, 10, 20, 1) 100%);
   }

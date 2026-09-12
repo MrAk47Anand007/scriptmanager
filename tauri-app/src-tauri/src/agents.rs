@@ -273,6 +273,11 @@ pub async fn resume_agent_run() -> Result<Value, String> {
     Err("Agent provider execution is migration-pending in the Tauri desktop app".to_string())
 }
 
+#[tauri::command]
+pub async fn terminate_agent_run() -> Result<Value, String> {
+    Err("Agent provider execution is migration-pending in the Tauri desktop app".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,5 +353,25 @@ mod tests {
     #[test]
     fn discovery_ignores_unknown_providers() {
         assert!(discover_provider_on_path("arbitrary-binary").is_none());
+    }
+
+    #[tokio::test]
+    async fn agent_execution_commands_return_pending_errors() {
+        assert!(run_agent()
+            .await
+            .unwrap_err()
+            .contains("migration-pending"));
+        assert!(interrupt_agent_run()
+            .await
+            .unwrap_err()
+            .contains("migration-pending"));
+        assert!(resume_agent_run()
+            .await
+            .unwrap_err()
+            .contains("migration-pending"));
+        assert!(terminate_agent_run()
+            .await
+            .unwrap_err()
+            .contains("migration-pending"));
     }
 }

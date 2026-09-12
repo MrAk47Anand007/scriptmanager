@@ -7,6 +7,9 @@ import { desktopCapabilities } from '@/lib/desktopCapabilities'
 import { invokeTauri } from '@/lib/tauriInvoke'
 
 type DesktopListener<T> = (event: T) => void
+type NotificationDeepLinkListener = (deepLink: string) => void
+
+const notificationDeepLinkListeners = new Set<NotificationDeepLinkListener>()
 
 function subscribe<T>(eventName: string, listener: DesktopListener<T>) {
   let active = true
@@ -29,15 +32,51 @@ function subscribe<T>(eventName: string, listener: DesktopListener<T>) {
 }
 
 window.__TAURI__ = true
-window.__ELECTRON__ = true
 window.scriptManagerDesktop = {
   capabilities: desktopCapabilities,
   selectFolder: async () => { const { open } = await import('@tauri-apps/plugin-dialog'); const picked = await open({ directory: true, multiple: false }); return typeof picked === 'string' ? picked : null; },
+  revealPath: (targetPath: string) => invokeTauri('reveal_path', { path: targetPath }),
+  copyText: async (value: string) => {
+    await navigator.clipboard.writeText(value)
+    return true
+  },
+  readClipboardText: () => navigator.clipboard.readText(),
+  setNotificationsEnabled: async (enabled: boolean) => {
+    localStorage.setItem('scriptManager_notifications', String(enabled))
+    if (enabled && 'Notification' in window && Notification.permission === 'default') {
+      await Notification.requestPermission()
+    }
+    return true
+  },
+  showNotification: async ({ title, body, deepLink }: { title: string; body: string; deepLink?: string }) => {
+    if (!('Notification' in window)) return false
+    if (Notification.permission === 'default') {
+      await Notification.requestPermission()
+    }
+    if (Notification.permission !== 'granted') return false
+    const notification = new Notification(title, { body })
+    if (deepLink) {
+      notification.onclick = () => {
+        notificationDeepLinkListeners.forEach((listener) => listener(deepLink))
+        window.focus()
+      }
+    }
+    return true
+  },
+  onNotificationDeepLink: (listener: NotificationDeepLinkListener) => {
+    notificationDeepLinkListeners.add(listener)
+    return () => notificationDeepLinkListeners.delete(listener)
+  },
   runtime: {
     getBootstrapState: () => invokeTauri('get_bootstrap_state'),
     listScripts: () => invokeTauri('get_scripts'),
     createScript: (payload: unknown) => invokeTauri('create_script', { payload }),
     readScript: (scriptId: string) => invokeTauri('read_script', { scriptId }),
+    regenerateWebhook: (scriptId: string) => invokeTauri('regenerate_webhook', { scriptId }),
+    regenerateWebhookSecret: (scriptId: string) =>
+      invokeTauri('regenerate_webhook_secret', { scriptId }),
+    toggleWebhookSignature: (payload: { scriptId: string; requireSignature: boolean }) =>
+      invokeTauri('toggle_webhook_signature', { payload }),
     saveScript: (payload: unknown) => invokeTauri('save_script', { payload }),
     deleteScript: (payload: { id: string }) => invokeTauri('delete_script', { payload }),
     duplicateScript: (scriptId: string) => invokeTauri('duplicate_script', { scriptId }),
@@ -45,6 +84,18 @@ window.scriptManagerDesktop = {
     createCollection: (payload: unknown) => invokeTauri('create_collection', { payload }),
     openFolder: (payload: unknown) => invokeTauri('open_folder', { payload }),
     inspectFolder: (folderPath: string) => invokeTauri('inspect_folder', { folderPath }),
+    inspectCollectionWorkspace: (collectionId: string) =>
+      invokeTauri('inspect_collection_workspace', { collectionId }),
+    manageCollectionPythonEnv: (payload: { collectionId: string; recreate?: boolean }) =>
+      invokeTauri('manage_collection_python_env', { payload }),
+    rescanCanonicalFolder: (collectionId: string) =>
+      invokeTauri('rescan_canonical_folder', { collectionId }),
+    listCanonicalRecoveryDrafts: (scriptId: string) =>
+      invokeTauri('list_canonical_recovery_drafts', { scriptId }),
+    saveCanonicalRecoveryDraft: (payload: { scriptId: string; sourcePath: string; sourceRevision: string; content: string }) =>
+      invokeTauri('save_canonical_recovery_draft', { payload }),
+    discardCanonicalRecoveryDraft: (draftId: string) =>
+      invokeTauri('discard_canonical_recovery_draft', { draftId }),
     updateCollection: (payload: unknown) => invokeTauri('update_collection', { payload }),
     deleteCollection: (payload: { id: string; hardDelete?: boolean }) => invokeTauri('delete_collection', { payload }),
     moveScript: (payload: { scriptId: string; collectionId: string | null }) =>
@@ -139,6 +190,9 @@ window.scriptManagerDesktop = {
       run: (payload: unknown) => invokeTauri('run_agent', { payload: payload as Record<string, unknown> }),
       interruptRun: (id: string) => invokeTauri('interrupt_agent_run', { id }),
       resumeRun: (payload: unknown) => invokeTauri('resume_agent_run', { payload: payload as Record<string, unknown> }),
+      terminateRun: (runId: string) => invokeTauri('terminate_agent_run', { runId }),
+      onEvent: (listener: DesktopListener<{ sessionId: string; event: unknown }>) =>
+        subscribe('agent-event', listener),
     },
     listPlugins: () => invokeTauri('list_plugins'),
     updatePlugin: (payload: { id: string; action: string; settings?: unknown }) =>

@@ -3,15 +3,15 @@
 import { useEffect } from 'react'
 import { listNotificationDeliveriesRuntime } from '@/lib/notificationsRuntimeClient'
 import { advanceDesktopNotificationCursor, parseDesktopNotificationPayload } from '@/lib/desktopNotificationPoller'
+import { isDesktopRenderer } from '@/lib/runtime/desktopMode'
 
 const CURSOR_KEY = 'scriptManager_desktop_notification_cursor'
 const POLL_INTERVAL_MS = 3_000
 
 export function DesktopNotificationHost() {
   useEffect(() => {
-    const desktop = window.__ELECTRON__ === true
     const showNotification = window.scriptManagerDesktop?.showNotification
-    if (!desktop || !showNotification) return undefined
+    if (!isDesktopRenderer() || !showNotification) return undefined
 
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | undefined

@@ -40,6 +40,7 @@ export function SourceControlWorkbench() {
   const [isCloning, setIsCloning] = useState(false)
   const [cloneError, setCloneError] = useState<string | null>(null)
   const [cloneNotice, setCloneNotice] = useState<string | null>(null)
+  const [approvalPendingNotice, setApprovalPendingNotice] = useState<string | null>(null)
 
   useEffect(() => {
     void dispatch(fetchProjects())
@@ -48,9 +49,15 @@ export function SourceControlWorkbench() {
   const run = async (action: GitAction) => {
     if (!git.projectId) return null
     try {
+      setApprovalPendingNotice(null)
       return await dispatch(runGitAction({ projectId: git.projectId, action })).unwrap()
     } catch (error) {
-      toast.error(getOperationError(error, `Git ${action.action} failed`))
+      const message = getOperationError(error, `Git ${action.action} failed`)
+      if (message.includes('requires approval')) {
+        setApprovalPendingNotice(`${action.action} is waiting for approval. Review the pending request in the Approvals inbox, then retry the Git action.`)
+      } else {
+        toast.error(message)
+      }
       return null
     }
   }
@@ -701,6 +708,12 @@ export function SourceControlWorkbench() {
           <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2">
             <Sparkles className="h-3.5 w-3.5 shrink-0" />
             <span>Push paused for approval · ID: {git.approvalId}</span>
+          </div>
+        )}
+        {approvalPendingNotice && (
+          <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            <span>{approvalPendingNotice}</span>
           </div>
         )}
 

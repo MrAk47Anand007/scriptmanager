@@ -673,8 +673,8 @@ export const CloudStorageSection = () => {
                                                     {hasDefaultClient
                                                         ? 'Leave blank to use the built-in app credentials.'
                                                         : form.type === 'gdrive'
-                                                            ? 'This build has no built-in Google credentials. Create a "Desktop app" OAuth client in Google Cloud Console (Drive API enabled) and paste its ID here, or set GDRIVE_CLIENT_ID in electron/oauthDefaults.ts.'
-                                                            : 'This build has no built-in Microsoft credentials. Register an app in Microsoft Entra ("Mobile and desktop applications" + http://127.0.0.1 redirect) and paste its ID here, or set ONEDRIVE_CLIENT_ID in electron/oauthDefaults.ts.'}
+                                                            ? 'This Tauri build has no built-in Google credentials. Create a "Desktop app" OAuth client in Google Cloud Console with Drive API enabled, then paste its ID here.'
+                                                            : 'This Tauri build has no built-in Microsoft credentials. Register an app in Microsoft Entra for mobile and desktop applications with a http://127.0.0.1 redirect, then paste its ID here.'}
                                                 </p>
                                             </div>
                                         </details>
