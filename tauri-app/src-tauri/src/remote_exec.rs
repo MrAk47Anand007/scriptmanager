@@ -518,6 +518,34 @@ mod tests {
         port
     }
 
+    async fn spawn_ssh_identification_server() -> (u16, tokio::sync::oneshot::Receiver<String>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test listener");
+        let port = listener.local_addr().unwrap().port();
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let _ = socket.write_all(b"SSH-2.0-scriptmanager-test\r\n").await;
+                let mut client_identification = Vec::new();
+                let mut byte = [0u8; 1];
+                while client_identification.len() < 255 {
+                    match socket.read(&mut byte).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {
+                            client_identification.push(byte[0]);
+                            if byte[0] == b'\n' {
+                                break;
+                            }
+                        }
+                    }
+                }
+                let _ = sender.send(String::from_utf8_lossy(&client_identification).trim().to_string());
+            }
+        });
+        (port, receiver)
+    }
+
     #[tokio::test]
     async fn profile_crud_round_trip() {
         let pool = test_pool().await;
@@ -632,6 +660,28 @@ mod tests {
         assert_eq!(result["transport"], "ssh");
         assert!(result["banner"].as_str().unwrap().starts_with("SSH-"));
         assert!(result["message"].as_str().unwrap().contains("127.0.0.1"));
+    }
+
+    #[tokio::test]
+    async fn connection_test_exchanges_ssh_identification_with_disposable_server() {
+        let pool = test_pool().await;
+        let (port, client_identification) = spawn_ssh_identification_server().await;
+        let mut payload = payload("web-identification");
+        payload.port = Some(port as i64);
+        let profile = save_profile_core(&pool, payload).await.unwrap();
+
+        let result = test_connection_core(&pool, &profile.id).await.unwrap();
+        let client_identification = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client_identification,
+        )
+        .await
+        .expect("server receives client identification")
+        .expect("client identification sent");
+
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["banner"], "SSH-2.0-scriptmanager-test");
+        assert_eq!(client_identification, "SSH-2.0-ScriptManager_Tauri");
     }
 
     #[tokio::test]
