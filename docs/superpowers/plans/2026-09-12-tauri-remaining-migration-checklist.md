@@ -492,9 +492,9 @@ Done means:
 
 ### 14. Agents And ACP Providers
 
-Status: profile/history migrated; provider execution pending.
+Status: profile/history migrated; Codex process launch contract started; full ACP control pending.
 
-Current Tauri code supports profiles/runs/history and provider discovery. Run attempts persist a failed migration-pending record and control attempts append durable migration-pending messages to the targeted run. Event streaming is exposed as a Tauri event subscription, but real provider execution/control does not stream ACP events until process control is ported.
+Current Tauri code supports profiles/runs/history and provider discovery. Codex run attempts now use a fixed allowlisted `codex exec --json --ephemeral --skip-git-repo-check --cd <cwd> <prompt>` process shape and persist stdout/stderr plus the terminal status. Claude launch and long-lived control still append durable migration-pending messages. Event streaming is exposed as a Tauri event subscription, but live ACP permission/event streaming still needs process-session control.
 
 Checklist:
 
@@ -519,6 +519,15 @@ Progress notes:
 - 2026-09-12: Confirmed `AgentsView` requires the desktop bridge for launch, follow-up, interrupt, and resume actions, leaving non-desktop mode as inspect-only.
 - 2026-09-12: Native agent launch attempts now persist a failed migration-pending run with user/system messages and emit an `agent-event` so the renderer can refresh durable history. Real provider process launch/run/interrupt/resume/terminate remains pending.
 - 2026-09-12: Native interrupt/resume/terminate attempts now validate the run id and append migration-pending system messages; resume also persists the follow-up prompt as a user message. Real provider process control remains pending.
+- 2026-09-12: Added a native Codex process-launch contract using only the fixed allowlisted `codex` executable identity and argument arrays; provider stdout/stderr are persisted as run messages and exit code maps to `succeeded`/`failed`. Focused tests cover the argument shape and final-state persistence without invoking the live CLI.
+
+Still remaining for ACP/Agents:
+
+- Wire Claude to a confirmed non-interactive/ACP-compatible provider command with the same fixed-identity, argument-array safety model.
+- Replace one-shot Codex process completion with a live session registry so interrupt, resume, and terminate can target running provider processes instead of only appending durable pending messages.
+- Parse provider JSONL/ACP events into structured messages, artifacts, usage, permission requests, and terminal run state instead of storing raw stdout/stderr blobs.
+- Reconnect provider permission requests to the native approvals pipeline and persist allow/deny decisions with replayable run history.
+- Add live provider smoke evidence after credentials/session state are available; current tests prove command shape and persistence only.
 
 Done means:
 

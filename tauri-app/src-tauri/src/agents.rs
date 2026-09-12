@@ -1,16 +1,24 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{Row, SqlitePool};
+use std::process::Command;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 /// Agent support decision (recorded in the migration completion plan, S9.1):
-/// profiles and run history are fully persisted. Provider **execution**
-/// (run/interrupt/resume) stays feature-gated behind a typed pending error
-/// until ACP provider process control is ported; discovery only ever checks
+/// profiles and run history are fully persisted. Codex launch uses a fixed,
+/// allowlisted non-interactive CLI shape. Long-lived process control and
+/// Claude execution remain explicit pending work; discovery only ever checks
 /// a fixed allowlist of executable names, never renderer-supplied commands.
 
 const ALLOWED_PROVIDERS: [&str; 2] = ["codex", "claude"];
+
+#[derive(Debug)]
+struct ProviderProcessResult {
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+}
 
 #[derive(Debug, Serialize)]
 pub struct AgentProfileView {
@@ -244,6 +252,91 @@ async fn insert_agent_message(
     Ok(())
 }
 
+fn provider_process_args(provider: &str, prompt: &str, cwd: &str) -> Result<Vec<String>, String> {
+    match provider {
+        "codex" => Ok(vec![
+            "exec".to_string(),
+            "--json".to_string(),
+            "--ephemeral".to_string(),
+            "--skip-git-repo-check".to_string(),
+            "--cd".to_string(),
+            cwd.to_string(),
+            prompt.to_string(),
+        ]),
+        "claude" => Err("Claude ACP provider process launch is not migrated yet".to_string()),
+        other => Err(format!("Unsupported agent provider: {other}")),
+    }
+}
+
+fn run_provider_process(provider: &str, prompt: &str, cwd: &str) -> Result<ProviderProcessResult, String> {
+    let executable = discover_provider_on_path(provider)
+        .ok_or_else(|| format!("'{provider}' executable not found on PATH"))?;
+    let args = provider_process_args(provider, prompt, cwd)?;
+    let output = Command::new(&executable)
+        .args(&args)
+        .current_dir(cwd)
+        .output()
+        .map_err(|error| format!("Failed to launch {provider} provider process: {error}"))?;
+    Ok(ProviderProcessResult {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        exit_code: output.status.code(),
+    })
+}
+
+async fn persist_provider_process_result(
+    pool: &SqlitePool,
+    run_id: &str,
+    result: ProviderProcessResult,
+) -> Result<String, String> {
+    let status = if result.exit_code == Some(0) { "succeeded" } else { "failed" };
+    if !result.stdout.trim().is_empty() {
+        insert_agent_message(
+            pool,
+            run_id,
+            "assistant",
+            result.stdout.trim(),
+            serde_json::json!({
+                "id": Uuid::new_v4().to_string(),
+                "role": "assistant",
+                "content": result.stdout.trim(),
+                "stream": "stdout",
+                "exitCode": result.exit_code,
+            }),
+        )
+        .await?;
+    }
+    if !result.stderr.trim().is_empty() || status == "failed" {
+        let content = if result.stderr.trim().is_empty() {
+            format!("Agent provider process exited with {:?}", result.exit_code)
+        } else {
+            result.stderr.trim().to_string()
+        };
+        insert_agent_message(
+            pool,
+            run_id,
+            "system",
+            &content,
+            serde_json::json!({
+                "id": Uuid::new_v4().to_string(),
+                "role": "system",
+                "content": content,
+                "stream": "stderr",
+                "status": status,
+                "exitCode": result.exit_code,
+            }),
+        )
+        .await?;
+    }
+    sqlx::query("UPDATE agent_runs SET status = ? WHERE id = ?")
+        .bind(status)
+        .bind(run_id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(status.to_string())
+}
+
 pub async fn run_agent_core(
     pool: &SqlitePool,
     payload: RunAgentPayload,
@@ -268,7 +361,7 @@ pub async fn run_agent_core(
 
     let run_id = Uuid::new_v4().to_string();
     sqlx::query(
-        "INSERT INTO agent_runs (id, profile_id, status, provider) VALUES (?, ?, 'failed', ?)",
+        "INSERT INTO agent_runs (id, profile_id, status, provider) VALUES (?, ?, 'running', ?)",
     )
     .bind(&run_id)
     .bind(&payload.profile_id)
@@ -290,21 +383,33 @@ pub async fn run_agent_core(
         }),
     )
     .await?;
-    let pending_message = "Agent provider execution is migration-pending in the Tauri desktop app (ACP process control not ported).";
-    insert_agent_message(
-        pool,
-        &run_id,
-        "system",
-        pending_message,
-        serde_json::json!({
-            "id": Uuid::new_v4().to_string(),
-            "role": "system",
-            "content": pending_message,
-            "status": "failed",
-            "migrationPending": true,
-        }),
-    )
-    .await?;
+
+    match run_provider_process(&provider, payload.prompt.trim(), payload.cwd.trim()) {
+        Ok(result) => {
+            persist_provider_process_result(pool, &run_id, result).await?;
+        }
+        Err(error) => {
+            sqlx::query("UPDATE agent_runs SET status = 'failed' WHERE id = ?")
+                .bind(&run_id)
+                .execute(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            insert_agent_message(
+                pool,
+                &run_id,
+                "system",
+                &error,
+                serde_json::json!({
+                    "id": Uuid::new_v4().to_string(),
+                    "role": "system",
+                    "content": error,
+                    "status": "failed",
+                    "migrationPending": provider != "codex",
+                }),
+            )
+            .await?;
+        }
+    }
 
     list_runs_core(pool)
         .await?
@@ -424,15 +529,21 @@ pub async fn run_agent(
     payload: RunAgentPayload,
 ) -> Result<AgentRunView, String> {
     let run = run_agent_core(&pool, payload).await?;
+    let state = if run.status == "succeeded" { "succeeded" } else { "failed" };
+    let message = read_run_core(&pool, &run.id)
+        .await?
+        .and_then(|detail| detail.messages.last().cloned())
+        .and_then(|message| message.get("content").and_then(|content| content.as_str()).map(str::to_string))
+        .unwrap_or_else(|| format!("Agent run {}", run.status));
     app_handle
         .emit(
             "agent-event",
             serde_json::json!({
                 "sessionId": run.id,
                 "event": {
-                    "type": "error",
-                    "state": "failed",
-                    "message": "Agent provider execution is migration-pending in the Tauri desktop app (ACP process control not ported)."
+                    "type": if run.status == "succeeded" { "state" } else { "error" },
+                    "state": state,
+                    "message": message
                 }
             }),
         )
@@ -536,13 +647,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_agent_persists_failed_migration_pending_run() {
+    async fn run_agent_records_claude_execution_pending_run() {
         let pool = test_pool().await;
         let profile = create_profile_core(
             &pool,
             CreateAgentProfilePayload {
-                name: "Codex".into(),
-                provider: "codex".into(),
+                name: "Claude".into(),
+                provider: "claude".into(),
                 access_level: "observe".into(),
                 project_id: None,
                 model: None,
@@ -563,7 +674,7 @@ mod tests {
         .unwrap();
         assert_eq!(run.profile_id, profile.id);
         assert_eq!(run.status, "failed");
-        assert_eq!(run.provider, "codex");
+        assert_eq!(run.provider, "claude");
 
         let detail = read_run_core(&pool, &run.id).await.unwrap().unwrap();
         assert_eq!(detail.messages.len(), 2);
@@ -572,7 +683,46 @@ mod tests {
         assert!(detail.messages[1]["content"]
             .as_str()
             .unwrap()
-            .contains("migration-pending"));
+            .contains("not migrated yet"));
+    }
+
+    #[tokio::test]
+    async fn codex_provider_result_persists_stdout_stderr_and_status() {
+        let pool = test_pool().await;
+        sqlx::query("INSERT INTO agent_profiles (id, name, provider, access_level) VALUES ('p-1', 'Codex', 'codex', 'observe')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO agent_runs (id, profile_id, status, provider) VALUES ('r-1', 'p-1', 'running', 'codex')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let status = persist_provider_process_result(
+            &pool,
+            "r-1",
+            ProviderProcessResult {
+                stdout: "{\"type\":\"message\",\"content\":\"done\"}\n".to_string(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(status, "succeeded");
+
+        let detail = read_run_core(&pool, "r-1").await.unwrap().unwrap();
+        assert_eq!(detail.run.status, "succeeded");
+        assert_eq!(detail.messages.len(), 1);
+        assert_eq!(detail.messages[0]["stream"], "stdout");
+        assert_eq!(detail.messages[0]["exitCode"], 0);
+
+        let args = provider_process_args("codex", "inspect", "C:/workspace").unwrap();
+        assert_eq!(args[0], "exec");
+        assert!(args.contains(&"--json".to_string()));
+        assert!(args.contains(&"--ephemeral".to_string()));
+        assert!(args.contains(&"--cd".to_string()));
+        assert_eq!(args.last().unwrap(), "inspect");
     }
 
     #[tokio::test]

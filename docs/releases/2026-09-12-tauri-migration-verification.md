@@ -6,7 +6,7 @@
 - `npm run guard:no-api-fallback` passed.
 - `npm run guard:desktop-bridge` passed.
 - `npm run build` passed. Vite reported the existing large chunk warning for `index--d6mMYz4.js`.
-- `cargo test --lib -- --nocapture` passed: 139 tests, 0 failed.
+- `cargo test --lib -- --nocapture` passed: 140 tests, 0 failed.
 - `npm run tauri:build:no-bundle` passed and built `tauri-app/src-tauri/target/release/scriptmanager.exe`.
 
 ## Tauri Dev Startup Evidence
@@ -30,6 +30,7 @@
 - Added native workflow notification-node execution with persisted notification delivery evidence for channel kind and channel id paths.
 - Added durable migration-pending agent launch records: failed run, user/system messages, and a final `agent-event` refresh signal when ACP process control is unavailable.
 - Added durable migration-pending agent control records: interrupt/resume/terminate attempts validate the run id, append system messages, and resume also persists the follow-up prompt while real provider process control remains unavailable.
+- Added a native Codex provider process launch contract: Tauri resolves only the fixed allowlisted `codex` executable identity, launches `codex exec` with argument arrays, and persists stdout/stderr plus terminal status into durable agent run messages. Focused Rust tests cover the command shape and final-state persistence without invoking a live provider session.
 - Clarified local-only cloud storage support and disabled unsupported provider claims.
 - Preserved plugin registry metadata while explicitly disabling plugin execution host claims.
 - Documented the remote execution SSH/SFTP target architecture: `russh` plus `russh-sftp`.
@@ -48,7 +49,8 @@
 - Gist live sync/delete still needs a real GitHub token.
 - API live send with bearer/basic/API key/no-auth is source-verified against a loopback HTTP server; visual Tauri UI API smoke is verified for a GET request and History refresh against `http://127.0.0.1:17891/smoke?from=tauri`.
 - Remote SSH/SFTP transport remains a deliberate migration-pending runtime. Current code supports profiles, SSH identification-banner connection checks with disposable local server coverage, renderer-compatible approval/audit records, approval-finalization events, and persisted typed pending transfer/execution failures.
-- ACP provider process control remains migration-pending. Profiles/history/discovery are native; launch and control attempts now persist migration-pending run history/messages until real provider process launch and control are ported.
+- ACP provider process control remains partially migration-pending. Profiles/history/discovery are native, Codex has a source-verified allowlisted process-launch/persistence path, but Claude launch, interrupt/resume/terminate against live sessions, approval/permission events, and streamed ACP event persistence still need full provider-session control.
+- ACP follow-up checklist is now explicit in the remaining migration plan: wire Claude launch, add a live provider session registry for controls, parse JSONL/ACP events into durable structured records, reconnect approval/permission decisions, and collect live provider smoke evidence once a usable session is available.
 - Workflow remote/agent/plugin nodes remain pending behind clear persisted failure states until their underlying SSH, ACP, and plugin-host runtimes exist. Notification nodes now execute through native persisted deliveries.
 - Protected Git approval consumption is source-complete for matching protected Git action requests; local Git workbench status/log/commit-safe UI smoke is verified, while protected remote fetch/pull/push approval retry remains source-level only.
 
