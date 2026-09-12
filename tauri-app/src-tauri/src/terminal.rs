@@ -428,6 +428,7 @@ struct ScriptForTerminalExec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn terminal_state_starts_empty() {
@@ -555,5 +556,87 @@ mod tests {
 
         let (cmd, _args) = resolve_terminal_interpreter(&None, None);
         assert!(cmd == "python" || cmd == "python3");
+    }
+
+    #[test]
+    fn portable_pty_smoke_create_write_resize_close_restart() {
+        fn spawn_smoke_pty() -> (
+            Box<dyn portable_pty::MasterPty + Send>,
+            Box<dyn Write + Send>,
+            Box<dyn PtyChild + Send>,
+        ) {
+            let pty_system = native_pty_system();
+            let pair = pty_system
+                .openpty(PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .expect("open smoke PTY");
+            let cmd = if cfg!(target_os = "windows") {
+                CommandBuilder::new("powershell.exe")
+            } else {
+                CommandBuilder::new("bash")
+            };
+            let child = pair.slave.spawn_command(cmd).expect("spawn smoke shell");
+            drop(pair.slave);
+            let writer = pair.master.take_writer().expect("take smoke writer");
+            (pair.master, writer, child)
+        }
+
+        fn read_until(reader: &mut Box<dyn Read + Send>, needle: &str) -> String {
+            let started = Instant::now();
+            let mut output = String::new();
+            let mut buf = [0u8; 512];
+            while started.elapsed() < Duration::from_secs(8) {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        output.push_str(&String::from_utf8_lossy(&buf[..n]));
+                        if output.contains(needle) {
+                            return output;
+                        }
+                    }
+                    Err(_) => std::thread::sleep(Duration::from_millis(50)),
+                }
+            }
+            output
+        }
+
+        let (master, mut writer, mut child) = spawn_smoke_pty();
+        let mut reader = master.try_clone_reader().expect("clone smoke reader");
+        master
+            .resize(PtySize {
+                rows: 30,
+                cols: 100,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("resize smoke PTY");
+        writer
+            .write_all(b"echo SCRIPT_MANAGER_PTY_SMOKE\r")
+            .expect("write smoke command");
+        let output = read_until(&mut reader, "SCRIPT_MANAGER_PTY_SMOKE");
+        assert!(
+            output.contains("SCRIPT_MANAGER_PTY_SMOKE"),
+            "PTY output did not include smoke marker: {output:?}"
+        );
+        let _ = child.kill();
+        drop(writer);
+        drop(reader);
+        drop(master);
+
+        let (master2, _writer2, mut child2) = spawn_smoke_pty();
+        master2
+            .resize(PtySize {
+                rows: 25,
+                cols: 90,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("resize restarted smoke PTY");
+        let _ = child2.kill();
+        drop(master2);
     }
 }

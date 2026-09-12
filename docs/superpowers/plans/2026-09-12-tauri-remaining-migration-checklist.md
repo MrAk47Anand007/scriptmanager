@@ -204,7 +204,7 @@ Status: migrated; keep regression proof.
 
 Checklist:
 
-- [ ] Re-run live PTY smoke in Tauri: create terminal, send command, resize, close, restart.
+- [x] Re-run live PTY smoke in Tauri: create terminal, send command, resize, close, restart.
 - [x] Confirm child processes are terminated on close and app exit. Source cleanup/bookkeeping is covered; live app-exit smoke remains in release verification.
 - [x] Confirm terminal events use only `terminal-event` with typed payloads.
 - [x] Confirm no WebSocket terminal path is reachable in Tauri desktop.
@@ -215,6 +215,10 @@ Evidence to inspect:
 - `tauri-app/src/components/TerminalComponent.tsx`
 - `tauri-app/src/lib/scriptsRuntimeClient.ts`
 - Old reference: `src/lib/socketService.ts`
+
+Progress notes:
+
+- 2026-09-12: Added and ran a real `portable-pty` smoke test that opens the native shell PTY, sends an `echo` command, observes output, resizes, kills/closes, and starts/resizes a replacement PTY. Visual terminal UI smoke remains covered by the manual Tauri activity-tab pass.
 
 Done means:
 

@@ -24,6 +24,7 @@
 - Implemented native linked-folder open/rescan/canonical recovery and Python `.venv` workspace management.
 - Added native API auth preparation for bearer, basic, API key, and manual OAuth2 token shapes, plus explicit pre-request/test-script migration-pending history records.
 - Added loopback API execution proof for no-auth, bearer, basic, and API-key query requests through the native request path.
+- Added real native `portable-pty` smoke proof for terminal create, command input, output read, resize, close, and restart.
 - Clarified local-only cloud storage support and disabled unsupported provider claims.
 - Preserved plugin registry metadata while explicitly disabling plugin execution host claims.
 - Documented the remote execution SSH/SFTP target architecture: `russh` plus `russh-sftp`.
@@ -33,7 +34,7 @@
 
 ## Remaining Manual Or External Verification
 
-- Full visual Tauri smoke is still pending: open each activity tab; exercise Scripts create/edit/run/cancel and terminal input; API send/history; Workflow create/publish/run/cancel/retry; Git status/log/commit-safe flow; Settings sections; and visible pending surfaces.
+- Full visual Tauri smoke is still pending: open each activity tab; exercise Scripts create/edit/run/cancel and terminal UI input; API send/history; Workflow create/publish/run/cancel/retry; Git status/log/commit-safe flow; Settings sections; and visible pending surfaces.
 - Gist live sync/delete still needs a real GitHub token.
 - API live send with bearer/basic/API key/no-auth is source-verified against a loopback HTTP server; visual Tauri UI API smoke remains pending with the broader manual pass.
 - Remote SSH/SFTP transport remains a deliberate migration-pending runtime. Current code supports profiles, TCP reachability checks, approval/audit records, and typed pending transfer/execution errors.
