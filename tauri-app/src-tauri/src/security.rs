@@ -18,9 +18,36 @@ use crate::state::AppPaths;
 /// Rust only through `reveal_secret`.
 const KEY_FILE_NAME: &str = "secrets_master.key";
 
-pub fn load_or_create_master_key(app_handle: &AppHandle) -> Result<Vec<u8>, String> {
+static KEY_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Pin the directory that holds the master key so background workers
+/// (workflows, remote execution) can resolve it without an AppHandle.
+pub fn init_key_dir(app_handle: &AppHandle) -> Result<(), String> {
     let paths = AppPaths::resolve(app_handle).map_err(|e| e.to_string())?;
-    let key_path: PathBuf = paths.data_dir.join(KEY_FILE_NAME);
+    let _ = KEY_DIR.set(paths.data_dir.clone());
+    Ok(())
+}
+
+#[cfg(test)]
+pub fn init_key_dir_for_tests(dir: PathBuf) {
+    let _ = KEY_DIR.set(dir);
+}
+
+/// Resolve the master key from the pinned key directory.
+pub fn current_master_key() -> Result<Vec<u8>, String> {
+    let dir = KEY_DIR
+        .get()
+        .ok_or_else(|| "Master key directory is not initialized".to_string())?;
+    load_or_create_master_key_in(dir)
+}
+
+pub fn load_or_create_master_key(app_handle: &AppHandle) -> Result<Vec<u8>, String> {
+    init_key_dir(app_handle)?;
+    current_master_key()
+}
+
+fn load_or_create_master_key_in(dir: &std::path::Path) -> Result<Vec<u8>, String> {
+    let key_path = dir.join(KEY_FILE_NAME);
     if key_path.exists() {
         let encoded = std::fs::read_to_string(&key_path).map_err(|e| e.to_string())?;
         let key = BASE64

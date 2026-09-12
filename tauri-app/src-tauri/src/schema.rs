@@ -672,6 +672,8 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
     ensure_column(pool, "remote_executions", "param_values", "TEXT NOT NULL DEFAULT '{}'").await?;
     ensure_column(pool, "remote_executions", "requested_at", "TEXT NOT NULL DEFAULT ''").await?;
     ensure_column(pool, "remote_executions", "approved_at", "TEXT").await?;
+    ensure_column(pool, "server_profiles", "encrypted_secret", "TEXT").await?;
+    ensure_column(pool, "server_profiles", "host_key_fingerprint", "TEXT").await?;
     sqlx::query(
         "UPDATE remote_executions SET requested_at = created_at WHERE requested_at = ''",
     )

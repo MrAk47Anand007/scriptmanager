@@ -42,3 +42,6 @@ cron = "0.12"
 url = "2"
 regex = "1"
 tauri-plugin-dialog = "2.7.3"
+russh = { version = "0.63", default-features = false, features = ["ring", "rsa"] }
+russh-sftp = "3.0"
+sha2 = "0.10"

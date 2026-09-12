@@ -22,6 +22,9 @@ mod security;
 mod settings;
 mod state;
 mod storage;
+mod ssh_transport;
+#[cfg(test)]
+mod ssh_test_server;
 mod terminal;
 mod workflows;
 mod workspace_access;
@@ -44,6 +47,8 @@ pub fn run() {
                 let paths = state::AppPaths::resolve(&handle)
                     .expect("Failed to resolve app paths");
                 handle.manage(execution::ExecutionState::new(paths.builds_dir));
+                security::init_key_dir(&handle)
+                    .expect("Failed to initialize secret vault key");
             });
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();

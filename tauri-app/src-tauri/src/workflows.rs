@@ -1081,6 +1081,140 @@ async fn run_api_node(
     }
 }
 
+fn remote_interpreter_for_language(language: &str) -> &'static str {
+    match language {
+        "node" | "javascript" | "typescript" => "node",
+        "shell" | "bash" => "bash",
+        "python" => "python3",
+        other => "python3",
+    }
+}
+
+/// Quote a fragment for the remote login shell. Remote commands are built
+/// only from the interpreter name and a generated temp path; user content
+/// travels as a file, never as part of the command line.
+fn shell_quote_single(fragment: &str) -> String {
+    format!("'{}'", fragment.replace('\'', "'\\''"))
+}
+
+async fn run_remote_node(
+    pool: &SqlitePool,
+    config: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let script_id = config
+        .get("scriptId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "nodes config.scriptId is required".to_string())?;
+    let profile_id = config
+        .get("profileId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "nodes config.profileId is required".to_string())?;
+
+    let script: Option<ScriptRef> = sqlx::query_as(
+        "SELECT id, language, interpreter, content, timeout_ms FROM scripts WHERE id = ?",
+    )
+    .bind(script_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let script = script.ok_or_else(|| format!("Script not found: {}", script_id))?;
+    let language = script.language.unwrap_or_else(|| "python".to_string());
+    let content = script.content.unwrap_or_default();
+    if content.trim().is_empty() {
+        return Err(format!("Script {} has no content", script_id));
+    }
+    let interpreter = script
+        .interpreter
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| remote_interpreter_for_language(&language).to_string());
+
+    let connection = crate::ssh_transport::load_profile_connection(pool, profile_id).await?;
+    let mut session = crate::ssh_transport::SshSession::connect(&connection).await?;
+
+    if let Some(fingerprint) = &session.host_key_fingerprint {
+        let _ = sqlx::query(
+            "UPDATE server_profiles SET host_key_fingerprint = ? WHERE id = ?",
+        )
+        .bind(fingerprint)
+        .bind(profile_id)
+        .execute(pool)
+        .await;
+    }
+
+    let extension = match language.as_str() {
+        "node" | "javascript" | "typescript" => "js",
+        "powershell" => "ps1",
+        "shell" | "bash" => "sh",
+        _ => "py",
+    };
+    let remote_path = format!(
+        "/tmp/scriptmanager-wf-{}.{}",
+        uuid::Uuid::new_v4(),
+        extension
+    );
+
+    let upload =
+        crate::ssh_transport::sftp_upload(&mut session, &remote_path, content.as_bytes(), None)
+            .await;
+    if let Err(error) = upload {
+        session.disconnect().await;
+        return Err(format!("Failed to upload workflow script: {error}"));
+    }
+
+    let timeout_secs: u64 = script
+        .timeout_ms
+        .filter(|t| *t > 0)
+        .map(|t| t as u64)
+        .unwrap_or(30_000)
+        .min(300_000)
+        / 1000
+        + 1;
+
+    let command = format!(
+        "{} {}",
+        shell_quote_single(interpreter.trim()),
+        shell_quote_single(&remote_path)
+    );
+    let mut stdout: Vec<String> = Vec::new();
+    let mut stderr: Vec<String> = Vec::new();
+    let exec_result = session
+        .run_command(&command, timeout_secs, |line, is_stderr| {
+            if is_stderr {
+                stderr.push(line.to_string());
+            } else {
+                stdout.push(line.to_string());
+            }
+        })
+        .await;
+
+    // Best-effort cleanup of the uploaded script; failures are ignored.
+    let _ = session
+        .run_command(&format!("rm -f {}", shell_quote_single(&remote_path)), 10, |_, _| {})
+        .await;
+    session.disconnect().await;
+
+    match exec_result {
+        Ok(exit_code) => {
+            if exit_code == 0 {
+                Ok(serde_json::json!({
+                    "status": "succeeded",
+                    "exitCode": exit_code,
+                    "stdout": stdout.join("\n"),
+                    "stderr": stderr.join("\n"),
+                }))
+            } else {
+                Err(format!(
+                    "Remote script {} exited with code {}: {}",
+                    script_id,
+                    exit_code,
+                    stderr.join("\n").trim()
+                ))
+            }
+        }
+        Err(error) => Err(format!("Remote script {} failed: {error}", script_id)),
+    }
+}
+
 async fn sleep_with_cancel(pool: &SqlitePool, run_id: &str, duration_ms: u64) -> bool {
     // Returns true when cancelled.
     let capped = duration_ms.min(300_000);
@@ -1101,7 +1235,6 @@ fn unsupported_node_error(node_type: &str) -> String {
         n if n.starts_with("plugin:") => {
             "Plugin workflow nodes are not migrated yet".to_string()
         }
-        "remote" => "Remote workflow nodes are not migrated yet".to_string(),
         "agent" => "Agent workflow nodes are not migrated yet".to_string(),
         "approval" => "Approval workflow nodes pause here until the approvals inbox is migrated".to_string(),
         other => format!("Unsupported workflow node: {}", other),
@@ -1282,6 +1415,13 @@ async fn execute_node(
         }
         "notification" => {
             let output = run_notification_node(pool, &node.config, input, &context).await?;
+            Ok(NodeOutcome::Succeeded {
+                output,
+                selected_port: None,
+            })
+        }
+        "remote" => {
+            let output = run_remote_node(pool, &node.config).await?;
             Ok(NodeOutcome::Succeeded {
                 output,
                 selected_port: None,
@@ -2078,8 +2218,8 @@ mod tests {
         let pool = test_pool().await;
         let definition = serde_json::json!({
             "schemaVersion": 1,
-            "name": "Remote",
-            "nodes": [ { "id": "r", "type": "remote", "name": "R", "config": { "scriptId": "s", "profileId": "p" } } ],
+            "name": "AgentPending",
+            "nodes": [ { "id": "r", "type": "agent", "name": "R", "config": { "profileId": "p", "prompt": "hi" } } ],
             "edges": []
         });
         let id = create_and_publish(&pool, definition).await;
@@ -2098,7 +2238,7 @@ mod tests {
         let definition = serde_json::json!({
             "schemaVersion": 1,
             "name": "Retry",
-            "nodes": [ { "id": "r", "type": "remote", "name": "R", "config": { "scriptId": "s", "profileId": "p" } } ],
+            "nodes": [ { "id": "r", "type": "agent", "name": "R", "config": { "profileId": "p", "prompt": "hi" } } ],
             "edges": []
         });
         let id = create_and_publish(&pool, definition).await;
@@ -2107,7 +2247,7 @@ mod tests {
             .unwrap();
         assert_eq!(failed.status, STATUS_FAILED);
         // Retry re-drives the node (and fails again deterministically for the
-        // unmigrated remote type), proving state reset instead of a stale read.
+        // unmigrated agent type), proving state reset instead of a stale read.
         let retried = retry_node_record(&pool, &failed.id, "r").await.unwrap();
         assert_eq!(retried.status, STATUS_FAILED);
         let node = retried.node_runs.iter().find(|n| n.node_id == "r").unwrap();
@@ -2120,5 +2260,64 @@ mod tests {
             .await
             .unwrap();
         assert!(retry_node_record(&pool, &ok.id, "n1").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn workflow_remote_node_runs_script_over_ssh() {
+        crate::ssh_test_server::init_master_key();
+        let (port, _files, behavior) = crate::ssh_test_server::spawn().await;
+        {
+            let mut guard = behavior.lock().await;
+            guard.exec_stdout = "remote-node-ok\n".to_string();
+            guard.exec_exit_code = 0;
+        }
+
+        let pool = test_pool().await;
+        sqlx::query(
+            "INSERT INTO scripts (id, name, filename, content, language) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("script-wf-remote")
+        .bind("wf_remote.py")
+        .bind("wf_remote.py")
+        .bind("print('hello from remote')")
+        .bind("python")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO server_profiles (id, name, host, port, username, auth_method, has_secret, encrypted_secret)
+             VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+        )
+        .bind("profile-wf-remote")
+        .bind("wf-host")
+        .bind("127.0.0.1")
+        .bind(port as i64)
+        .bind(crate::ssh_test_server::TEST_USER)
+        .bind("password")
+        .bind(crate::security::encrypt_value(
+            &crate::security::current_master_key().unwrap(),
+            crate::ssh_test_server::TEST_PASSWORD,
+        )
+        .unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let definition = serde_json::json!({
+            "schemaVersion": 1,
+            "name": "RemoteNode",
+            "nodes": [ { "id": "r", "type": "remote", "name": "R", "config": { "scriptId": "script-wf-remote", "profileId": "profile-wf-remote" } } ],
+            "edges": []
+        });
+        let id = create_and_publish(&pool, definition).await;
+        let detail = run_workflow_record(&pool, &id, serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(detail.status, STATUS_SUCCEEDED);
+        let node = &detail.node_runs[0];
+        assert_eq!(node.status, STATUS_SUCCEEDED);
+        let output: serde_json::Value =
+            serde_json::from_str(node.output_json.as_deref().unwrap_or("{}")).unwrap();
+        assert!(output["stdout"].as_str().unwrap().contains("remote-node-ok"));
     }
 }

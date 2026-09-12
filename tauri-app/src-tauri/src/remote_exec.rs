@@ -29,7 +29,9 @@ pub struct ServerProfileView {
 
 async fn load_profiles(pool: &SqlitePool) -> Result<Vec<ServerProfileView>, String> {
     let rows = sqlx::query(
-        "SELECT id, name, host, port, username, auth_method, has_secret, key_path, project_id, notes, created_at, updated_at
+        "SELECT id, name, host, port, username, auth_method,
+                CASE WHEN encrypted_secret IS NOT NULL AND encrypted_secret != '' THEN 1 ELSE 0 END,
+                key_path, project_id, notes, created_at, updated_at
          FROM server_profiles ORDER BY created_at",
     )
     .fetch_all(pool)
@@ -73,6 +75,10 @@ pub struct SaveServerProfilePayload {
     #[serde(default = "default_auth_method")]
     pub auth_method: String,
     pub has_secret: Option<bool>,
+    /// Plaintext password or key passphrase. Encrypted at rest immediately;
+    /// never persisted or logged as plaintext.
+    #[serde(default)]
+    pub secret: Option<String>,
     pub key_path: Option<String>,
     pub project_id: Option<String>,
     pub notes: Option<String>,
@@ -93,18 +99,28 @@ pub async fn save_profile_core(
     if payload.auth_method != "password" && payload.auth_method != "key" {
         return Err(format!("Unknown auth method: {}", payload.auth_method));
     }
+    let secret_ciphertext: Option<String> = match payload.secret.as_deref() {
+        Some(secret) if !secret.trim().is_empty() => {
+            Some(crate::ssh_transport::encrypt_profile_secret(secret)?)
+        }
+        _ => None,
+    };
 
     match payload.id.clone() {
         Some(id) => {
             sqlx::query(
-                "UPDATE server_profiles SET name = ?, host = ?, port = ?, username = ?, auth_method = ?, has_secret = ?, key_path = ?, project_id = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE server_profiles SET name = ?, host = ?, port = ?, username = ?, auth_method = ?,
+                    encrypted_secret = COALESCE(? , encrypted_secret),
+                    has_secret = CASE WHEN COALESCE(?, encrypted_secret) IS NOT NULL THEN 1 ELSE 0 END,
+                    key_path = ?, project_id = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             )
             .bind(name)
             .bind(payload.host.trim())
             .bind(payload.port.unwrap_or(22))
             .bind(payload.username.trim())
             .bind(&payload.auth_method)
-            .bind(payload.has_secret.unwrap_or(false))
+            .bind(&secret_ciphertext)
+            .bind(&secret_ciphertext)
             .bind(payload.key_path.as_deref().filter(|p| !p.is_empty()))
             .bind(payload.project_id.as_deref().filter(|p| !p.is_empty()))
             .bind(payload.notes.as_deref().unwrap_or(""))
@@ -116,7 +132,7 @@ pub async fn save_profile_core(
         None => {
             let id = Uuid::new_v4().to_string();
             sqlx::query(
-                "INSERT INTO server_profiles (id, name, host, port, username, auth_method, has_secret, key_path, project_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO server_profiles (id, name, host, port, username, auth_method, has_secret, encrypted_secret, key_path, project_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&id)
             .bind(name)
@@ -124,7 +140,8 @@ pub async fn save_profile_core(
             .bind(payload.port.unwrap_or(22))
             .bind(payload.username.trim())
             .bind(&payload.auth_method)
-            .bind(payload.has_secret.unwrap_or(false))
+            .bind(secret_ciphertext.is_some())
+            .bind(&secret_ciphertext)
             .bind(payload.key_path.as_deref().filter(|p| !p.is_empty()))
             .bind(payload.project_id.as_deref().filter(|p| !p.is_empty()))
             .bind(payload.notes.as_deref().unwrap_or(""))
@@ -221,27 +238,102 @@ async fn probe_ssh_identification(host: &str, port: i64) -> (bool, i64, Option<S
 }
 
 pub async fn test_connection_core(pool: &SqlitePool, profile_id: &str) -> Result<Value, String> {
-    let row = sqlx::query("SELECT host, port FROM server_profiles WHERE id = ?")
-        .bind(profile_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Server profile not found".to_string())?;
+    let row = sqlx::query(
+        "SELECT host, port, encrypted_secret, key_path FROM server_profiles WHERE id = ?",
+    )
+    .bind(profile_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Server profile not found".to_string())?;
     let host: String = row.try_get(0).map_err(|e| e.to_string())?;
     let port: i64 = row.try_get(1).map_err(|e| e.to_string())?;
+    let encrypted_secret: Option<String> = row.try_get(2).map_err(|e| e.to_string())?;
+    let key_path: Option<String> = row.try_get(3).map_err(|e| e.to_string())?;
+    let has_credentials = encrypted_secret
+        .as_deref()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+        || key_path.as_deref().map(|p| !p.trim().is_empty()).unwrap_or(false);
 
+    // Banner probe: cheap reachability + protocol identity check.
     let (ok, latency, banner, message) = probe_ssh_identification(&host, port).await;
+
+    // When credentials are stored, upgrade to a full authenticated SSH
+    // handshake. This also pins the host key fingerprint (trust on first use).
+    let mut authenticated = false;
+    let mut learned_fingerprint: Option<String> = None;
+    let mut full_message = message;
+    if ok && has_credentials {
+        match crate::ssh_transport::load_profile_connection(pool, profile_id).await {
+            Ok(connection) => match crate::ssh_transport::SshSession::connect(&connection).await {
+                Ok(session) => {
+                    authenticated = true;
+                    learned_fingerprint = session.host_key_fingerprint.clone();
+                    full_message = "SSH authentication succeeded".to_string();
+                    session.disconnect().await;
+                }
+                Err(auth_error) => {
+                    record_audit(
+                        pool,
+                        "server_profile.test_connection_failed",
+                        "local-admin",
+                        profile_id,
+                        &auth_error,
+                    )
+                    .await?;
+                    return Ok(serde_json::json!({
+                        "ok": false,
+                        "success": false,
+                        "latencyMs": latency,
+                        "latency_ms": latency,
+                        "transport": "ssh",
+                        "banner": banner,
+                        "authenticated": false,
+                        "error": auth_error.clone(),
+                        "message": format!("{auth_error} for {host}:{port} in {latency}ms"),
+                    }));
+                }
+            },
+            Err(load_error) => {
+                return Ok(serde_json::json!({
+                    "ok": false,
+                    "success": false,
+                    "latencyMs": latency,
+                    "latency_ms": latency,
+                    "transport": "ssh",
+                    "banner": banner,
+                    "authenticated": false,
+                    "error": load_error.clone(),
+                    "message": format!("{load_error} for {host}:{port} in {latency}ms"),
+                }));
+            }
+        }
+    }
+
+    if let Some(fingerprint) = &learned_fingerprint {
+        let _ = sqlx::query(
+            "UPDATE server_profiles SET host_key_fingerprint = ? WHERE id = ?",
+        )
+        .bind(fingerprint)
+        .bind(profile_id)
+        .execute(pool)
+        .await;
+    }
+
     record_audit(pool, "server_profile.test_connection", "local-admin", profile_id, &format!("{host}:{port}")).await?;
 
     Ok(serde_json::json!({
-        "ok": ok,
-        "success": ok,
+        "ok": ok && (authenticated || !has_credentials),
+        "success": ok && (authenticated || !has_credentials),
         "latencyMs": latency,
         "latency_ms": latency,
         "transport": "ssh",
         "banner": banner,
-        "error": if ok { Value::Null } else { Value::String(message.clone()) },
-        "message": format!("{message} for {host}:{port} in {latency}ms"),
+        "authenticated": authenticated,
+        "hostKeyFingerprint": learned_fingerprint,
+        "error": if ok && (authenticated || !has_credentials) { Value::Null } else { Value::String(full_message.clone()) },
+        "message": format!("{full_message} for {host}:{port} in {latency}ms"),
     }))
 }
 
@@ -357,18 +449,38 @@ pub async fn decide_remote_exec_core(
     Ok(serde_json::json!({ "ok": true, "remote_exec_id": id, "status": new_status }))
 }
 
-fn remote_exec_pending_message(command: &str) -> String {
-    format!(
-        "Remote command execution is migration-pending in the Tauri desktop app. Command was approved but not sent over SSH: {}",
-        command.trim()
+fn remote_exec_transport_failure(output: &str) -> String {
+    format!("Remote SSH execution failed: {output}")
+}
+
+async fn persist_remote_exec_failure(
+    pool: &SqlitePool,
+    id: &str,
+    message: &str,
+) -> Result<(), String> {
+    let output = format!("{message}\n");
+    let finished = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "UPDATE remote_executions SET status = 'failed', output = ?, log_output = ?,
+            exit_code = ?, finished_at = ? WHERE id = ?",
     )
+    .bind(&output)
+    .bind(&output)
+    .bind(crate::ssh_transport::SSH_TRANSPORT_EXIT_CODE)
+    .bind(&finished)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    record_audit(pool, "remote_exec.execute_failed", "local-admin", id, message).await
 }
 
 pub async fn finalize_approved_remote_exec_core(
+    app_handle: Option<&AppHandle>,
     pool: &SqlitePool,
     id: &str,
 ) -> Result<Value, String> {
-    let row = sqlx::query("SELECT status, command FROM remote_executions WHERE id = ?")
+    let row = sqlx::query("SELECT status, command, profile_id FROM remote_executions WHERE id = ?")
         .bind(id)
         .fetch_optional(pool)
         .await
@@ -376,6 +488,7 @@ pub async fn finalize_approved_remote_exec_core(
         .ok_or_else(|| "Remote execution not found".to_string())?;
     let status: String = row.try_get(0).map_err(|e| e.to_string())?;
     let command: String = row.try_get(1).map_err(|e| e.to_string())?;
+    let profile_id: String = row.try_get(2).map_err(|e| e.to_string())?;
     if status != "approved" {
         return Err("Remote execution must be approved before it can run".to_string());
     }
@@ -388,31 +501,158 @@ pub async fn finalize_approved_remote_exec_core(
         .await
         .map_err(|e| e.to_string())?;
 
-    let message = remote_exec_pending_message(&command);
-    let output = format!("{message}\n");
-    let finished = chrono::Utc::now().to_rfc3339();
-    sqlx::query(
-        "UPDATE remote_executions SET status = 'failed', output = ?, log_output = ?,
-            exit_code = ?, finished_at = ? WHERE id = ?",
-    )
-    .bind(&output)
-    .bind(&output)
-    .bind(127_i64)
-    .bind(&finished)
-    .bind(id)
-    .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-    record_audit(pool, "remote_exec.execute_failed", "local-admin", id, &message).await?;
+    emit_remote_exec_event(
+        app_handle,
+        serde_json::json!({ "type": "line", "remoteExecId": id, "line": format!("Connecting over SSH to run: {}", command.trim()) }),
+    );
 
-    Ok(serde_json::json!({
-        "ok": false,
-        "remote_exec_id": id,
-        "status": "failed",
-        "exitCode": 127,
-        "output": output,
-        "message": message,
-    }))
+    let connection = match crate::ssh_transport::load_profile_connection(pool, &profile_id).await {
+        Ok(connection) => connection,
+        Err(error) => {
+            persist_remote_exec_failure(pool, id, &error).await?;
+            emit_remote_exec_event(
+                app_handle,
+                serde_json::json!({ "type": "error", "remoteExecId": id, "message": error }),
+            );
+            return Ok(serde_json::json!({
+                "ok": false,
+                "remote_exec_id": id,
+                "status": "failed",
+                "exitCode": crate::ssh_transport::SSH_TRANSPORT_EXIT_CODE,
+                "message": error,
+            }));
+        }
+    };
+
+    let mut session = match crate::ssh_transport::SshSession::connect(&connection).await {
+        Ok(session) => session,
+        Err(error) => {
+            persist_remote_exec_failure(pool, id, &error).await?;
+            emit_remote_exec_event(
+                app_handle,
+                serde_json::json!({ "type": "error", "remoteExecId": id, "message": error }),
+            );
+            return Ok(serde_json::json!({
+                "ok": false,
+                "remote_exec_id": id,
+                "status": "failed",
+                "exitCode": crate::ssh_transport::SSH_TRANSPORT_EXIT_CODE,
+                "message": error,
+            }));
+        }
+    };
+
+    // Pin the host key fingerprint on first contact so later mismatches fail.
+    if let Some(fingerprint) = &session.host_key_fingerprint {
+        let _ = sqlx::query(
+            "UPDATE server_profiles SET host_key_fingerprint = ? WHERE id = ?",
+        )
+        .bind(fingerprint)
+        .bind(&profile_id)
+        .execute(pool)
+        .await;
+        record_audit(
+            pool,
+            "remote_exec.host_key_recorded",
+            "local-admin",
+            &profile_id,
+            fingerprint,
+        )
+        .await?;
+    }
+
+    let mut collected: Vec<String> = Vec::new();
+    let app_for_stream = app_handle.cloned();
+    let run_result = session
+        .run_command(
+            &command,
+            crate::ssh_transport::SSH_COMMAND_TIMEOUT_SECS,
+            |line, is_stderr| {
+                if is_stderr {
+                    collected.push(format!("[stderr] {line}"));
+                } else {
+                    collected.push(line.to_string());
+                }
+                emit_remote_exec_event(
+                    app_for_stream.as_ref(),
+                    serde_json::json!({ "type": "line", "remoteExecId": id, "line": line }),
+                );
+            },
+        )
+        .await;
+
+    session.disconnect().await;
+
+    match run_result {
+        Ok(exit_code) => {
+            let output = if collected.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n", collected.join("\n"))
+            };
+            let finished = chrono::Utc::now().to_rfc3339();
+            let final_status = if exit_code == 0 { "done" } else { "failed" };
+            sqlx::query(
+                "UPDATE remote_executions SET status = ?, output = ?, log_output = ?,
+                    exit_code = ?, finished_at = ? WHERE id = ?",
+            )
+            .bind(final_status)
+            .bind(&output)
+            .bind(&output)
+            .bind(exit_code)
+            .bind(&finished)
+            .bind(id)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            record_audit(
+                pool,
+                "remote_exec.execute",
+                "local-admin",
+                id,
+                &format!("exit {exit_code}"),
+            )
+            .await?;
+            if exit_code == 0 {
+                emit_remote_exec_event(
+                    app_handle,
+                    serde_json::json!({ "type": "done", "remoteExecId": id, "exitCode": exit_code }),
+                );
+            } else {
+                emit_remote_exec_event(
+                    app_handle,
+                    serde_json::json!({
+                        "type": "error",
+                        "remoteExecId": id,
+                        "message": format!("Remote command exited with code {exit_code}"),
+                        "exitCode": exit_code,
+                    }),
+                );
+            }
+            Ok(serde_json::json!({
+                "ok": exit_code == 0,
+                "remote_exec_id": id,
+                "status": final_status,
+                "exitCode": exit_code,
+                "output": output,
+            }))
+        }
+        Err(error) => {
+            let message = remote_exec_transport_failure(&error);
+            persist_remote_exec_failure(pool, id, &message).await?;
+            emit_remote_exec_event(
+                app_handle,
+                serde_json::json!({ "type": "error", "remoteExecId": id, "message": message.clone() }),
+            );
+            Ok(serde_json::json!({
+                "ok": false,
+                "remote_exec_id": id,
+                "status": "failed",
+                "exitCode": crate::ssh_transport::SSH_TRANSPORT_EXIT_CODE,
+                "message": message,
+            }))
+        }
+    }
 }
 
 #[tauri::command]
@@ -422,24 +662,7 @@ pub async fn approve_remote_execution(
     payload: DecideRemoteExecPayload,
 ) -> Result<Value, String> {
     let result = decide_remote_exec_core(&pool, &payload.id, true, payload.note.as_deref()).await?;
-    let finalized = finalize_approved_remote_exec_core(&pool, &payload.id).await?;
-    emit_remote_exec_event(
-        &app_handle,
-        serde_json::json!({
-            "type": "line",
-            "remoteExecId": payload.id,
-            "line": finalized["output"].as_str().unwrap_or_default(),
-        }),
-    );
-    emit_remote_exec_event(
-        &app_handle,
-        serde_json::json!({
-            "type": "error",
-            "remoteExecId": payload.id,
-            "message": finalized["message"].as_str().unwrap_or("Remote execution failed"),
-            "exitCode": finalized["exitCode"].as_i64().unwrap_or(127),
-        }),
-    );
+    finalize_approved_remote_exec_core(Some(&app_handle), &pool, &payload.id).await?;
     Ok(result)
 }
 
@@ -457,22 +680,98 @@ pub async fn reject_remote_execution(
 ) -> Result<Value, String> {
     let result = decide_remote_exec_core(&pool, &payload.id, false, payload.note.as_deref()).await?;
     emit_remote_exec_event(
-        &app_handle,
+        Some(&app_handle),
         serde_json::json!({ "type": "done", "remoteExecId": payload.id, "exitCode": 0 }),
     );
     Ok(result)
 }
 
-fn emit_remote_exec_event(app_handle: &AppHandle, payload: Value) {
-    app_handle.emit("remote-exec-event", payload).ok();
+fn emit_remote_exec_event(app_handle: Option<&AppHandle>, payload: Value) {
+    if let Some(handle) = app_handle {
+        handle.emit("remote-exec-event", payload).ok();
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TransferRemoteScriptPayload {
+    #[serde(rename = "profileId", alias = "profile_id")]
+    pub profile_id: String,
+    #[serde(rename = "scriptId", alias = "script_id")]
+    pub script_id: Option<String>,
+    #[serde(rename = "remotePath", alias = "remote_path")]
+    pub remote_path: String,
+    #[serde(default)]
+    pub permissions: Option<String>,
 }
 
 #[tauri::command]
 pub async fn transfer_remote_script(
-    _pool: State<'_, SqlitePool>,
-    _payload: Value,
+    pool: State<'_, SqlitePool>,
+    payload: TransferRemoteScriptPayload,
 ) -> Result<Value, String> {
-    Err("SSH file transfer is migration-pending in the Tauri desktop app".to_string())
+    transfer_remote_script_core(&pool, payload).await
+}
+
+pub async fn transfer_remote_script_core(
+    pool: &SqlitePool,
+    payload: TransferRemoteScriptPayload,
+) -> Result<Value, String> {
+    crate::ssh_transport::validate_remote_path(&payload.remote_path)?;
+
+    // Read the script content from SQLite; the transfer never shells out.
+    let content: String = match payload.script_id.as_deref().filter(|s| !s.is_empty()) {
+        Some(script_id) => {
+            let row = sqlx::query("SELECT COALESCE(content, '') FROM scripts WHERE id = ?")
+                .bind(script_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("Script not found: {script_id}"))?;
+            let content: String = row.try_get(0).map_err(|e| e.to_string())?;
+            if content.trim().is_empty() {
+                return Err(format!("Script {script_id} has no content to transfer"));
+            }
+            content
+        }
+        None => return Err("scriptId is required for remote transfer".to_string()),
+    };
+
+    let connection =
+        crate::ssh_transport::load_profile_connection(pool, &payload.profile_id).await?;
+    let mut session = crate::ssh_transport::SshSession::connect(&connection).await?;
+    if let Some(fingerprint) = &session.host_key_fingerprint {
+        let _ = sqlx::query(
+            "UPDATE server_profiles SET host_key_fingerprint = ? WHERE id = ?",
+        )
+        .bind(fingerprint)
+        .bind(&payload.profile_id)
+        .execute(pool)
+        .await;
+    }
+    let upload = crate::ssh_transport::sftp_upload(
+        &mut session,
+        payload.remote_path.trim(),
+        content.as_bytes(),
+        payload.permissions.as_deref(),
+    )
+    .await;
+    session.disconnect().await;
+    upload.map_err(|e| e.to_string())?;
+
+    record_audit(
+        pool,
+        "remote_exec.transfer",
+        "local-admin",
+        &payload.profile_id,
+        &format!("{} -> {}", payload.script_id.as_deref().unwrap_or(""), payload.remote_path.trim()),
+    )
+    .await?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "remote_path": payload.remote_path.trim(),
+        "bytes": content.len(),
+    }))
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -573,6 +872,7 @@ mod tests {
             username: "deployer".to_string(),
             auth_method: "key".to_string(),
             has_secret: Some(false),
+            secret: None,
             key_path: None,
             project_id: None,
             notes: Some("test".to_string()),
@@ -624,9 +924,10 @@ mod tests {
 
     #[tokio::test]
     async fn profile_crud_round_trip() {
+        crate::ssh_test_server::init_master_key();
         let pool = test_pool().await;
         let saved = save_profile_core(&pool, payload("web-1")).await.unwrap();
-        assert!(saved.key_path.is_none());
+        assert!(!saved.has_secret);
         assert_eq!(saved.auth_method, "key");
 
         let updated = save_profile_core(
@@ -638,7 +939,8 @@ mod tests {
                 port: Some(2222),
                 username: "deployer".to_string(),
                 auth_method: "password".to_string(),
-                has_secret: Some(true),
+                has_secret: None,
+                secret: Some("s3cret-value".to_string()),
                 key_path: None,
                 project_id: None,
                 notes: None,
@@ -651,7 +953,17 @@ mod tests {
         assert!(updated.has_secret);
         assert_eq!(updated.auth_method, "password");
 
-        delete_profile_core(&pool, &saved.id).await.unwrap();
+        // The plaintext secret must never be visible in profile listings.
+        let stored = sqlx::query("SELECT encrypted_secret FROM server_profiles WHERE id = ?")
+            .bind(&updated.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let encrypted: String = stored.try_get(0).unwrap();
+        assert!(!encrypted.contains("s3cret-value"));
+        assert_ne!(encrypted, "s3cret-value");
+
+        delete_profile_core(&pool, &updated.id).await.unwrap();
         assert!(load_profiles(&pool).await.unwrap().is_empty());
     }
 
@@ -721,7 +1033,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn approved_remote_exec_persists_migration_pending_failure() {
+    async fn approved_remote_exec_fails_when_host_is_unreachable() {
+        crate::ssh_test_server::init_master_key();
         let pool = test_pool().await;
         let profile = save_profile_core(&pool, payload("web-finalize")).await.unwrap();
         let started = start_remote_exec_core(
@@ -735,44 +1048,243 @@ mod tests {
         )
         .await
         .unwrap();
-        let exec_id = started["remote_exec_id"].as_str().unwrap();
+        let exec_id = started["remote_exec_id"].as_str().unwrap().to_string();
 
-        let approved = decide_remote_exec_core(&pool, exec_id, true, Some("approved for smoke"))
+        let approved = decide_remote_exec_core(&pool, &exec_id, true, Some("approved for smoke"))
             .await
             .unwrap();
         assert_eq!(approved["status"], "approved");
-        let finalized = finalize_approved_remote_exec_core(&pool, exec_id)
+        // Port 22 has no test SSH server listening: transport must fail loudly.
+        let finalized = finalize_approved_remote_exec_core(None, &pool, &exec_id)
             .await
             .unwrap();
         assert_eq!(finalized["status"], "failed");
-        assert_eq!(finalized["exitCode"], 127);
-        assert!(finalized["output"].as_str().unwrap().contains("uptime"));
+        assert_eq!(
+            finalized["exitCode"],
+            crate::ssh_transport::SSH_TRANSPORT_EXIT_CODE
+        );
 
         let row = sqlx::query(
             "SELECT status, output, log_output, exit_code, approved_at, started_at, finished_at
              FROM remote_executions WHERE id = ?",
         )
-        .bind(exec_id)
+        .bind(&exec_id)
         .fetch_one(&pool)
         .await
         .unwrap();
         assert_eq!(row.try_get::<String, _>(0).unwrap(), "failed");
-        assert!(row
-            .try_get::<String, _>(1)
-            .unwrap()
-            .contains("migration-pending"));
-        assert!(row
-            .try_get::<Option<String>, _>(2)
-            .unwrap()
-            .unwrap()
-            .contains("Command was approved"));
-        assert_eq!(row.try_get::<Option<i64>, _>(3).unwrap(), Some(127));
+        assert!(row.try_get::<String, _>(1).unwrap().contains("failed"));
+        assert!(row.try_get::<Option<String>, _>(2).unwrap().is_some());
+        assert_eq!(
+            row.try_get::<Option<i64>, _>(3).unwrap(),
+            Some(crate::ssh_transport::SSH_TRANSPORT_EXIT_CODE)
+        );
         assert!(row.try_get::<Option<String>, _>(4).unwrap().is_some());
         assert!(row.try_get::<Option<String>, _>(5).unwrap().is_some());
         assert!(row.try_get::<Option<String>, _>(6).unwrap().is_some());
 
         let audit = audit_entries(&pool).await.unwrap();
         assert!(audit.iter().any(|e| e["action"] == "remote_exec.execute_failed"));
+    }
+
+    #[tokio::test]
+    async fn approved_remote_exec_runs_over_ssh_and_streams_output() {
+        crate::ssh_test_server::init_master_key();
+        let (port, _files, behavior) = crate::ssh_test_server::spawn().await;
+        {
+            let mut guard = behavior.lock().await;
+            guard.exec_stdout = "remote-ok from ssh exec\n".to_string();
+            guard.exec_exit_code = 0;
+        }
+
+        let pool = test_pool().await;
+        let mut profile_payload = payload("web-ssh-exec");
+        profile_payload.auth_method = "password".to_string();
+        profile_payload.secret = Some(crate::ssh_test_server::TEST_PASSWORD.to_string());
+        profile_payload.port = Some(port as i64);
+        let profile = save_profile_core(&pool, profile_payload).await.unwrap();
+
+        let started = start_remote_exec_core(
+            &pool,
+            StartRemoteExecPayload {
+                profile_id: profile.id.clone(),
+                script_id: None,
+                command: "echo remote-ok".to_string(),
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+        let exec_id = started["remote_exec_id"].as_str().unwrap().to_string();
+        decide_remote_exec_core(&pool, &exec_id, true, None)
+            .await
+            .unwrap();
+        let finalized = finalize_approved_remote_exec_core(None, &pool, &exec_id)
+            .await
+            .unwrap();
+
+        assert_eq!(finalized["status"], "done");
+        assert_eq!(finalized["exitCode"], 0);
+        assert!(finalized["output"].as_str().unwrap().contains("remote-ok from ssh exec"));
+
+        let row = sqlx::query(
+            "SELECT status, output, exit_code FROM remote_executions WHERE id = ?",
+        )
+        .bind(&exec_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.try_get::<String, _>(0).unwrap(), "done");
+        assert!(row.try_get::<String, _>(1).unwrap().contains("remote-ok"));
+        assert_eq!(row.try_get::<Option<i64>, _>(2).unwrap(), Some(0));
+
+        // The host key fingerprint is pinned after the first connection.
+        let pinned: Option<String> =
+            sqlx::query_scalar("SELECT host_key_fingerprint FROM server_profiles WHERE id = ?")
+                .bind(&profile.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(pinned.is_some());
+        assert!(pinned.as_deref().unwrap_or_default().starts_with("SHA256:"));
+    }
+
+    #[tokio::test]
+    async fn remote_exec_rejects_changed_host_key() {
+        crate::ssh_test_server::init_master_key();
+        let (port, _files, _behavior) = crate::ssh_test_server::spawn().await;
+        let pool = test_pool().await;
+        let mut profile_payload = payload("web-hostkey");
+        profile_payload.auth_method = "password".to_string();
+        profile_payload.secret = Some(crate::ssh_test_server::TEST_PASSWORD.to_string());
+        profile_payload.port = Some(port as i64);
+        let profile = save_profile_core(&pool, profile_payload).await.unwrap();
+
+        // A pinned fingerprint that never matches the test server key.
+        sqlx::query("UPDATE server_profiles SET host_key_fingerprint = ? WHERE id = ?")
+            .bind("SHA256:not-the-real-host-key")
+            .bind(&profile.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let started = start_remote_exec_core(
+            &pool,
+            StartRemoteExecPayload {
+                profile_id: profile.id,
+                script_id: None,
+                command: "echo hi".to_string(),
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+        let exec_id = started["remote_exec_id"].as_str().unwrap().to_string();
+        decide_remote_exec_core(&pool, &exec_id, true, None)
+            .await
+            .unwrap();
+        let finalized = finalize_approved_remote_exec_core(None, &pool, &exec_id)
+            .await
+            .unwrap();
+        assert_eq!(finalized["status"], "failed");
+
+        let row = sqlx::query("SELECT status, exit_code FROM remote_executions WHERE id = ?")
+            .bind(&exec_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.try_get::<String, _>(0).unwrap(), "failed");
+        assert_eq!(
+            row.try_get::<Option<i64>, _>(1).unwrap(),
+            Some(crate::ssh_transport::SSH_TRANSPORT_EXIT_CODE)
+        );
+    }
+
+    #[tokio::test]
+    async fn connection_test_authenticates_with_stored_secret() {
+        crate::ssh_test_server::init_master_key();
+        let (port, _files, _behavior) = crate::ssh_test_server::spawn().await;
+        let pool = test_pool().await;
+        let mut profile_payload = payload("web-connection-auth");
+        profile_payload.auth_method = "password".to_string();
+        profile_payload.secret = Some(crate::ssh_test_server::TEST_PASSWORD.to_string());
+        profile_payload.port = Some(port as i64);
+        let profile = save_profile_core(&pool, profile_payload).await.unwrap();
+
+        let result = test_connection_core(&pool, &profile.id).await.unwrap();
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["authenticated"], true);
+        assert!(result["hostKeyFingerprint"].is_string());
+
+        // Wrong password must fail the authenticated probe, not fake success.
+        let mut bad_payload = payload("web-connection-bad");
+        bad_payload.auth_method = "password".to_string();
+        bad_payload.secret = Some("wrong-password".to_string());
+        bad_payload.port = Some(port as i64);
+        let bad_profile = save_profile_core(&pool, bad_payload).await.unwrap();
+        let bad = test_connection_core(&pool, &bad_profile.id).await.unwrap();
+        assert_eq!(bad["ok"], false);
+        assert_eq!(bad["authenticated"], false);
+        assert!(bad["error"].as_str().unwrap().contains("authentication"));
+    }
+
+    #[tokio::test]
+    async fn transfer_script_uploads_content_over_sftp() {
+        crate::ssh_test_server::init_master_key();
+        let (port, files, _behavior) = crate::ssh_test_server::spawn().await;
+        let pool = test_pool().await;
+        let mut profile_payload = payload("web-sftp");
+        profile_payload.auth_method = "password".to_string();
+        profile_payload.secret = Some(crate::ssh_test_server::TEST_PASSWORD.to_string());
+        profile_payload.port = Some(port as i64);
+        let profile = save_profile_core(&pool, profile_payload).await.unwrap();
+
+        sqlx::query(
+            "INSERT INTO scripts (id, name, filename, content) VALUES (?, ?, ?, ?)",
+        )
+        .bind("script-sftp-1")
+        .bind("deploy.py")
+        .bind("deploy.py")
+        .bind("print('deployed')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result = transfer_remote_script_core(
+            &pool,
+            TransferRemoteScriptPayload {
+                profile_id: profile.id.clone(),
+                script_id: Some("script-sftp-1".to_string()),
+                remote_path: "/tmp/deploy.py".to_string(),
+                permissions: Some("755".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["success"], true);
+        assert_eq!(result["remote_path"], "/tmp/deploy.py");
+
+        let files = files.lock().await;
+        let uploaded = files.get("/tmp/deploy.py").expect("file stored on server");
+        assert_eq!(uploaded, b"print('deployed')");
+    }
+
+    #[tokio::test]
+    async fn transfer_script_rejects_relative_remote_paths() {
+        crate::ssh_test_server::init_master_key();
+        let pool = test_pool().await;
+        let profile = save_profile_core(&pool, payload("web-sftp-bad")).await.unwrap();
+        let result = transfer_remote_script_core(
+            &pool,
+            TransferRemoteScriptPayload {
+                profile_id: profile.id,
+                script_id: Some("script-1".to_string()),
+                remote_path: "relative/path.py".to_string(),
+                permissions: None,
+            },
+        )
+        .await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
