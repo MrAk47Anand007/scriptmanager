@@ -633,19 +633,20 @@ npm run tauri:build
 Manual smoke:
 
 - [x] Launch `npx tauri dev`.
-- [ ] Open every activity tab.
+- [x] Open every activity tab.
 - [ ] Exercise Scripts create/edit/run/cancel and terminal input.
 - [ ] Exercise API send and history.
 - [ ] Exercise Workflow create/publish/run/cancel/retry.
 - [ ] Exercise Git status/log/commit-safe flow.
-- [ ] Exercise Settings sections.
-- [ ] Exercise pending surfaces and confirm they do not crash.
+- [x] Exercise Settings sections.
+- [x] Exercise pending surfaces and confirm they do not crash.
 - [x] Scan dev logs for missing command errors.
 - [x] Record results in `docs/releases/`.
 
 Progress notes:
 
-- 2026-09-12: `npx tauri dev` started Vite on `http://localhost:1420`, compiled and launched `target\debug\scriptmanager.exe`, initialized the SQLite schema, loaded the initial scripts/collections/templates/notification-delivery data through native commands, and was stopped cleanly with Ctrl+C. No missing-command errors appeared in the captured startup logs. Full visual tab-by-tab smoke remains pending because this terminal run did not exercise the Tauri WebView UI.
+- 2026-09-12: `npx tauri dev` started Vite on `http://localhost:1420`, compiled and launched `target\debug\scriptmanager.exe`, initialized the SQLite schema, loaded the initial scripts/collections/templates/notification-delivery data through native commands, and was stopped cleanly with Ctrl+C. No missing-command errors appeared in the captured startup logs.
+- 2026-09-12: Relaunched `npx tauri dev` and used Windows UI Automation to verify the visible `ScriptManager` Tauri window opens as `Desktop / Ready`, all activity tabs navigate without crashing, and Settings sections General, Appearance, Cloud Storage, GitHub Gist, Security, Secret Vault, Notifications, Plugins, Workspace Access, and Desktop all render and remain Ready. Pending surfaces such as Plugins and Workspace Access are visible and stable. Terminal panel opens, but terminal text entry was not automated because Windows UI automation safety rules forbid terminal interaction through UI automation.
 
 Done means:
 
@@ -661,7 +662,7 @@ Done means:
 4. SSH/SCP transport for Ops remote execution.
 5. ACP provider run/interrupt/resume/terminate and event streaming.
 6. Plugin execution host and plugin workflow nodes.
-7. Workflow remote/notification/agent/plugin node execution.
+7. Workflow remote/agent/plugin node execution.
 8. Git protected-operation approvals.
 9. Clipboard and reveal-path helpers.
 10. Electron naming cleanup (`__ELECTRON__`, `electron.d.ts`, docs).

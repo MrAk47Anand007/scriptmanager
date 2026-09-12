@@ -6,7 +6,7 @@
 - `npm run guard:no-api-fallback` passed.
 - `npm run guard:desktop-bridge` passed.
 - `npm run build` passed. Vite reported the existing large chunk warning for `index--d6mMYz4.js`.
-- `cargo test --lib -- --nocapture` passed: 120 tests, 0 failed.
+- `cargo test --lib -- --nocapture` passed: 129 tests, 0 failed.
 - `npm run tauri:build:no-bundle` passed and built `tauri-app/src-tauri/target/release/scriptmanager.exe`.
 
 ## Tauri Dev Startup Evidence
@@ -16,6 +16,7 @@
 - Startup logs showed schema creation/migration and initial native command reads for scripts, tags, collections, templates, and notification deliveries.
 - No missing Tauri command errors appeared in the captured startup logs.
 - The dev process was stopped cleanly with Ctrl+C after startup evidence was captured.
+- A later `npx tauri dev` run opened the visible `ScriptManager` desktop window through Windows UI Automation. The app reached `Desktop / Ready`, every activity tab opened without crashing, and all Settings subsections rendered and stayed Ready.
 
 ## Source Work Completed In This Migration Pass
 
@@ -28,6 +29,7 @@
 - Added remote execution approval-contract proof: start returns renderer-compatible approval metadata, approve/reject remains immutable, and connection tests expose both legacy and renderer field names.
 - Added native workflow notification-node execution with persisted notification delivery evidence for channel kind and channel id paths.
 - Added durable migration-pending agent launch records: failed run, user/system messages, and a final `agent-event` refresh signal when ACP process control is unavailable.
+- Added durable migration-pending agent control records: interrupt/resume/terminate attempts validate the run id, append system messages, and resume also persists the follow-up prompt while real provider process control remains unavailable.
 - Clarified local-only cloud storage support and disabled unsupported provider claims.
 - Preserved plugin registry metadata while explicitly disabling plugin execution host claims.
 - Documented the remote execution SSH/SFTP target architecture: `russh` plus `russh-sftp`.
@@ -37,11 +39,11 @@
 
 ## Remaining Manual Or External Verification
 
-- Full visual Tauri smoke is still pending: open each activity tab; exercise Scripts create/edit/run/cancel and terminal UI input; API send/history; Workflow create/publish/run/cancel/retry; Git status/log/commit-safe flow; Settings sections; and visible pending surfaces.
+- Visual Tauri smoke is partially complete: the desktop window opens, all activity tabs navigate, all Settings sections render, and visible pending surfaces such as Plugins and Workspace Access do not crash. Scripts create/edit/run/cancel, API UI send/history, Workflow create/publish/run/cancel/retry, and Git UI status/log/commit-safe flow still need hands-on UI proof. Terminal panel opens, but terminal text entry was not automated because Windows UI automation safety rules forbid terminal interaction through UI automation.
 - Gist live sync/delete still needs a real GitHub token.
 - API live send with bearer/basic/API key/no-auth is source-verified against a loopback HTTP server; visual Tauri UI API smoke remains pending with the broader manual pass.
 - Remote SSH/SFTP transport remains a deliberate migration-pending runtime. Current code supports profiles, TCP reachability checks, renderer-compatible approval/audit records, and typed pending transfer/execution errors.
-- ACP provider process control remains migration-pending. Profiles/history/discovery are native; launch attempts now persist failed migration-pending runs, while real interrupt/resume/terminate still return typed pending errors until process control is ported.
+- ACP provider process control remains migration-pending. Profiles/history/discovery are native; launch and control attempts now persist migration-pending run history/messages until real provider process launch and control are ported.
 - Workflow remote/agent/plugin nodes remain pending behind clear persisted failure states until their underlying SSH, ACP, and plugin-host runtimes exist. Notification nodes now execute through native persisted deliveries.
 - Protected Git approval consumption is source-complete for matching protected Git action requests; full visual workbench retry smoke remains pending with the broader Tauri UI smoke pass.
 
