@@ -641,7 +641,7 @@ Manual smoke:
 - [ ] Exercise Scripts create/edit/run/cancel and terminal input.
 - [x] Exercise API send and history.
 - [ ] Exercise Workflow create/publish/run/cancel/retry.
-- [ ] Exercise Git status/log/commit-safe flow.
+- [x] Exercise Git status/log/commit-safe flow.
 - [x] Exercise Settings sections.
 - [x] Exercise pending surfaces and confirm they do not crash.
 - [x] Scan dev logs for missing command errors.
@@ -652,6 +652,7 @@ Progress notes:
 - 2026-09-12: `npx tauri dev` started Vite on `http://localhost:1420`, compiled and launched `target\debug\scriptmanager.exe`, initialized the SQLite schema, loaded the initial scripts/collections/templates/notification-delivery data through native commands, and was stopped cleanly with Ctrl+C. No missing-command errors appeared in the captured startup logs.
 - 2026-09-12: Relaunched `npx tauri dev` and used Windows UI Automation to verify the visible `ScriptManager` Tauri window opens as `Desktop / Ready`, all activity tabs navigate without crashing, and Settings sections General, Appearance, Cloud Storage, GitHub Gist, Security, Secret Vault, Notifications, Plugins, Workspace Access, and Desktop all render and remain Ready. Pending surfaces such as Plugins and Workspace Access are visible and stable. Terminal panel opens, but terminal text entry was not automated because Windows UI automation safety rules forbid terminal interaction through UI automation.
 - 2026-09-12: Exercised the API Client in the visible Tauri window against a disposable local HTTP endpoint at `http://127.0.0.1:17891/smoke?from=tauri`. The request returned `200 OK` with the expected JSON response in the response viewer, and the API sidebar History tab showed the recent GET entries after the send/history refresh fix.
+- 2026-09-12: Exercised the Git workbench in the visible Tauri window using a disposable local repository and temporary project row. The UI loaded repository status on `main`, showed one modified `README.md`, rendered the diff, committed through `Commit All Changes`, refreshed to `Working tree clean`, and showed `git ui smoke commit` in the History tab.
 
 Done means:
 
