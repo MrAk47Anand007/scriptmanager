@@ -38,14 +38,15 @@ pub struct SshProfileConnection {
 }
 
 /// Load a server profile plus its decrypted secret for immediate
-/// connection use. The secret never leaves this module.
+/// connection use. Resolves by id first, then by display name (older
+/// workflow configs stored names). The secret never leaves this module.
 pub async fn load_profile_connection(
     pool: &SqlitePool,
     profile_id: &str,
 ) -> Result<SshProfileConnection, String> {
     let row = sqlx::query(
         "SELECT id, host, port, username, auth_method, encrypted_secret, key_path, host_key_fingerprint
-         FROM server_profiles WHERE id = ?",
+         FROM server_profiles WHERE id = ?1 OR name = ?1 ORDER BY (id = ?1) DESC LIMIT 1",
     )
     .bind(profile_id)
     .fetch_optional(pool)

@@ -966,14 +966,16 @@ async fn run_script_node(
     pool: &SqlitePool,
     script_id: &str,
 ) -> Result<serde_json::Value, String> {
-    let row: Option<ScriptRef> = sqlx::query_as(
-        "SELECT id, language, interpreter, content, timeout_ms FROM scripts WHERE id = ?",
+    // Resolve by id first; older builders stored the display name, so fall
+    // back to a name lookup before failing.
+    let script: Option<ScriptRef> = sqlx::query_as(
+        "SELECT id, language, interpreter, content, timeout_ms FROM scripts WHERE id = ?1 OR name = ?1 ORDER BY (id = ?1) DESC LIMIT 1",
     )
     .bind(script_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| e.to_string())?;
-    let script = row.ok_or_else(|| format!("Script not found: {}", script_id))?;
+    let script = script.ok_or_else(|| format!("Script not found: {}", script_id))?;
     let language = script.language.unwrap_or_else(|| "python".to_string());
     let interpreter = script
         .interpreter
@@ -1041,7 +1043,8 @@ async fn run_api_node(
         "SELECT id, name, method, url, headers, query_params, variables, request_options,
             pre_request_script, test_script, response_mappings, body_type, body,
             auth_type, auth_config, collection_id, created_at, updated_at
-         FROM api_requests WHERE id = ? AND workspace_id = 'default'",
+         FROM api_requests WHERE (id = ?1 OR name = ?1) AND workspace_id = 'default'
+         ORDER BY (id = ?1) DESC LIMIT 1",
     )
     .bind(request_id)
     .fetch_optional(pool)
@@ -1111,7 +1114,7 @@ async fn run_remote_node(
         .ok_or_else(|| "nodes config.profileId is required".to_string())?;
 
     let script: Option<ScriptRef> = sqlx::query_as(
-        "SELECT id, language, interpreter, content, timeout_ms FROM scripts WHERE id = ?",
+        "SELECT id, language, interpreter, content, timeout_ms FROM scripts WHERE id = ?1 OR name = ?1 ORDER BY (id = ?1) DESC LIMIT 1",
     )
     .bind(script_id)
     .fetch_optional(pool)
@@ -1585,6 +1588,16 @@ async fn execute_layers(
                     return Ok(serde_json::json!({ "paused": true }));
                 }
                 Err(message) => {
+                    // A cancel request that lands while a node is executing
+                    // surfaces as a node error; record it as cancelled so the
+                    // user's cancel decision is not overwritten by "failed".
+                    if is_cancel_requested(pool, run_id).await {
+                        let error = serde_json::json!({ "message": "Workflow run cancelled" });
+                        finish_node(pool, run_id, node_id, attempt, STATUS_CANCELLED, None, Some(&error), None).await?;
+                        statuses.insert(node_id.clone(), STATUS_CANCELLED.to_string());
+                        finish_run(pool, run_id, STATUS_CANCELLED, None, Some(&error)).await?;
+                        return Err("Workflow run cancelled".to_string());
+                    }
                     let error = serde_json::json!({ "message": message });
                     finish_node(pool, run_id, node_id, attempt, STATUS_FAILED, None, Some(&error), None).await?;
                     statuses.insert(node_id.clone(), STATUS_FAILED.to_string());
@@ -1837,7 +1850,14 @@ pub async fn cancel_workflow_run(
     pool: tauri::State<'_, SqlitePool>,
     run_id: String,
 ) -> Result<WorkflowRunDetail, String> {
-    let detail = get_run_detail(&pool, &run_id).await?;
+    cancel_workflow_run_core(&pool, &run_id).await
+}
+
+pub async fn cancel_workflow_run_core(
+    pool: &SqlitePool,
+    run_id: &str,
+) -> Result<WorkflowRunDetail, String> {
+    let detail = get_run_detail(pool, run_id).await?;
     if ["succeeded", STATUS_FAILED, STATUS_CANCELLED].contains(&detail.status.as_str()) {
         return Ok(detail);
     }
@@ -1848,8 +1868,8 @@ pub async fn cancel_workflow_run(
     )
     .bind(&now)
     .bind(&now)
-    .bind(&run_id)
-    .execute(&*pool)
+    .bind(run_id)
+    .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
     // Mark in-flight pending/running nodes cancelled so the drawer is consistent
@@ -1859,11 +1879,11 @@ pub async fn cancel_workflow_run(
          WHERE run_id = ? AND status IN ('pending', 'running')",
     )
     .bind(&now)
-    .bind(&run_id)
-    .execute(&*pool)
+    .bind(run_id)
+    .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
-    get_run_detail(&pool, &run_id).await
+    get_run_detail(pool, run_id).await
 }
 
 // ---------- Tests ----------
@@ -2260,6 +2280,46 @@ mod tests {
             .await
             .unwrap();
         assert!(retry_node_record(&pool, &ok.id, "n1").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn workflow_run_cancel_marks_run_and_nodes_cancelled() {
+        let pool = test_pool().await;
+        let definition = serde_json::json!({
+            "schemaVersion": 1,
+            "name": "Cancellable",
+            "nodes": [ { "id": "wait", "type": "delay", "name": "Wait", "config": { "durationMs": 8000 } } ],
+            "edges": []
+        });
+        let workflow_id = create_and_publish(&pool, definition).await;
+
+        let run_pool = pool.clone();
+        let run_handle = tokio::spawn(async move {
+            run_workflow_record(&run_pool, &workflow_id, serde_json::json!({})).await
+        });
+
+        // Wait for the run row to appear, then cancel while the delay sleeps.
+        let run_id = loop {
+            let pending: Option<(String, String)> = sqlx::query_as(
+                "SELECT id, status FROM workflow_runs ORDER BY created_at DESC LIMIT 1",
+            )
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+            if let Some((id, _)) = pending {
+                break id;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        };
+
+        let cancelled = cancel_workflow_run_core(&pool, &run_id).await.unwrap();
+        assert_eq!(cancelled.status, STATUS_CANCELLED);
+
+        let finished = run_handle.await.unwrap().unwrap();
+        // The run must end cancelled, never overwritten back to failed.
+        assert_eq!(finished.status, STATUS_CANCELLED);
+        let node = &finished.node_runs[0];
+        assert_eq!(node.status, STATUS_CANCELLED);
     }
 
     #[tokio::test]

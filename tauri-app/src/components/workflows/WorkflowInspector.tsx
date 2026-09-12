@@ -5,12 +5,66 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { selectSelectedWorkflowNode } from '@/features/workflows/selectors'
 import { selectNode, updateNodeConfig } from '@/features/workflows/workflowsSlice'
 import { getWorkflowNodeSpec, validateNodeConfig, type InspectorField } from '@/lib/workflows/nodeRegistry'
+import { listAgentProfilesRuntime } from '@/lib/agentRuntimeClient'
+
+function ResourceField({ resource, field, value, onChange }: { resource: NonNullable<InspectorField['resource']>; field: InspectorField; value: unknown; onChange: (value: unknown) => void }) {
+  const className = 'mt-1.5 w-full rounded-md border border-wb-border bg-background px-2.5 py-2 text-xs outline-none focus:border-accent-brand'
+  const scripts = useAppSelector((state) => state.scripts.items)
+  const apiRequests = useAppSelector((state) => state.api.requests)
+  const remoteProfiles = useAppSelector((state) => state.ops.serverProfiles)
+  const [agentProfiles, setAgentProfiles] = useState<Array<{ id: string; name: string }>>([])
+
+  useEffect(() => {
+    if (resource !== 'agentProfiles') return
+    let cancelled = false
+    listAgentProfilesRuntime()
+      .then((profiles) => {
+        if (!cancelled) setAgentProfiles(profiles.map((profile) => ({ id: profile.id, name: profile.name })))
+      })
+      .catch(() => {
+        if (!cancelled) setAgentProfiles([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [resource])
+
+  const options: Array<{ value: string; label: string }> = (() => {
+    switch (resource) {
+      case 'scripts':
+        return scripts.map((script) => ({ value: script.id, label: script.name }))
+      case 'apiRequests':
+        return apiRequests.map((request) => ({ value: request.id, label: request.name }))
+      case 'remoteProfiles':
+        return remoteProfiles.map((profile) => ({ value: profile.id, label: profile.name }))
+      case 'agentProfiles':
+        return agentProfiles
+      default:
+        return []
+    }
+  })()
+
+  const stored = String(value ?? '')
+  // Values saved before the resource picker existed may hold a display name;
+  // keep them selectable so the mapping stays visible and correctable.
+  const known = options.some((option) => option.value === stored)
+  return (
+    <select aria-label={field.label} value={stored} onChange={(event) => onChange(event.target.value)} className={className}>
+      <option value="">Select…</option>
+      {!known && stored !== '' && <option value={stored}>{stored}</option>}
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>{option.label}</option>
+      ))}
+    </select>
+  )
+}
 
 function Field({ field, value, onChange }: { field: InspectorField; value: unknown; onChange: (value: unknown) => void }) {
   const className = 'mt-1.5 w-full rounded-md border border-wb-border bg-background px-2.5 py-2 text-xs outline-none focus:border-accent-brand'
   if (field.kind === 'select') return <select aria-label={field.label} value={String(value ?? '')} onChange={(event)=>onChange(event.target.value)} className={className}><option value="">Select…</option>{field.options?.map((option)=><option key={option.value} value={option.value}>{option.label}</option>)}</select>
   if (field.kind === 'textarea') return <textarea aria-label={field.label} value={String(value ?? '')} onChange={(event)=>onChange(event.target.value)} rows={4} className={`${className} resize-y`}/>
   if (field.kind === 'json') return <textarea aria-label={field.label} value={JSON.stringify(value ?? {}, null, 2)} onChange={(event)=>{try{onChange(JSON.parse(event.target.value))}catch{}}} rows={6} className={`${className} resize-y font-mono`}/>
+  if (field.kind === 'resource') return <ResourceField resource={field.resource ?? 'scripts'} field={field} value={value} onChange={onChange}/>
   return <input aria-label={field.label} type={field.kind==='number'?'number':'text'} min={field.min} value={field.kind==='number'?Number(value ?? 0):String(value ?? '')} onChange={(event)=>onChange(field.kind==='number'?Number(event.target.value):event.target.value)} className={className}/>
 }
 
