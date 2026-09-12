@@ -113,12 +113,13 @@ impl Default for TerminalState {
     }
 }
 
-#[tauri::command]
-pub fn create_terminal(
-    session_id: String,
-    window: Window,
-    state: State<'_, TerminalState>,
-) -> Result<(), String> {
+/// Spawn a fresh PTY and shell, wire the typed event channel, and start the
+/// output reader thread. The `emit` closure receives every terminal event
+/// for this session.
+fn spawn_pty_session<F>(session_id: &str, emit: F) -> Result<TerminalSession, String>
+where
+    F: Fn(TerminalEvent) + Clone + Send + 'static,
+{
     let pty_system = native_pty_system();
 
     let pair = pty_system
@@ -146,17 +147,12 @@ pub fn create_terminal(
 
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
-    let session_id_clone = session_id.clone();
+    let session_id_clone = session_id.to_string();
 
     // Emit connected event
-    window
-        .emit(
-            "terminal-event",
-            TerminalEvent::Connected {
-                session_id: session_id_clone.clone(),
-            },
-        )
-        .ok();
+    emit(TerminalEvent::Connected {
+        session_id: session_id_clone.clone(),
+    });
 
     // Read loop — emits on a single typed event channel
     std::thread::spawn(move || {
@@ -164,46 +160,62 @@ pub fn create_terminal(
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => {
-                    let _ = window.emit(
-                        "terminal-event",
-                        TerminalEvent::Closed {
-                            session_id: session_id_clone.clone(),
-                        },
-                    );
+                    let _ = emit(TerminalEvent::Closed {
+                        session_id: session_id_clone.clone(),
+                    });
                     break;
                 }
                 Ok(n) => {
                     let output = String::from_utf8_lossy(&buf[..n]).into_owned();
-                    let _ = window.emit(
-                        "terminal-event",
-                        TerminalEvent::Data {
-                            session_id: session_id_clone.clone(),
-                            data: output,
-                        },
-                    );
+                    let _ = emit(TerminalEvent::Data {
+                        session_id: session_id_clone.clone(),
+                        data: output,
+                    });
                 }
                 Err(e) => {
-                    let _ = window.emit(
-                        "terminal-event",
-                        TerminalEvent::Error {
-                            session_id: session_id_clone.clone(),
-                            message: e.to_string(),
-                        },
-                    );
+                    let _ = emit(TerminalEvent::Error {
+                        session_id: session_id_clone.clone(),
+                        message: e.to_string(),
+                    });
                     break;
                 }
             }
         }
     });
 
-    let session = TerminalSession::new(pair.master, writer, child);
-    state
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(session_id, session);
+    Ok(TerminalSession::new(pair.master, writer, child))
+}
 
+/// Create the session only when it is missing. Re-creating an existing
+/// session would drop a live PTY (and any script currently running in it),
+/// so warm/ensure calls are no-ops while the session is alive.
+fn ensure_terminal_session<F>(
+    session_id: &str,
+    emit: F,
+    sessions: &mut HashMap<String, TerminalSession>,
+) -> Result<(), String>
+where
+    F: Fn(TerminalEvent) + Clone + Send + 'static,
+{
+    if sessions.contains_key(session_id) {
+        return Ok(());
+    }
+    let session = spawn_pty_session(session_id, emit)?;
+    sessions.insert(session_id.to_string(), session);
     Ok(())
+}
+
+#[tauri::command]
+pub fn create_terminal(
+    session_id: String,
+    window: Window,
+    state: State<'_, TerminalState>,
+) -> Result<(), String> {
+    let emitter_window = window.clone();
+    let mut sessions = state.sessions.lock().unwrap();
+    ensure_terminal_session(&session_id, move |event| {
+        emitter_window.emit("terminal-event", event).ok();
+    }, &mut sessions)
 }
 
 #[tauri::command]
@@ -341,9 +353,17 @@ pub async fn run_script_in_terminal(
 
     let full_input = format!("{}{}", env_commands, command_str);
 
-    // Lock sessions, write to writer, set context, release
+    // Lock sessions, ensure the PTY exists, write to writer, set context,
+    // release. Creating on demand removes the mount race where the renderer
+    // opens the terminal panel and runs the script in the same tick.
     {
         let mut sessions = state.sessions.lock().unwrap();
+        {
+            let emitter_window = window.clone();
+            ensure_terminal_session(&session_id, move |event| {
+                emitter_window.emit("terminal-event", event).ok();
+            }, &mut sessions)?;
+        }
         if let Some(session) = sessions.get_mut(&session_id) {
             session.script_id = Some(script_id.clone());
             if let Err(e) = session.writer.write_all(full_input.as_bytes()) {
@@ -435,6 +455,48 @@ mod tests {
         let state = TerminalState::default();
         let sessions = state.sessions.lock().unwrap();
         assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn ensure_terminal_session_creates_once_and_does_not_clobber() {
+        let (tx, rx) = std::sync::mpsc::channel::<TerminalEvent>();
+        let mut sessions: HashMap<String, TerminalSession> = HashMap::new();
+
+        ensure_terminal_session("t-ensure", move |event| {
+            let _ = tx.send(event);
+        }, &mut sessions)
+        .expect("first ensure creates the session");
+        assert!(sessions.contains_key("t-ensure"));
+
+        // Writing through the original session still works.
+        {
+            let session = sessions.get_mut("t-ensure").unwrap();
+            session
+                .writer
+                .write_all(b"echo ensure-ok\r")
+                .expect("writer stays live");
+        }
+
+        // A second ensure must be a no-op (no clobber, no second Connected).
+        let (tx2, _rx2) = std::sync::mpsc::channel::<TerminalEvent>();
+        ensure_terminal_session("t-ensure", move |event| {
+            let _ = tx2.send(event);
+        }, &mut sessions)
+        .expect("second ensure is a no-op");
+
+        let mut connected = 0;
+        while let Ok(event) = rx.try_recv() {
+            if matches!(event, TerminalEvent::Connected { .. }) {
+                connected += 1;
+            }
+        }
+        assert_eq!(connected, 1, "exactly one session was spawned");
+
+        if let Some(mut session) = sessions.remove("t-ensure") {
+            if let Some(mut child) = session.child.take() {
+                let _ = child.kill();
+            }
+        }
     }
 
     #[test]
