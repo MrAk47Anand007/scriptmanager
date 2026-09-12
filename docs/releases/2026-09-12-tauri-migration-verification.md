@@ -6,7 +6,7 @@
 - `npm run guard:no-api-fallback` passed.
 - `npm run guard:desktop-bridge` passed.
 - `npm run build` passed. Vite reported the existing large chunk warning for `index--d6mMYz4.js`.
-- `cargo test --lib -- --nocapture` passed: 129 tests, 0 failed.
+- `cargo test --lib -- --nocapture` passed: 139 tests, 0 failed.
 - `npm run tauri:build:no-bundle` passed and built `tauri-app/src-tauri/target/release/scriptmanager.exe`.
 
 ## Tauri Dev Startup Evidence
@@ -38,6 +38,7 @@
 - Added visible and source-level proof for Tauri open-folder restart behavior: the dialog opens after restart, accepts the renderer camelCase `folderPath` payload, and linked-folder scripts read/save/run against their canonical source files with containment checks.
 - Added API send/history UI proof in the visible Tauri window and refreshed Redux history state immediately after successful native sends so newly inserted native history records appear in the API sidebar.
 - Added disposable SSH-identification integration proof for the remote connection test: a local test server emits an `SSH-` banner and asserts the Tauri client sends `SSH-2.0-ScriptManager_Tauri`.
+- Added remote execution approval-finalization proof: approved Tauri remote executions now emit renderer-compatible `remote-exec-event` line/error payloads and persist a failed migration-pending terminal state with output, log output, exit code, timestamps, and audit evidence instead of silently emitting a synthetic done event.
 - Added Git workbench UI proof against a disposable local repository: status loaded one modified file, diff rendered, `Commit All Changes` produced a local commit, the working tree refreshed clean, and History showed the new commit.
 - Updated operator/troubleshooting/docs language from Electron-hosted assumptions to Tauri-hosted behavior.
 
@@ -46,7 +47,7 @@
 - Visual Tauri smoke is partially complete: the desktop window opens, all activity tabs navigate, all Settings sections render, visible pending surfaces such as Plugins and Workspace Access do not crash, the Scripts open-folder dialog opens after restart, the API Client can send a GET request to a disposable local HTTP endpoint, render a `200 OK` JSON response, and show recent entries in History, and the Git workbench can load status, render a diff, commit all changes, refresh clean, and show the new commit in History against a disposable local repository. Scripts create/edit/run/cancel and Workflow create/publish/run/cancel/retry still need hands-on UI proof. Terminal panel opens, but terminal text entry was not automated because Windows UI automation safety rules forbid terminal interaction through UI automation.
 - Gist live sync/delete still needs a real GitHub token.
 - API live send with bearer/basic/API key/no-auth is source-verified against a loopback HTTP server; visual Tauri UI API smoke is verified for a GET request and History refresh against `http://127.0.0.1:17891/smoke?from=tauri`.
-- Remote SSH/SFTP transport remains a deliberate migration-pending runtime. Current code supports profiles, SSH identification-banner connection checks with disposable local server coverage, renderer-compatible approval/audit records, and typed pending transfer/execution errors.
+- Remote SSH/SFTP transport remains a deliberate migration-pending runtime. Current code supports profiles, SSH identification-banner connection checks with disposable local server coverage, renderer-compatible approval/audit records, approval-finalization events, and persisted typed pending transfer/execution failures.
 - ACP provider process control remains migration-pending. Profiles/history/discovery are native; launch and control attempts now persist migration-pending run history/messages until real provider process launch and control are ported.
 - Workflow remote/agent/plugin nodes remain pending behind clear persisted failure states until their underlying SSH, ACP, and plugin-host runtimes exist. Notification nodes now execute through native persisted deliveries.
 - Protected Git approval consumption is source-complete for matching protected Git action requests; local Git workbench status/log/commit-safe UI smoke is verified, while protected remote fetch/pull/push approval retry remains source-level only.

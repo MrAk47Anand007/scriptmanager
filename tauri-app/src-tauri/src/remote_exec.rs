@@ -332,11 +332,14 @@ pub async fn decide_remote_exec_core(
     let new_status = if approve { "approved" } else { "rejected" };
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
-        "UPDATE remote_executions SET status = ?, approved_by = ?, note = ?, finished_at = ? WHERE id = ?",
+        "UPDATE remote_executions SET status = ?, approved_by = ?, note = ?, approved_at = ?,
+            finished_at = CASE WHEN ? = 'rejected' THEN ? ELSE NULL END WHERE id = ?",
     )
     .bind(new_status)
     .bind("local-admin")
     .bind(note.unwrap_or(""))
+    .bind(if approve { Some(now.as_str()) } else { None })
+    .bind(new_status)
     .bind(&now)
     .bind(id)
     .execute(pool)
@@ -354,6 +357,64 @@ pub async fn decide_remote_exec_core(
     Ok(serde_json::json!({ "ok": true, "remote_exec_id": id, "status": new_status }))
 }
 
+fn remote_exec_pending_message(command: &str) -> String {
+    format!(
+        "Remote command execution is migration-pending in the Tauri desktop app. Command was approved but not sent over SSH: {}",
+        command.trim()
+    )
+}
+
+pub async fn finalize_approved_remote_exec_core(
+    pool: &SqlitePool,
+    id: &str,
+) -> Result<Value, String> {
+    let row = sqlx::query("SELECT status, command FROM remote_executions WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Remote execution not found".to_string())?;
+    let status: String = row.try_get(0).map_err(|e| e.to_string())?;
+    let command: String = row.try_get(1).map_err(|e| e.to_string())?;
+    if status != "approved" {
+        return Err("Remote execution must be approved before it can run".to_string());
+    }
+
+    let started = chrono::Utc::now().to_rfc3339();
+    sqlx::query("UPDATE remote_executions SET status = 'running', started_at = ? WHERE id = ?")
+        .bind(&started)
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let message = remote_exec_pending_message(&command);
+    let output = format!("{message}\n");
+    let finished = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "UPDATE remote_executions SET status = 'failed', output = ?, log_output = ?,
+            exit_code = ?, finished_at = ? WHERE id = ?",
+    )
+    .bind(&output)
+    .bind(&output)
+    .bind(127_i64)
+    .bind(&finished)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    record_audit(pool, "remote_exec.execute_failed", "local-admin", id, &message).await?;
+
+    Ok(serde_json::json!({
+        "ok": false,
+        "remote_exec_id": id,
+        "status": "failed",
+        "exitCode": 127,
+        "output": output,
+        "message": message,
+    }))
+}
+
 #[tauri::command]
 pub async fn approve_remote_execution(
     app_handle: AppHandle,
@@ -361,7 +422,24 @@ pub async fn approve_remote_execution(
     payload: DecideRemoteExecPayload,
 ) -> Result<Value, String> {
     let result = decide_remote_exec_core(&pool, &payload.id, true, payload.note.as_deref()).await?;
-    emit_decided(&app_handle, &payload.id);
+    let finalized = finalize_approved_remote_exec_core(&pool, &payload.id).await?;
+    emit_remote_exec_event(
+        &app_handle,
+        serde_json::json!({
+            "type": "line",
+            "remoteExecId": payload.id,
+            "line": finalized["output"].as_str().unwrap_or_default(),
+        }),
+    );
+    emit_remote_exec_event(
+        &app_handle,
+        serde_json::json!({
+            "type": "error",
+            "remoteExecId": payload.id,
+            "message": finalized["message"].as_str().unwrap_or("Remote execution failed"),
+            "exitCode": finalized["exitCode"].as_i64().unwrap_or(127),
+        }),
+    );
     Ok(result)
 }
 
@@ -378,17 +456,15 @@ pub async fn reject_remote_execution(
     payload: DecideRemoteExecPayload,
 ) -> Result<Value, String> {
     let result = decide_remote_exec_core(&pool, &payload.id, false, payload.note.as_deref()).await?;
-    emit_decided(&app_handle, &payload.id);
+    emit_remote_exec_event(
+        &app_handle,
+        serde_json::json!({ "type": "done", "remoteExecId": payload.id, "exitCode": 0 }),
+    );
     Ok(result)
 }
 
-fn emit_decided(app_handle: &AppHandle, id: &str) {
-    app_handle
-        .emit(
-            "remote-exec-event",
-            serde_json::json!({ "type": "done", "remoteExecId": id, "exitCode": 0 }),
-        )
-        .ok();
+fn emit_remote_exec_event(app_handle: &AppHandle, payload: Value) {
+    app_handle.emit("remote-exec-event", payload).ok();
 }
 
 #[tauri::command]
@@ -642,6 +718,61 @@ mod tests {
         assert_eq!(started["requires_approval"], true);
         assert!(started["remote_exec_id"].as_str().unwrap().len() > 8);
         assert_eq!(started["environment"], "production");
+    }
+
+    #[tokio::test]
+    async fn approved_remote_exec_persists_migration_pending_failure() {
+        let pool = test_pool().await;
+        let profile = save_profile_core(&pool, payload("web-finalize")).await.unwrap();
+        let started = start_remote_exec_core(
+            &pool,
+            StartRemoteExecPayload {
+                profile_id: profile.id,
+                script_id: None,
+                command: "uptime".to_string(),
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+        let exec_id = started["remote_exec_id"].as_str().unwrap();
+
+        let approved = decide_remote_exec_core(&pool, exec_id, true, Some("approved for smoke"))
+            .await
+            .unwrap();
+        assert_eq!(approved["status"], "approved");
+        let finalized = finalize_approved_remote_exec_core(&pool, exec_id)
+            .await
+            .unwrap();
+        assert_eq!(finalized["status"], "failed");
+        assert_eq!(finalized["exitCode"], 127);
+        assert!(finalized["output"].as_str().unwrap().contains("uptime"));
+
+        let row = sqlx::query(
+            "SELECT status, output, log_output, exit_code, approved_at, started_at, finished_at
+             FROM remote_executions WHERE id = ?",
+        )
+        .bind(exec_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.try_get::<String, _>(0).unwrap(), "failed");
+        assert!(row
+            .try_get::<String, _>(1)
+            .unwrap()
+            .contains("migration-pending"));
+        assert!(row
+            .try_get::<Option<String>, _>(2)
+            .unwrap()
+            .unwrap()
+            .contains("Command was approved"));
+        assert_eq!(row.try_get::<Option<i64>, _>(3).unwrap(), Some(127));
+        assert!(row.try_get::<Option<String>, _>(4).unwrap().is_some());
+        assert!(row.try_get::<Option<String>, _>(5).unwrap().is_some());
+        assert!(row.try_get::<Option<String>, _>(6).unwrap().is_some());
+
+        let audit = audit_entries(&pool).await.unwrap();
+        assert!(audit.iter().any(|e| e["action"] == "remote_exec.execute_failed"));
     }
 
     #[tokio::test]

@@ -398,7 +398,7 @@ Done means:
 
 Status: profile/audit shell migrated; real SSH/SCP transport pending.
 
-Current code records profiles and remote execution state, but dedicated SSH/SCP transport remains migration-pending.
+Current code records profiles and remote execution state. Approval now produces a renderer-visible `remote-exec-event` line/error sequence and persists the migration-pending terminal output, exit code, and audit row, but dedicated SSH/SCP transport remains migration-pending.
 
 Checklist:
 
