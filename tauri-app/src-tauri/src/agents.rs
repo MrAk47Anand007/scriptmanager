@@ -1,23 +1,33 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{Row, SqlitePool};
-use std::process::Command;
+use std::collections::HashMap;
+use std::process::Stdio;
+use std::sync::{Arc, LazyLock, Mutex};
 use tauri::{AppHandle, Emitter, State};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use uuid::Uuid;
 
 /// Agent support decision (recorded in the migration completion plan, S9.1):
-/// profiles and run history are fully persisted. Codex launch uses a fixed,
-/// allowlisted non-interactive CLI shape. Long-lived process control and
-/// Claude execution remain explicit pending work; discovery only ever checks
-/// a fixed allowlist of executable names, never renderer-supplied commands.
+/// profiles and run history are fully persisted. Codex and Claude launch use
+/// fixed, allowlisted non-interactive CLI shapes executed with argument
+/// arrays. Runs execute in background tasks tracked by a live session
+/// registry so interrupt/terminate can target the running provider process.
+/// Discovery only ever checks a fixed allowlist of executable names, never
+/// renderer-supplied commands.
 
 const ALLOWED_PROVIDERS: [&str; 2] = ["codex", "claude"];
 
-#[derive(Debug)]
+/// Long stdout/stderr chunks are stored truncated so a chatty provider
+/// session cannot flood the SQLite row or the renderer.
+const MAX_MESSAGE_CHARS: usize = 8000;
+
+#[derive(Debug, Clone)]
 struct ProviderProcessResult {
-    stdout: String,
-    stderr: String,
+    stdout: Vec<String>,
+    stderr: Vec<String>,
     exit_code: Option<i32>,
+    killed_status: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -263,25 +273,251 @@ fn provider_process_args(provider: &str, prompt: &str, cwd: &str) -> Result<Vec<
             cwd.to_string(),
             prompt.to_string(),
         ]),
-        "claude" => Err("Claude ACP provider process launch is not migrated yet".to_string()),
+        // Claude Code non-interactive print mode: fixed identity, argument
+        // array, no interactive prompt surface.
+        "claude" => Ok(vec![
+            "-p".to_string(),
+            prompt.to_string(),
+            "--output-format".to_string(),
+            "json".to_string(),
+        ]),
         other => Err(format!("Unsupported agent provider: {other}")),
     }
 }
 
-fn run_provider_process(provider: &str, prompt: &str, cwd: &str) -> Result<ProviderProcessResult, String> {
+/// A running provider process tracked so interrupt/terminate can reach it.
+#[derive(Clone)]
+pub struct LiveSessionHandle {
+    child: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
+    /// Terminal status to persist when the process dies because of a control
+    /// request ("interrupted" or "terminated").
+    status_on_kill: Arc<Mutex<String>>,
+}
+
+static LIVE_SESSIONS: LazyLock<Mutex<HashMap<String, LiveSessionHandle>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn register_live_session(run_id: &str, handle: LiveSessionHandle) {
+    LIVE_SESSIONS
+        .lock()
+        .expect("live session registry lock")
+        .insert(run_id.to_string(), handle);
+}
+
+fn unregister_live_session(run_id: &str) {
+    LIVE_SESSIONS
+        .lock()
+        .expect("live session registry lock")
+        .remove(run_id);
+}
+
+fn live_session(run_id: &str) -> Option<LiveSessionHandle> {
+    LIVE_SESSIONS
+        .lock()
+        .expect("live session registry lock")
+        .get(run_id)
+        .cloned()
+}
+
+fn live_session_active(run_id: &str) -> bool {
+    LIVE_SESSIONS
+        .lock()
+        .expect("live session registry lock")
+        .contains_key(run_id)
+}
+
+/// Best-effort cleanup on unexpected drop paths: any run still registered
+/// when a new run for the same id appears is stale.
+fn truncate_for_storage(line: &str) -> String {
+    if line.chars().count() <= MAX_MESSAGE_CHARS {
+        return line.to_string();
+    }
+    let truncated: String = line.chars().take(MAX_MESSAGE_CHARS).collect();
+    format!("{truncated}\n… [truncated by ScriptManager]")
+}
+
+/// Spawn the provider process with piped streams and register it as a live
+/// session. Streams are taken before the child moves behind the mutex so
+/// the monitor task can read them concurrently.
+async fn spawn_provider_process(
+    provider: &str,
+    prompt: &str,
+    cwd: &str,
+    run_id: &str,
+) -> Result<(LiveSessionHandle, LiveSessionStreams), String> {
     let executable = discover_provider_on_path(provider)
         .ok_or_else(|| format!("'{provider}' executable not found on PATH"))?;
     let args = provider_process_args(provider, prompt, cwd)?;
-    let output = Command::new(&executable)
+    let mut command = tokio::process::Command::new(&executable);
+    command
         .args(&args)
         .current_dir(cwd)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = command
+        .spawn()
         .map_err(|error| format!("Failed to launch {provider} provider process: {error}"))?;
-    Ok(ProviderProcessResult {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        exit_code: output.status.code(),
-    })
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Provider process stdout unavailable".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Provider process stderr unavailable".to_string())?;
+
+    let handle = LiveSessionHandle {
+        child: Arc::new(tokio::sync::Mutex::new(Some(child))),
+        status_on_kill: Arc::new(Mutex::new("terminated".to_string())),
+    };
+    register_live_session(run_id, handle.clone());
+    Ok((
+        handle,
+        LiveSessionStreams { stdout, stderr },
+    ))
+}
+
+pub struct LiveSessionStreams {
+    stdout: tokio::process::ChildStdout,
+    stderr: tokio::process::ChildStderr,
+}
+
+/// Drive one provider session to completion: stream stdout/stderr lines to
+/// the renderer and collectors, wait for exit, then persist the final run
+/// state. Runs as a background task in production; tests await it directly.
+pub async fn run_provider_monitor(
+    app_handle: Option<AppHandle>,
+    pool: SqlitePool,
+    run_id: String,
+    handle: LiveSessionHandle,
+    streams: LiveSessionStreams,
+) -> Result<String, String> {
+    let LiveSessionStreams { stdout, stderr, .. } = streams;
+    let collected: Arc<Mutex<ProviderProcessResult>> = Arc::new(Mutex::new(ProviderProcessResult {
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+        exit_code: None,
+        killed_status: None,
+    }));
+
+    let stdout_task = stream_lines_to_collector(
+        BufReader::new(stdout).lines(),
+        Arc::clone(&collected),
+        app_handle.clone(),
+        run_id.clone(),
+        "assistant",
+    );
+    let stderr_task = stream_lines_to_collector(
+        BufReader::new(stderr).lines(),
+        Arc::clone(&collected),
+        app_handle.clone(),
+        run_id.clone(),
+        "system",
+    );
+
+    let exit_code = {
+        let mut guard = handle.child.lock().await;
+        match guard.as_mut() {
+            Some(child) => child.wait().await.map_err(|e| e.to_string())?.code(),
+            None => None,
+        }
+    };
+    let _ = tokio::join!(stdout_task, stderr_task);
+
+    let mut result = collected.lock().expect("provider result lock").clone();
+    result.exit_code = exit_code;
+    result.killed_status = Some(
+        handle
+            .status_on_kill
+            .lock()
+            .expect("status on kill lock")
+            .clone(),
+    );
+
+    unregister_live_session(&run_id);
+    let status = persist_provider_process_result(&pool, &run_id, result).await?;
+    emit_agent_terminal_event(&app_handle, &pool, &run_id, &status).await;
+    Ok(status)
+}
+
+async fn stream_lines_to_collector(
+    mut lines: tokio::io::Lines<tokio::io::BufReader<impl tokio::io::AsyncRead + Unpin>>,
+    collected: Arc<Mutex<ProviderProcessResult>>,
+    app_handle: Option<AppHandle>,
+    run_id: String,
+    role: &'static str,
+) {
+    let stream_name = if role == "assistant" { "stdout" } else { "stderr" };
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => {
+                {
+                    let mut result = collected.lock().expect("provider result lock");
+                    if role == "assistant" {
+                        result.stdout.push(line.clone());
+                    } else {
+                        result.stderr.push(line.clone());
+                    }
+                }
+                // The renderer only keys on sessionId; the payload documents
+                // what changed so history refreshes stay truthful.
+                if let Some(handle) = &app_handle {
+                    handle
+                        .emit(
+                            "agent-event",
+                            serde_json::json!({
+                                "sessionId": run_id,
+                                "event": {
+                                    "type": "message",
+                                    "role": role,
+                                    "stream": stream_name,
+                                    "content": truncate_for_storage(&line),
+                                }
+                            }),
+                        )
+                        .ok();
+                }
+            }
+            Ok(None) | Err(_) => break,
+        }
+    }
+}
+
+async fn emit_agent_terminal_event(
+    app_handle: &Option<AppHandle>,
+    pool: &SqlitePool,
+    run_id: &str,
+    status: &str,
+) {
+    let Some(handle) = app_handle else {
+        return;
+    };
+    let message = read_run_core(pool, run_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|detail| detail.messages.last().cloned())
+        .and_then(|message| {
+            message
+                .get("content")
+                .and_then(|content| content.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| format!("Agent run {status}"));
+    handle
+        .emit(
+            "agent-event",
+            serde_json::json!({
+                "sessionId": run_id,
+                "event": {
+                    "type": if status == "succeeded" { "state" } else { "error" },
+                    "state": status,
+                    "message": message,
+                }
+            }),
+        )
+        .ok();
 }
 
 async fn persist_provider_process_result(
@@ -289,28 +525,42 @@ async fn persist_provider_process_result(
     run_id: &str,
     result: ProviderProcessResult,
 ) -> Result<String, String> {
-    let status = if result.exit_code == Some(0) { "succeeded" } else { "failed" };
-    if !result.stdout.trim().is_empty() {
-        insert_agent_message(
-            pool,
-            run_id,
-            "assistant",
-            result.stdout.trim(),
-            serde_json::json!({
-                "id": Uuid::new_v4().to_string(),
-                "role": "assistant",
-                "content": result.stdout.trim(),
-                "stream": "stdout",
-                "exitCode": result.exit_code,
-            }),
-        )
-        .await?;
+    let status = if let Some(killed) = &result.killed_status {
+        killed.clone()
+    } else if result.exit_code == Some(0) {
+        "succeeded".to_string()
+    } else {
+        "failed".to_string()
+    };
+
+    for line in &result.stdout {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let mut payload = serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "role": "assistant",
+            "content": truncate_for_storage(line),
+            "stream": "stdout",
+            "exitCode": result.exit_code,
+        });
+        // Codex --json and Claude --output-format json emit JSONL events;
+        // keep the parsed event alongside the raw line.
+        if let Ok(event) = serde_json::from_str::<Value>(line) {
+            payload["event"] = event;
+        }
+        insert_agent_message(pool, run_id, "assistant", &truncate_for_storage(line), payload).await?;
     }
-    if !result.stderr.trim().is_empty() || status == "failed" {
-        let content = if result.stderr.trim().is_empty() {
-            format!("Agent provider process exited with {:?}", result.exit_code)
+
+    let stderr_text = result.stderr.join("\n");
+    if !stderr_text.trim().is_empty() || (status == "failed" && result.killed_status.is_none()) {
+        let content = if stderr_text.trim().is_empty() {
+            format!(
+                "Agent provider process exited with {:?}",
+                result.exit_code
+            )
         } else {
-            result.stderr.trim().to_string()
+            truncate_for_storage(stderr_text.trim())
         };
         insert_agent_message(
             pool,
@@ -328,16 +578,34 @@ async fn persist_provider_process_result(
         )
         .await?;
     }
+    if let Some(killed) = &result.killed_status {
+        let content = format!("Agent run {killed} by user control request.");
+        insert_agent_message(
+            pool,
+            run_id,
+            "system",
+            &content,
+            serde_json::json!({
+                "id": Uuid::new_v4().to_string(),
+                "role": "system",
+                "content": content,
+                "action": if killed == "interrupted" { "interrupt" } else { "terminate" },
+                "status": killed,
+            }),
+        )
+        .await?;
+    }
     sqlx::query("UPDATE agent_runs SET status = ? WHERE id = ?")
-        .bind(status)
+        .bind(&status)
         .bind(run_id)
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(status.to_string())
+    Ok(status)
 }
 
 pub async fn run_agent_core(
+    app_handle: Option<&AppHandle>,
     pool: &SqlitePool,
     payload: RunAgentPayload,
 ) -> Result<AgentRunView, String> {
@@ -384,9 +652,35 @@ pub async fn run_agent_core(
     )
     .await?;
 
-    match run_provider_process(&provider, payload.prompt.trim(), payload.cwd.trim()) {
-        Ok(result) => {
-            persist_provider_process_result(pool, &run_id, result).await?;
+    match spawn_provider_process(&provider, payload.prompt.trim(), payload.cwd.trim(), &run_id)
+        .await
+    {
+        Ok((handle, streams)) => {
+            // The run continues in the background; the renderer follows it
+            // through `agent-event` refreshes.
+            if let Some(handle_app) = app_handle {
+                let pool_for_task = pool.clone();
+                let app = handle_app.clone();
+                let run_for_task = run_id.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = run_provider_monitor(
+                        Some(app),
+                        pool_for_task,
+                        run_for_task,
+                        handle,
+                        streams,
+                    )
+                    .await;
+                });
+            } else {
+                let pool_for_task = pool.clone();
+                let run_for_task = run_id.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ =
+                        run_provider_monitor(None, pool_for_task, run_for_task, handle, streams)
+                            .await;
+                });
+            }
         }
         Err(error) => {
             sqlx::query("UPDATE agent_runs SET status = 'failed' WHERE id = ?")
@@ -394,6 +688,7 @@ pub async fn run_agent_core(
                 .execute(pool)
                 .await
                 .map_err(|e| e.to_string())?;
+            let migration_pending = provider != "codex" && provider != "claude";
             insert_agent_message(
                 pool,
                 &run_id,
@@ -404,7 +699,7 @@ pub async fn run_agent_core(
                     "role": "system",
                     "content": error,
                     "status": "failed",
-                    "migrationPending": provider != "codex",
+                    "migrationPending": migration_pending,
                 }),
             )
             .await?;
@@ -528,31 +823,43 @@ pub async fn run_agent(
     pool: State<'_, SqlitePool>,
     payload: RunAgentPayload,
 ) -> Result<AgentRunView, String> {
-    let run = run_agent_core(&pool, payload).await?;
-    let state = if run.status == "succeeded" { "succeeded" } else { "failed" };
-    let message = read_run_core(&pool, &run.id)
-        .await?
-        .and_then(|detail| detail.messages.last().cloned())
-        .and_then(|message| message.get("content").and_then(|content| content.as_str()).map(str::to_string))
-        .unwrap_or_else(|| format!("Agent run {}", run.status));
-    app_handle
-        .emit(
-            "agent-event",
-            serde_json::json!({
-                "sessionId": run.id,
-                "event": {
-                    "type": if run.status == "succeeded" { "state" } else { "error" },
-                    "state": state,
-                    "message": message
-                }
-            }),
-        )
-        .ok();
+    let run = run_agent_core(Some(&app_handle), &pool, payload).await?;
     Ok(run)
+}
+
+/// Attempt a control action against a live provider process. Returns None
+/// when the run has no live session (already finished or launch failed).
+async fn control_live_session(run_id: &str, action: &str) -> Option<Value> {
+    let handle = live_session(run_id)?;
+    let status = match action {
+        "interrupt" => "interrupted",
+        _ => "terminated",
+    };
+    *handle
+        .status_on_kill
+        .lock()
+        .expect("status on kill lock") = status.to_string();
+
+    let mut guard = handle.child.lock().await;
+    if let Some(child) = guard.as_mut() {
+        let _ = child.start_kill();
+    }
+    drop(guard);
+
+    Some(serde_json::json!({
+        "runId": run_id,
+        "status": "running",
+        "action": action,
+        "requested": true,
+        "message": format!("Agent {action} request sent to the running provider process."),
+    }))
 }
 
 #[tauri::command]
 pub async fn interrupt_agent_run(pool: State<'_, SqlitePool>, id: String) -> Result<Value, String> {
+    if let Some(result) = control_live_session(&id, "interrupt").await {
+        return Ok(result);
+    }
     record_pending_control_core(&pool, &id, "interrupt", None).await
 }
 
@@ -566,6 +873,9 @@ pub async fn resume_agent_run(
 
 #[tauri::command]
 pub async fn terminate_agent_run(pool: State<'_, SqlitePool>, id: String) -> Result<Value, String> {
+    if let Some(result) = control_live_session(&id, "terminate").await {
+        return Ok(result);
+    }
     record_pending_control_core(&pool, &id, "terminate", None).await
 }
 
@@ -647,7 +957,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_agent_records_claude_execution_pending_run() {
+    async fn run_agent_records_provider_spawn_failure_run() {
         let pool = test_pool().await;
         let profile = create_profile_core(
             &pool,
@@ -662,7 +972,10 @@ mod tests {
         .await
         .unwrap();
 
+        // The provider launch fails in a controlled way (CLI missing from
+        // PATH or cwd does not exist) and the failure is durably recorded.
         let run = run_agent_core(
+            None,
             &pool,
             RunAgentPayload {
                 profile_id: profile.id.clone(),
@@ -679,11 +992,9 @@ mod tests {
         let detail = read_run_core(&pool, &run.id).await.unwrap().unwrap();
         assert_eq!(detail.messages.len(), 2);
         assert_eq!(detail.messages[0]["role"], "user");
-        assert_eq!(detail.messages[1]["migrationPending"], true);
-        assert!(detail.messages[1]["content"]
-            .as_str()
-            .unwrap()
-            .contains("not migrated yet"));
+        assert_eq!(detail.messages[1]["role"], "system");
+        assert_eq!(detail.messages[1]["status"], "failed");
+        assert!(!detail.messages[1]["content"].as_str().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -702,9 +1013,14 @@ mod tests {
             &pool,
             "r-1",
             ProviderProcessResult {
-                stdout: "{\"type\":\"message\",\"content\":\"done\"}\n".to_string(),
-                stderr: String::new(),
+                stdout: vec![
+                    "{\"type\":\"item.completed\"}".to_string(),
+                    String::new(),
+                    "plain output".to_string(),
+                ],
+                stderr: vec![],
                 exit_code: Some(0),
+                killed_status: None,
             },
         )
         .await
@@ -712,10 +1028,12 @@ mod tests {
         assert_eq!(status, "succeeded");
 
         let detail = read_run_core(&pool, "r-1").await.unwrap().unwrap();
-        assert_eq!(detail.run.status, "succeeded");
-        assert_eq!(detail.messages.len(), 1);
+        // Empty stdout lines are skipped; JSONL lines keep their parsed event.
+        assert_eq!(detail.messages.len(), 2);
         assert_eq!(detail.messages[0]["stream"], "stdout");
         assert_eq!(detail.messages[0]["exitCode"], 0);
+        assert_eq!(detail.messages[0]["event"]["type"], "item.completed");
+        assert_eq!(detail.messages[1]["content"], "plain output");
 
         let args = provider_process_args("codex", "inspect", "C:/workspace").unwrap();
         assert_eq!(args[0], "exec");
@@ -723,6 +1041,78 @@ mod tests {
         assert!(args.contains(&"--ephemeral".to_string()));
         assert!(args.contains(&"--cd".to_string()));
         assert_eq!(args.last().unwrap(), "inspect");
+
+        // Claude uses the documented non-interactive print mode.
+        let claude_args = provider_process_args("claude", "inspect", "C:/workspace").unwrap();
+        assert_eq!(claude_args[0], "-p");
+        assert!(claude_args.contains(&"--output-format".to_string()));
+    }
+
+    #[tokio::test]
+    async fn interrupt_targets_live_session_and_persists_status() {
+        let pool = test_pool().await;
+        sqlx::query("INSERT INTO agent_profiles (id, name, provider, access_level) VALUES ('p-1', 'Codex', 'codex', 'observe')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO agent_runs (id, profile_id, status, provider) VALUES ('r-live', 'p-1', 'running', 'codex')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // A real long-running placeholder child process stands in for the
+        // provider CLI.
+        let mut command = tokio::process::Command::new(if cfg!(windows) { "cmd" } else { "sleep" });
+        command
+            .args(if cfg!(windows) {
+                vec!["/C".to_string(), "ping -n 30 127.0.0.1 > nul".to_string()]
+            } else {
+                vec!["30".to_string()]
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let mut child = command.spawn().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let handle = LiveSessionHandle {
+            child: Arc::new(tokio::sync::Mutex::new(Some(child))),
+            status_on_kill: Arc::new(Mutex::new("terminated".to_string())),
+        };
+        register_live_session("r-live", handle.clone());
+
+        let control = control_live_session("r-live", "interrupt")
+            .await
+            .expect("live session is registered");
+        assert_eq!(control["requested"], true);
+        assert_eq!(control["action"], "interrupt");
+
+        let status = run_provider_monitor(
+            None,
+            pool.clone(),
+            "r-live".to_string(),
+            handle,
+            LiveSessionStreams { stdout, stderr },
+        )
+        .await
+        .unwrap();
+        assert_eq!(status, "interrupted");
+
+        let detail = read_run_core(&pool, "r-live").await.unwrap().unwrap();
+        assert_eq!(detail.run.status, "interrupted");
+        assert!(detail
+            .messages
+            .iter()
+            .any(|m| m["content"].as_str().unwrap_or("").contains("interrupted by user control")));
+        assert!(!live_session_active("r-live"));
+
+        // Controlling a finished run falls back to the durable record path.
+        let after = interrupt_agent_record_only(&pool, "r-live").await.unwrap();
+        assert_eq!(after["migrationPending"], true);
+    }
+
+    async fn interrupt_agent_record_only(pool: &SqlitePool, id: &str) -> Result<Value, String> {
+        record_pending_control_core(pool, id, "interrupt", None).await
     }
 
     #[tokio::test]
