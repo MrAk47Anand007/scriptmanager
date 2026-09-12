@@ -274,7 +274,7 @@ Still pending:
 Checklist:
 
 - [x] Decide whether each pending node type must be implemented now or visibly marked migration-pending.
-- [ ] Port notification node execution after native notification/dispatcher parity is complete.
+- [x] Port notification node execution after native notification/dispatcher parity is complete.
 - [ ] Port remote node execution after SSH transport is complete.
 - [ ] Port agent node execution after ACP provider process execution is complete.
 - [ ] Port plugin node execution after plugin host boundary is complete.
@@ -290,6 +290,10 @@ Evidence to inspect:
 Done means:
 
 - Workflow runs either execute every visible node type or fail unsupported nodes with a clear persisted migration-pending error.
+
+Progress notes:
+
+- 2026-09-12: Notification workflow nodes now persist native `notification_deliveries` for enabled channels selected by `channel` kind or `channelId`, resolve message/title templates from workflow context, and return delivered channel ids in node output. Remote, agent, and plugin workflow nodes remain migration-pending behind persisted unsupported-node failures until their runtimes are ported.
 
 ### 7. Observability
 

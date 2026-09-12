@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, Row, SqlitePool};
 use std::collections::{HashMap, HashSet};
 
 const WORKSPACE_ID: &str = "default";
@@ -1109,6 +1109,84 @@ fn unsupported_node_error(node_type: &str) -> String {
     }
 }
 
+async fn run_notification_node(
+    pool: &SqlitePool,
+    config: &serde_json::Value,
+    input: &serde_json::Value,
+    context: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let channel_id = config
+        .get("channelId")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let channel_kind = config
+        .get("channel")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("desktop");
+    let title = config
+        .get("title")
+        .map(|v| resolve_mappings(v, context))
+        .and_then(|v| v.as_str().map(ToOwned::to_owned))
+        .unwrap_or_else(|| "Workflow notification".to_string());
+    let message = config
+        .get("message")
+        .map(|v| resolve_mappings(v, context))
+        .and_then(|v| v.as_str().map(ToOwned::to_owned))
+        .ok_or_else(|| "nodes config.message is required".to_string())?;
+
+    let rows = if let Some(channel_id) = channel_id {
+        sqlx::query("SELECT id, kind FROM notification_channels WHERE id = ? AND enabled = 1")
+            .bind(channel_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        sqlx::query("SELECT id, kind FROM notification_channels WHERE kind = ? AND enabled = 1")
+            .bind(channel_kind)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?
+    };
+
+    if rows.is_empty() {
+        return Err("Notification channel not found".to_string());
+    }
+
+    let payload = serde_json::json!({
+        "title": title,
+        "body": message,
+        "input": input,
+        "source": "workflow",
+    });
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut channel_ids = Vec::new();
+    for row in rows {
+        let channel_id: String = row.try_get(0).map_err(|e| e.to_string())?;
+        channel_ids.push(channel_id.clone());
+        sqlx::query(
+            "INSERT INTO notification_deliveries (id, channel_id, rule_id, status, payload_json, delivered_at)
+             VALUES (?, ?, NULL, 'delivered', ?, ?)",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(&channel_id)
+        .bind(payload.to_string())
+        .bind(&now)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(serde_json::json!({
+        "status": "delivered",
+        "delivered": channel_ids.len(),
+        "channelIds": channel_ids,
+        "payload": payload,
+    }))
+}
+
 enum NodeOutcome {
     Succeeded {
         output: serde_json::Value,
@@ -1198,6 +1276,13 @@ async fn execute_node(
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "nodes config.requestId is required".to_string())?;
             let output = run_api_node(pool, request_id).await?;
+            Ok(NodeOutcome::Succeeded {
+                output,
+                selected_port: None,
+            })
+        }
+        "notification" => {
+            let output = run_notification_node(pool, &node.config, input, &context).await?;
             Ok(NodeOutcome::Succeeded {
                 output,
                 selected_port: None,
@@ -1891,6 +1976,102 @@ mod tests {
             .collect();
         assert_eq!(statuses["t"], STATUS_SUCCEEDED);
         assert_eq!(statuses["f"], STATUS_SKIPPED);
+    }
+
+    #[tokio::test]
+    async fn workflow_run_notification_node_persists_delivery() {
+        let pool = test_pool().await;
+        sqlx::query("INSERT INTO notification_channels (id, name, kind) VALUES ('c-desktop', 'Desktop', 'desktop')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let definition = serde_json::json!({
+            "schemaVersion": 1,
+            "name": "Notify",
+            "nodes": [
+                {
+                    "id": "notify",
+                    "type": "notification",
+                    "name": "Notify",
+                    "config": {
+                        "channel": "desktop",
+                        "title": "Workflow complete",
+                        "message": "Hello {{trigger.name}}"
+                    }
+                }
+            ],
+            "edges": []
+        });
+        let id = create_and_publish(&pool, definition).await;
+        let detail = run_workflow_record(&pool, &id, serde_json::json!({ "name": "Tauri" }))
+            .await
+            .unwrap();
+
+        assert_eq!(detail.status, STATUS_SUCCEEDED);
+        let node = &detail.node_runs[0];
+        assert_eq!(node.status, STATUS_SUCCEEDED);
+        let output: serde_json::Value = serde_json::from_str(node.output_json.as_ref().unwrap()).unwrap();
+        assert_eq!(output["delivered"], 1);
+        assert_eq!(output["channelIds"][0], "c-desktop");
+
+        let payload: String = sqlx::query_scalar(
+            "SELECT payload_json FROM notification_deliveries WHERE channel_id = 'c-desktop'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(payload.contains("Workflow complete"));
+        assert!(payload.contains("Hello Tauri"));
+    }
+
+    #[tokio::test]
+    async fn workflow_run_notification_node_can_target_channel_id() {
+        let pool = test_pool().await;
+        sqlx::query("INSERT INTO notification_channels (id, name, kind) VALUES ('c-target', 'Target', 'desktop')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO notification_channels (id, name, kind) VALUES ('c-other', 'Other', 'desktop')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let definition = serde_json::json!({
+            "schemaVersion": 1,
+            "name": "Notify target",
+            "nodes": [
+                {
+                    "id": "notify",
+                    "type": "notification",
+                    "name": "Notify",
+                    "config": {
+                        "channel": "desktop",
+                        "channelId": "c-target",
+                        "message": "Direct channel"
+                    }
+                }
+            ],
+            "edges": []
+        });
+        let id = create_and_publish(&pool, definition).await;
+        let detail = run_workflow_record(&pool, &id, serde_json::json!({}))
+            .await
+            .unwrap();
+
+        assert_eq!(detail.status, STATUS_SUCCEEDED);
+        let delivered: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notification_deliveries WHERE channel_id = 'c-target'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let other: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notification_deliveries WHERE channel_id = 'c-other'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(delivered, 1);
+        assert_eq!(other, 0);
     }
 
     #[tokio::test]

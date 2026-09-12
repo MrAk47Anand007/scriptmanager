@@ -26,6 +26,7 @@
 - Added loopback API execution proof for no-auth, bearer, basic, and API-key query requests through the native request path.
 - Added real native `portable-pty` smoke proof for terminal create, command input, output read, resize, close, and restart.
 - Added remote execution approval-contract proof: start returns renderer-compatible approval metadata, approve/reject remains immutable, and connection tests expose both legacy and renderer field names.
+- Added native workflow notification-node execution with persisted notification delivery evidence for channel kind and channel id paths.
 - Clarified local-only cloud storage support and disabled unsupported provider claims.
 - Preserved plugin registry metadata while explicitly disabling plugin execution host claims.
 - Documented the remote execution SSH/SFTP target architecture: `russh` plus `russh-sftp`.
@@ -40,7 +41,7 @@
 - API live send with bearer/basic/API key/no-auth is source-verified against a loopback HTTP server; visual Tauri UI API smoke remains pending with the broader manual pass.
 - Remote SSH/SFTP transport remains a deliberate migration-pending runtime. Current code supports profiles, TCP reachability checks, renderer-compatible approval/audit records, and typed pending transfer/execution errors.
 - ACP provider execution remains migration-pending. Profiles/history/discovery are native; run/interrupt/resume/terminate return typed pending errors until process control is ported.
-- Workflow notification/remote/agent/plugin nodes remain pending behind clear persisted failure states until their underlying native dispatcher, SSH, ACP, and plugin-host runtimes exist.
+- Workflow remote/agent/plugin nodes remain pending behind clear persisted failure states until their underlying SSH, ACP, and plugin-host runtimes exist. Notification nodes now execute through native persisted deliveries.
 - Protected Git approval consumption is source-complete for matching protected Git action requests; full visual workbench retry smoke remains pending with the broader Tauri UI smoke pass.
 
 ## Known Non-Blocking Warnings
