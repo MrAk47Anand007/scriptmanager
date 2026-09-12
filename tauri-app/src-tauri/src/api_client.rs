@@ -1836,6 +1836,107 @@ mod tests {
         );
     }
 
+    fn spawn_capture_server(expected_requests: usize) -> (String, std::sync::mpsc::Receiver<String>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let addr = listener.local_addr().expect("server addr");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().take(expected_requests) {
+                let mut stream = stream.expect("accept request");
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                    .ok();
+                let mut buffer = [0u8; 8192];
+                let bytes = std::io::Read::read(&mut stream, &mut buffer).unwrap_or(0);
+                let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+                tx.send(request).ok();
+                let body = r#"{"ok":true}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = std::io::Write::write_all(&mut stream, response.as_bytes());
+            }
+        });
+        (format!("http://{}", addr), rx)
+    }
+
+    #[tokio::test]
+    async fn api_execute_sends_no_auth_bearer_basic_and_api_key_requests() {
+        let pool = test_pool().await;
+        let (base_url, rx) = spawn_capture_server(4);
+
+        let cases = vec![
+            (
+                "none",
+                serde_json::json!({}),
+                format!("{base_url}/none"),
+                None,
+            ),
+            (
+                "bearer",
+                serde_json::json!({ "token": "bearer-token" }),
+                format!("{base_url}/bearer"),
+                Some("Authorization: Bearer bearer-token"),
+            ),
+            (
+                "basic",
+                serde_json::json!({ "username": "alice", "password": "secret" }),
+                format!("{base_url}/basic"),
+                Some("Authorization: Basic YWxpY2U6c2VjcmV0"),
+            ),
+            (
+                "apikey",
+                serde_json::json!({
+                    "keyName": "api_key",
+                    "keyValue": "query secret",
+                    "keyLocation": "query"
+                }),
+                format!("{base_url}/api-key"),
+                None,
+            ),
+        ];
+
+        for (auth_type, auth_config, url, _) in &cases {
+            let payload = SendApiRequestPayload {
+                request_id: None,
+                collection_id: None,
+                environment_id: None,
+                method: Some("GET".to_string()),
+                url: Some(url.clone()),
+                headers: None,
+                query_params: None,
+                variables: None,
+                request_options: None,
+                pre_request_script: None,
+                test_script: None,
+                response_mappings: None,
+                body_type: None,
+                body: None,
+                auth_type: Some((*auth_type).to_string()),
+                auth_config: Some(auth_config.clone()),
+            };
+            let prepared = prepare_request(&pool, &payload).await.unwrap();
+            let response = execute_prepared(&prepared).await.unwrap();
+            assert_eq!(response.status, 200);
+            assert_eq!(response.body, r#"{"ok":true}"#);
+        }
+
+        let captured: Vec<String> = (0..4)
+            .map(|_| {
+                rx.recv_timeout(std::time::Duration::from_secs(5))
+                    .expect("captured request")
+            })
+            .collect();
+        let captured_lower: Vec<String> = captured.iter().map(|raw| raw.to_lowercase()).collect();
+        assert!(captured[0].starts_with("GET /none HTTP/1.1"));
+        assert!(!captured_lower[0].contains("authorization:"));
+        assert!(captured_lower[1].contains("authorization: bearer bearer-token"));
+        assert!(captured_lower[2].contains("authorization: basic ywxpy2u6c2vjcmv0"));
+        assert!(captured[3].starts_with("GET /api-key?api_key=query%20secret HTTP/1.1"));
+    }
+
     #[tokio::test]
     async fn api_prepare_substitutes_auth_variables() {
         let pool = test_pool().await;

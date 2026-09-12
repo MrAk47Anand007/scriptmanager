@@ -23,6 +23,7 @@
 - Added a desktop bridge contract guard and exposed missing top-level helpers for reveal path, clipboard, notifications, Python workspace inspection, webhook controls, canonical recovery, agent events, agent termination, and Git approval-pending display.
 - Implemented native linked-folder open/rescan/canonical recovery and Python `.venv` workspace management.
 - Added native API auth preparation for bearer, basic, API key, and manual OAuth2 token shapes, plus explicit pre-request/test-script migration-pending history records.
+- Added loopback API execution proof for no-auth, bearer, basic, and API-key query requests through the native request path.
 - Clarified local-only cloud storage support and disabled unsupported provider claims.
 - Preserved plugin registry metadata while explicitly disabling plugin execution host claims.
 - Documented the remote execution SSH/SFTP target architecture: `russh` plus `russh-sftp`.
@@ -34,7 +35,7 @@
 
 - Full visual Tauri smoke is still pending: open each activity tab; exercise Scripts create/edit/run/cancel and terminal input; API send/history; Workflow create/publish/run/cancel/retry; Git status/log/commit-safe flow; Settings sections; and visible pending surfaces.
 - Gist live sync/delete still needs a real GitHub token.
-- API live send with bearer/basic/API key/no-auth still needs a local or live HTTP smoke target from the Tauri UI; source preparation is covered by Rust tests.
+- API live send with bearer/basic/API key/no-auth is source-verified against a loopback HTTP server; visual Tauri UI API smoke remains pending with the broader manual pass.
 - Remote SSH/SFTP transport remains a deliberate migration-pending runtime. Current code supports profiles, TCP reachability checks, approval/audit records, and typed pending transfer/execution errors.
 - ACP provider execution remains migration-pending. Profiles/history/discovery are native; run/interrupt/resume/terminate return typed pending errors until process control is ported.
 - Workflow notification/remote/agent/plugin nodes remain pending behind clear persisted failure states until their underlying native dispatcher, SSH, ACP, and plugin-host runtimes exist.

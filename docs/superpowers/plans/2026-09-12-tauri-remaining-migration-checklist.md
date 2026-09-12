@@ -227,7 +227,7 @@ Status: migrated for core workspace; verify edge behavior.
 Checklist:
 
 - [x] Verify collection/request/environment/globals CRUD through Tauri.
-- [ ] Verify send request with bearer/basic/API key/no-auth.
+- [x] Verify send request with bearer/basic/API key/no-auth.
 - [x] Verify OAuth2 request auth behavior. Token entry can be manual, but provider OAuth flows are separate storage/OAuth work.
 - [x] Verify pre-request and test script behavior. Native request execution now returns persisted migration-pending console/test results instead of silently dropping scripts.
 - [x] Verify collection run summaries and persisted history.
@@ -243,6 +243,7 @@ Evidence to inspect:
 Progress notes:
 
 - 2026-09-12: Added native API auth preparation for API key header/query and manual OAuth2 access-token auth, with variable substitution covered by Rust tests.
+- 2026-09-12: Added loopback HTTP execution coverage for no-auth, bearer, basic, and API-key query requests through `prepare_request` + `execute_prepared`; the local server receives the expected auth headers/query and response body/status is returned.
 - 2026-09-12: Pre-request and post-request scripts remain migration-pending, but native send/history now return explicit persisted console/test evidence when configured.
 
 Done means:
