@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{Row, SqlitePool};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 /// Agent support decision (recorded in the migration completion plan, S9.1):
@@ -83,6 +83,14 @@ pub struct CreateAgentProfilePayload {
     #[serde(rename = "projectId", alias = "project_id")]
     pub project_id: Option<String>,
     pub model: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RunAgentPayload {
+    #[serde(rename = "profileId", alias = "profile_id")]
+    pub profile_id: String,
+    pub prompt: String,
+    pub cwd: String,
 }
 
 const ACCESS_LEVELS: [&str; 3] = ["observe", "develop", "full"];
@@ -208,6 +216,96 @@ pub async fn read_run_core(pool: &SqlitePool, id: &str) -> Result<Option<AgentRu
     }))
 }
 
+async fn insert_agent_message(
+    pool: &SqlitePool,
+    run_id: &str,
+    role: &str,
+    content: &str,
+    payload: Value,
+) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO agent_run_messages (id, run_id, role, content, payload_json) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(run_id)
+    .bind(role)
+    .bind(content)
+    .bind(payload.to_string())
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub async fn run_agent_core(
+    pool: &SqlitePool,
+    payload: RunAgentPayload,
+) -> Result<AgentRunView, String> {
+    if payload.prompt.trim().is_empty() {
+        return Err("Agent prompt is required".to_string());
+    }
+    if payload.cwd.trim().is_empty() {
+        return Err("Agent working directory is required".to_string());
+    }
+
+    let profile = sqlx::query("SELECT provider FROM agent_profiles WHERE id = ?")
+        .bind(&payload.profile_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Agent profile not found".to_string())?;
+    let provider: String = profile.try_get(0).map_err(|e| e.to_string())?;
+    if !ALLOWED_PROVIDERS.contains(&provider.as_str()) {
+        return Err(format!("Unsupported agent provider: {}", provider));
+    }
+
+    let run_id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO agent_runs (id, profile_id, status, provider) VALUES (?, ?, 'failed', ?)",
+    )
+    .bind(&run_id)
+    .bind(&payload.profile_id)
+    .bind(&provider)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    insert_agent_message(
+        pool,
+        &run_id,
+        "user",
+        payload.prompt.trim(),
+        serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "role": "user",
+            "content": payload.prompt.trim(),
+            "cwd": payload.cwd.trim(),
+        }),
+    )
+    .await?;
+    let pending_message = "Agent provider execution is migration-pending in the Tauri desktop app (ACP process control not ported).";
+    insert_agent_message(
+        pool,
+        &run_id,
+        "system",
+        pending_message,
+        serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "role": "system",
+            "content": pending_message,
+            "status": "failed",
+            "migrationPending": true,
+        }),
+    )
+    .await?;
+
+    list_runs_core(pool)
+        .await?
+        .into_iter()
+        .find(|run| run.id == run_id)
+        .ok_or_else(|| "Agent run creation failed".to_string())
+}
+
 #[tauri::command]
 pub async fn read_agent_run(
     pool: State<'_, SqlitePool>,
@@ -259,8 +357,26 @@ pub async fn discover_agent_providers() -> Result<Vec<Value>, String> {
 }
 
 #[tauri::command]
-pub async fn run_agent() -> Result<Value, String> {
-    Err("Agent provider execution is migration-pending in the Tauri desktop app (ACP process control not ported)".to_string())
+pub async fn run_agent(
+    app_handle: AppHandle,
+    pool: State<'_, SqlitePool>,
+    payload: RunAgentPayload,
+) -> Result<AgentRunView, String> {
+    let run = run_agent_core(&pool, payload).await?;
+    app_handle
+        .emit(
+            "agent-event",
+            serde_json::json!({
+                "sessionId": run.id,
+                "event": {
+                    "type": "error",
+                    "state": "failed",
+                    "message": "Agent provider execution is migration-pending in the Tauri desktop app (ACP process control not ported)."
+                }
+            }),
+        )
+        .ok();
+    Ok(run)
 }
 
 #[tauri::command]
@@ -357,10 +473,6 @@ mod tests {
 
     #[tokio::test]
     async fn agent_execution_commands_return_pending_errors() {
-        assert!(run_agent()
-            .await
-            .unwrap_err()
-            .contains("migration-pending"));
         assert!(interrupt_agent_run()
             .await
             .unwrap_err()
@@ -372,6 +484,46 @@ mod tests {
         assert!(terminate_agent_run()
             .await
             .unwrap_err()
+            .contains("migration-pending"));
+    }
+
+    #[tokio::test]
+    async fn run_agent_persists_failed_migration_pending_run() {
+        let pool = test_pool().await;
+        let profile = create_profile_core(
+            &pool,
+            CreateAgentProfilePayload {
+                name: "Codex".into(),
+                provider: "codex".into(),
+                access_level: "observe".into(),
+                project_id: None,
+                model: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let run = run_agent_core(
+            &pool,
+            RunAgentPayload {
+                profile_id: profile.id.clone(),
+                prompt: "inspect".into(),
+                cwd: "C:/workspace".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(run.profile_id, profile.id);
+        assert_eq!(run.status, "failed");
+        assert_eq!(run.provider, "codex");
+
+        let detail = read_run_core(&pool, &run.id).await.unwrap().unwrap();
+        assert_eq!(detail.messages.len(), 2);
+        assert_eq!(detail.messages[0]["role"], "user");
+        assert_eq!(detail.messages[1]["migrationPending"], true);
+        assert!(detail.messages[1]["content"]
+            .as_str()
+            .unwrap()
             .contains("migration-pending"));
     }
 }

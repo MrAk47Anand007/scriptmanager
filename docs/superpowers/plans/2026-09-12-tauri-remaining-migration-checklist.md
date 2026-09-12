@@ -514,6 +514,7 @@ Progress notes:
 
 - 2026-09-12: Added `agents.onEvent` bridge subscription, added `terminate_agent_run`, and covered all execution commands as typed migration-pending stubs with a focused Rust test.
 - 2026-09-12: Confirmed `AgentsView` requires the desktop bridge for launch, follow-up, interrupt, and resume actions, leaving non-desktop mode as inspect-only.
+- 2026-09-12: Native agent launch attempts now persist a failed migration-pending run with user/system messages and emit an `agent-event` so the renderer can refresh durable history. Real provider process launch/run/interrupt/resume/terminate remains pending.
 
 Done means:
 
