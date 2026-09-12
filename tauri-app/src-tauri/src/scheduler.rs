@@ -109,10 +109,17 @@ pub async fn delete_schedule(
     schedule_view(&pool, &script_id).await
 }
 
-/// Scheduler tick: run every enabled schedule whose next run time has passed.
-/// Missed runs execute once at the next tick (run-once policy; recorded in
-/// the migration completion plan, S4.1).
+/// Scheduler tick: run every enabled script schedule and workflow cron
+/// trigger whose next run time has passed. Missed runs execute once at the
+/// next tick (run-once policy; recorded in the migration completion plan,
+/// S4.1).
 pub async fn tick(app_handle: &AppHandle, pool: &SqlitePool) -> Result<usize, String> {
+    let mut triggered = tick_script_schedules(app_handle, pool).await?;
+    triggered += tick_workflow_triggers(pool).await.map_err(|e| e.to_string())?;
+    Ok(triggered)
+}
+
+async fn tick_script_schedules(app_handle: &AppHandle, pool: &SqlitePool) -> Result<usize, String> {
     let now = Utc::now();
     let rows = sqlx::query(
         "SELECT id, schedule_cron FROM scripts
@@ -151,6 +158,10 @@ pub async fn tick(app_handle: &AppHandle, pool: &SqlitePool) -> Result<usize, St
         triggered += 1;
     }
     Ok(triggered)
+}
+
+async fn tick_workflow_triggers(pool: &SqlitePool) -> Result<usize, String> {
+    crate::workflows::tick_workflow_triggers(pool).await
 }
 
 pub fn spawn(app_handle: AppHandle, pool: SqlitePool) {

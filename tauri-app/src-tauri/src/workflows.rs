@@ -559,7 +559,7 @@ async fn to_record(_pool: &SqlitePool, row: WorkflowRow) -> Result<WorkflowRecor
     })
 }
 
-async fn list_workflow_records(pool: &SqlitePool) -> Result<Vec<WorkflowRecord>, String> {
+pub(crate) async fn list_workflow_records(pool: &SqlitePool) -> Result<Vec<WorkflowRecord>, String> {
     let rows = sqlx::query_as::<_, WorkflowRow>(
         "SELECT id, name, description, published_version, project_id, draft_definition,
             created_at, updated_at
@@ -790,9 +790,31 @@ pub(crate) async fn get_run_detail(pool: &SqlitePool, run_id: &str) -> Result<Wo
     })
 }
 
-async fn list_run_summaries(
+/// Workflow record lookup usable from both the UI commands and the MCP tools;
+/// resolves by id, or by exact name when the id does not match.
+pub(crate) async fn get_workflow_record(
+    pool: &SqlitePool,
+    id_or_name: &str,
+) -> Option<WorkflowRecord> {
+    let row = sqlx::query_as::<_, WorkflowRow>(
+        "SELECT id, name, description, published_version, project_id, draft_definition,
+            created_at, updated_at
+         FROM workflows WHERE workspace_id = ? AND (id = ?1 OR name = ?1)
+         ORDER BY (id = ?1) DESC LIMIT 1",
+    )
+    .bind(WORKSPACE_ID)
+    .bind(id_or_name)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()?;
+    to_record(pool, row).await.ok()
+}
+
+pub(crate) async fn list_run_summaries(
     pool: &SqlitePool,
     workflow_id: &str,
+    limit: i64,
 ) -> Result<Vec<WorkflowRunSummary>, String> {
     // Validate workflow exists for a controlled 404 instead of an empty list.
     if get_workflow_row(pool, workflow_id).await?.is_none() {
@@ -800,9 +822,10 @@ async fn list_run_summaries(
     }
     sqlx::query_as::<_, WorkflowRunSummary>(
         "SELECT id, workflow_id, status, created_at, started_at, finished_at
-         FROM workflow_runs WHERE workflow_id = ? ORDER BY created_at DESC LIMIT 100",
+         FROM workflow_runs WHERE workflow_id = ? ORDER BY created_at DESC LIMIT ?",
     )
     .bind(workflow_id)
+    .bind(limit.clamp(1, 100))
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())
@@ -962,7 +985,7 @@ fn resolve_node_interpreter(language: &str) -> String {
     }
 }
 
-async fn run_script_node(
+pub(crate) async fn run_script_node(
     pool: &SqlitePool,
     script_id: &str,
 ) -> Result<serde_json::Value, String> {
@@ -1238,8 +1261,7 @@ fn unsupported_node_error(node_type: &str) -> String {
         n if n.starts_with("plugin:") => {
             "Plugin workflow nodes are not migrated yet".to_string()
         }
-        "agent" => "Agent workflow nodes are not migrated yet".to_string(),
-        "approval" => "Approval workflow nodes pause here until the approvals inbox is migrated".to_string(),
+        "approval" => "Approval workflow nodes pause the run until a decision is recorded".to_string(),
         other => format!("Unsupported workflow node: {}", other),
     }
 }
@@ -1320,6 +1342,90 @@ async fn run_notification_node(
         "channelIds": channel_ids,
         "payload": payload,
     }))
+}
+
+/// Run a workflow `agent` node: resolve the configured ACP profile, template
+/// the prompt against the run context, drive the provider CLI to completion,
+/// and expose its reply as the node output. The node's own timeout/retry
+/// policy (applied by the driver) bounds a runaway provider process.
+async fn run_agent_node(
+    pool: &SqlitePool,
+    config: &serde_json::Value,
+    context: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let profile_id = config
+        .get("profileId")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| "nodes config.profileId is required".to_string())?;
+    let profile: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT provider, project_id FROM agent_profiles WHERE id = ?")
+            .bind(profile_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let (provider, project_id) =
+        profile.ok_or_else(|| format!("Agent profile not found: {}", profile_id))?;
+
+    let prompt_value = config
+        .get("prompt")
+        .cloned()
+        .ok_or_else(|| "nodes config.prompt is required".to_string())?;
+    let prompt = match resolve_mappings(&prompt_value, context) {
+        v if v.is_string() => v.as_str().unwrap_or_default().to_string(),
+        other => other.to_string(),
+    };
+    if prompt.trim().is_empty() {
+        return Err("nodes config.prompt must not be empty".to_string());
+    }
+
+    let cwd = agent_node_cwd(pool, config, context, project_id).await?;
+    if !std::path::Path::new(&cwd).is_dir() {
+        return Err(format!("Agent node working directory does not exist: {}", cwd));
+    }
+
+    let result = crate::agents::run_provider_collect(pool, &provider, &prompt, &cwd).await?;
+    Ok(serde_json::json!({
+        "provider": provider,
+        "reply": result.reply,
+        "exitCode": result.exit_code,
+        "stderr": result.stderr_tail,
+    }))
+}
+
+/// Working directory for an agent node: an explicit node override wins, then
+/// the profile's project repository root, then a shared scratch directory.
+async fn agent_node_cwd(
+    pool: &SqlitePool,
+    config: &serde_json::Value,
+    context: &serde_json::Value,
+    project_id: Option<String>,
+) -> Result<String, String> {
+    if let Some(v) = config.get("cwd") {
+        let resolved = resolve_mappings(v, context);
+        if let Some(value) = resolved.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+            return Ok(value.to_string());
+        }
+    }
+    if let Some(project_id) = project_id {
+        let row: Option<sqlx::sqlite::SqliteRow> = sqlx::query(
+            "SELECT repository_root FROM projects WHERE id = ?",
+        )
+        .bind(&project_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        if let Some(row) = row {
+            let root: Option<String> = row.try_get(0).map_err(|e| e.to_string())?;
+            if let Some(root) = root.map(|r| r.trim().to_string()).filter(|r| !r.is_empty()) {
+                return Ok(root);
+            }
+        }
+    }
+    let scratch = std::env::temp_dir().join("scriptmanager-agent-nodes");
+    std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
+    Ok(scratch.to_string_lossy().to_string())
 }
 
 enum NodeOutcome {
@@ -1425,6 +1531,13 @@ async fn execute_node(
         }
         "remote" => {
             let output = run_remote_node(pool, &node.config).await?;
+            Ok(NodeOutcome::Succeeded {
+                output,
+                selected_port: None,
+            })
+        }
+        "agent" => {
+            let output = run_agent_node(pool, &node.config, &context).await?;
             Ok(NodeOutcome::Succeeded {
                 output,
                 selected_port: None,
@@ -1634,11 +1747,23 @@ fn downstream_of(def: &WfDefinition, start: &str) -> HashSet<String> {
     seen
 }
 
-async fn run_workflow_record(
+struct PreparedRun {
+    run_id: String,
+    def: WfDefinition,
+    layers: Vec<Vec<String>>,
+    trigger: serde_json::Value,
+}
+
+/// Resolve the published definition, plan the layers, and insert the run row
+/// plus its pending node rows. Shared by the synchronous driver (tests), the
+/// background starter (UI/MCP), and the scheduler.
+async fn prepare_workflow_run(
     pool: &SqlitePool,
     workflow_id: &str,
     input: serde_json::Value,
-) -> Result<WorkflowRunDetail, String> {
+    trigger_type: &str,
+    actor_id: &str,
+) -> Result<PreparedRun, String> {
     let workflow = get_workflow_row(pool, workflow_id)
         .await?
         .ok_or_else(|| "Workflow not found".to_string())?;
@@ -1674,11 +1799,13 @@ async fn run_workflow_record(
     sqlx::query(
         "INSERT INTO workflow_runs (id, workflow_id, version_id, status, trigger_type, actor_id,
             correlation_id, input_json, created_at, started_at)
-         VALUES (?, ?, ?, 'running', 'manual', 'local-admin', ?, ?, ?, ?)",
+         VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)",
     )
     .bind(&run_id)
     .bind(workflow_id)
     .bind(&version_id)
+    .bind(trigger_type)
+    .bind(actor_id)
     .bind(&correlation_id)
     .bind(&input_json)
     .bind(&now)
@@ -1702,8 +1829,55 @@ async fn run_workflow_record(
     }
     let trigger: serde_json::Value =
         serde_json::from_str(&input_json).unwrap_or(serde_json::Value::Null);
+    Ok(PreparedRun { run_id, def, layers, trigger })
+}
+
+/// Synchronous execution used by tests and callers that want the final
+/// run detail in the same call.
+async fn run_workflow_record(
+    pool: &SqlitePool,
+    workflow_id: &str,
+    input: serde_json::Value,
+) -> Result<WorkflowRunDetail, String> {
+    let prepared = prepare_workflow_run(pool, workflow_id, input, "manual", "local-admin").await?;
+    let PreparedRun { run_id, def, layers, trigger } = prepared;
     let _ = execute_layers(pool, &run_id, &def, &layers, &trigger, None).await;
     get_run_detail(pool, &run_id).await
+}
+
+/// Start a run in the background and return its detail immediately (status
+/// 'running'). Used by the Run command, MCP tools, and cron triggers so a
+/// long workflow cannot block the caller; progress is observed via polling.
+pub async fn start_workflow_run_record(
+    pool: &SqlitePool,
+    workflow_id: &str,
+    input: serde_json::Value,
+    trigger_type: &str,
+    actor_id: &str,
+) -> Result<WorkflowRunDetail, String> {
+    let prepared = prepare_workflow_run(pool, workflow_id, input, trigger_type, actor_id).await?;
+    let detail = get_run_detail(pool, &prepared.run_id).await?;
+    let run_pool = pool.clone();
+    tauri::async_runtime::spawn(async move {
+        let PreparedRun { run_id, def, layers, trigger } = prepared;
+        if let Err(message) = execute_layers(&run_pool, &run_id, &def, &layers, &trigger, None).await
+        {
+            // Safety net: a driver crash (not a node failure) would otherwise
+            // leave the run row stuck in 'running' forever.
+            let status: Option<String> = sqlx::query_scalar("SELECT status FROM workflow_runs WHERE id = ?")
+                .bind(&run_id)
+                .fetch_optional(&run_pool)
+                .await
+                .ok()
+                .flatten();
+            if status.as_deref() == Some("running") {
+                let error = serde_json::json!({ "message": message });
+                let _ = finish_run(&run_pool, &run_id, STATUS_FAILED, None, Some(&error)).await;
+            }
+            log::warn!("Workflow run {run_id} background execution ended: {message}");
+        }
+    });
+    Ok(detail)
 }
 
 // ---------- Tauri commands ----------
@@ -1748,7 +1922,8 @@ pub async fn run_workflow(
         .id
         .or(payload.workflow_id)
         .ok_or_else(|| "Workflow id is required".to_string())?;
-    run_workflow_record(&pool, &workflow_id, payload.input.unwrap_or(serde_json::json!({}))).await
+    // Runs execute in the background; the execution drawer polls for progress.
+    start_workflow_run_record(&pool, &workflow_id, payload.input.unwrap_or(serde_json::json!({})), "manual", "local-admin").await
 }
 
 #[tauri::command]
@@ -1756,7 +1931,7 @@ pub async fn list_workflow_runs(
     pool: tauri::State<'_, SqlitePool>,
     workflow_id: String,
 ) -> Result<Vec<WorkflowRunSummary>, String> {
-    list_run_summaries(&pool, &workflow_id).await
+    list_run_summaries(&pool, &workflow_id, 100).await
 }
 
 #[tauri::command]
@@ -1886,7 +2061,431 @@ pub async fn cancel_workflow_run_core(
     get_run_detail(pool, run_id).await
 }
 
-// ---------- Tests ----------
+// ---------- Approval resolution ----------
+
+#[derive(Debug, Deserialize)]
+pub struct ResolveWorkflowApprovalPayload {
+    #[serde(rename = "runId")]
+    pub run_id: String,
+    #[serde(rename = "nodeId")]
+    pub node_id: String,
+    pub approved: bool,
+    #[serde(rename = "decidedBy", default)]
+    pub decided_by: Option<String>,
+}
+
+/// Approve or reject an approval node that has paused a run. Approving
+/// resumes the remaining nodes in the background; rejecting fails the run.
+pub async fn resolve_workflow_approval_record(
+    pool: &SqlitePool,
+    run_id: &str,
+    node_id: &str,
+    approved: bool,
+    decided_by: &str,
+) -> Result<WorkflowRunDetail, String> {
+    let detail = get_run_detail(pool, run_id).await?;
+    let node = detail
+        .node_runs
+        .iter()
+        .find(|n| n.node_id == node_id)
+        .ok_or_else(|| "Workflow node run not found".to_string())?;
+    if node.status != STATUS_WAITING_APPROVAL {
+        return Err("Node is not waiting for approval".to_string());
+    }
+    if detail.status != STATUS_PAUSED {
+        return Err("Workflow run is not paused".to_string());
+    }
+    let attempt = node.attempt;
+
+    if !approved {
+        let error = serde_json::json!({ "message": format!("Rejected by {}", decided_by) });
+        finish_node(pool, run_id, node_id, attempt, STATUS_FAILED, None, Some(&error), None).await?;
+        finish_run(pool, run_id, STATUS_FAILED, None, Some(&error)).await?;
+        return get_run_detail(pool, run_id).await;
+    }
+
+    let output = serde_json::json!({ "approved": true, "decidedBy": decided_by, "decidedAt": now_rfc3339() });
+    finish_node(pool, run_id, node_id, attempt, STATUS_SUCCEEDED, Some(&output), None, None).await?;
+
+    // Reload the definition so the remaining downstream nodes can resume.
+    let version_id: String = sqlx::query_scalar("SELECT version_id FROM workflow_runs WHERE id = ?")
+        .bind(run_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Workflow run not found".to_string())?;
+    let definition_json: String = sqlx::query_scalar(
+        "SELECT definition_json FROM workflow_versions WHERE id = ?",
+    )
+    .bind(&version_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Workflow version not found".to_string())?;
+    let definition_value: serde_json::Value = serde_json::from_str(&definition_json)
+        .map_err(|_| "Workflow definition is invalid".to_string())?;
+    let raw_def = parse_definition(&definition_value)?;
+    let def = WfDefinition {
+        name: raw_def.name.clone(),
+        description: raw_def.description.clone(),
+        variables: raw_def.variables.clone(),
+        nodes: raw_def.nodes.clone(),
+        edges: raw_def.edges.clone(),
+    };
+    let layers = plan_layers(&def)?;
+    let mut scope = downstream_of(&def, node_id);
+    scope.remove(node_id);
+
+    sqlx::query(
+        "UPDATE workflow_runs SET status = 'running', error_json = NULL, finished_at = NULL,
+            cancel_requested_at = NULL WHERE id = ?",
+    )
+    .bind(run_id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if scope.is_empty() {
+        let summary = serde_json::json!({ "nodes": { "approved": output } });
+        finish_run(pool, run_id, STATUS_SUCCEEDED, Some(&summary), None).await?;
+        return get_run_detail(pool, run_id).await;
+    }
+
+    let run_pool = pool.clone();
+    let run_id_owned = run_id.to_string();
+    let trigger_value = output.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(message) = execute_layers(&run_pool, &run_id_owned, &def, &layers, &trigger_value, Some(&scope)).await {
+            log::warn!("Workflow run {run_id_owned} post-approval execution ended: {message}");
+        }
+    });
+    get_run_detail(pool, run_id).await
+}
+
+#[tauri::command]
+pub async fn resolve_workflow_approval(
+    pool: tauri::State<'_, SqlitePool>,
+    payload: ResolveWorkflowApprovalPayload,
+) -> Result<WorkflowRunDetail, String> {
+    resolve_workflow_approval_record(
+        &pool,
+        &payload.run_id,
+        &payload.node_id,
+        payload.approved,
+        payload.decided_by.as_deref().unwrap_or("local-admin"),
+    )
+    .await
+}
+
+// ---------- Triggers (cron) ----------
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowTriggerRecord {
+    pub id: String,
+    pub workflow_id: String,
+    pub trigger_type: String,
+    pub enabled: bool,
+    pub config: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+fn trigger_row_to_record(
+    id: String,
+    workflow_id: String,
+    trigger_type: String,
+    enabled: i64,
+    config_json: String,
+    created_at: String,
+    updated_at: String,
+) -> WorkflowTriggerRecord {
+    WorkflowTriggerRecord {
+        id,
+        workflow_id,
+        trigger_type,
+        enabled: enabled != 0,
+        config: serde_json::from_str(&config_json).unwrap_or(serde_json::Value::Null),
+        created_at,
+        updated_at,
+    }
+}
+
+pub(crate) async fn list_workflow_triggers_record(
+    pool: &SqlitePool,
+    workflow_id: &str,
+) -> Result<Vec<WorkflowTriggerRecord>, String> {
+    let rows = sqlx::query(
+        "SELECT id, workflow_id, type, enabled, config_json, created_at, updated_at
+         FROM workflow_triggers WHERE workflow_id = ? ORDER BY created_at",
+    )
+    .bind(workflow_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(trigger_row_to_record(
+                row.try_get(0).map_err(|e| e.to_string())?,
+                row.try_get(1).map_err(|e| e.to_string())?,
+                row.try_get(2).map_err(|e| e.to_string())?,
+                row.try_get(3).map_err(|e| e.to_string())?,
+                row.try_get(4).map_err(|e| e.to_string())?,
+                row.try_get(5).map_err(|e| e.to_string())?,
+                row.try_get(6).map_err(|e| e.to_string())?,
+            ))
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn list_workflow_triggers(
+    pool: tauri::State<'_, SqlitePool>,
+    workflow_id: String,
+) -> Result<Vec<WorkflowTriggerRecord>, String> {
+    list_workflow_triggers_record(&pool, &workflow_id).await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SaveWorkflowTriggerPayload {
+    #[serde(rename = "workflowId")]
+    pub workflow_id: String,
+    #[serde(rename = "type", alias = "trigger_type", default = "default_trigger_type")]
+    pub trigger_type: String,
+    pub cron: Option<String>,
+    pub enabled: bool,
+}
+
+fn default_trigger_type() -> String {
+    "cron".to_string()
+}
+
+/// Create or update the cron trigger of a workflow. One trigger per workflow;
+/// the next fire time is stored inside config_json and advanced by the
+/// scheduler so a missed tick fires once, not per tick.
+pub async fn save_workflow_trigger_record(
+    pool: &SqlitePool,
+    payload: SaveWorkflowTriggerPayload,
+) -> Result<WorkflowTriggerRecord, String> {
+    if payload.trigger_type != "cron" {
+        return Err(format!("Unsupported workflow trigger type: {}", payload.trigger_type));
+    }
+    if get_workflow_row(pool, &payload.workflow_id).await?.is_none() {
+        return Err("Workflow not found".to_string());
+    }
+    let cron = payload.cron.unwrap_or_default().trim().to_string();
+    let next_run = if payload.enabled {
+        let next = crate::scheduler::next_run_after(&cron, chrono::Utc::now())
+            .ok_or_else(|| "Invalid cron expression".to_string())?;
+        Some(next.to_rfc3339())
+    } else {
+        None
+    };
+    let config = serde_json::json!({ "cron": cron, "nextRunAt": next_run });
+
+    let existing: Option<String> =
+        sqlx::query_scalar("SELECT id FROM workflow_triggers WHERE workflow_id = ? AND type = 'cron'")
+            .bind(&payload.workflow_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+
+    let id = match existing {
+        Some(id) => {
+            sqlx::query(
+                "UPDATE workflow_triggers SET enabled = ?, config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            )
+            .bind(payload.enabled)
+            .bind(config.to_string())
+            .bind(&id)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            id
+        }
+        None => {
+            let id = uuid::Uuid::new_v4().to_string();
+            sqlx::query(
+                "INSERT INTO workflow_triggers (id, workflow_id, type, enabled, config_json) VALUES (?, ?, 'cron', ?, ?)",
+            )
+            .bind(&id)
+            .bind(&payload.workflow_id)
+            .bind(payload.enabled)
+            .bind(config.to_string())
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            id
+        }
+    };
+
+    let (trigger_type, enabled, config_json, created_at, updated_at): (String, i64, String, String, String) =
+        sqlx::query_as(
+            "SELECT type, enabled, config_json, created_at, updated_at FROM workflow_triggers WHERE id = ?",
+        )
+        .bind(&id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(trigger_row_to_record(id, payload.workflow_id, trigger_type, enabled, config_json, created_at, updated_at))
+}
+
+#[tauri::command]
+pub async fn save_workflow_trigger(
+    pool: tauri::State<'_, SqlitePool>,
+    payload: SaveWorkflowTriggerPayload,
+) -> Result<WorkflowTriggerRecord, String> {
+    save_workflow_trigger_record(&pool, payload).await
+}
+
+#[tauri::command]
+pub async fn delete_workflow_trigger(
+    pool: tauri::State<'_, SqlitePool>,
+    trigger_id: String,
+) -> Result<bool, String> {
+    let result = sqlx::query("DELETE FROM workflow_triggers WHERE id = ?")
+        .bind(&trigger_id)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Fire every due cron trigger. Called from the scheduler tick; the next fire
+/// time is advanced before starting the run (run-once policy).
+pub(crate) async fn tick_workflow_triggers(pool: &SqlitePool) -> Result<usize, String> {
+    let now = chrono::Utc::now();
+    let rows = sqlx::query(
+        "SELECT workflow_triggers.id, workflow_triggers.workflow_id, workflow_triggers.config_json
+         FROM workflow_triggers
+         JOIN workflows ON workflows.id = workflow_triggers.workflow_id
+         WHERE workflow_triggers.type = 'cron' AND workflow_triggers.enabled = 1
+           AND workflows.published_version IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut fired = 0usize;
+    for row in rows {
+        let trigger_id: String = row.try_get(0).map_err(|e| e.to_string())?;
+        let workflow_id: String = row.try_get(1).map_err(|e| e.to_string())?;
+        let config_json: String = row.try_get(2).map_err(|e| e.to_string())?;
+        let config: serde_json::Value = serde_json::from_str(&config_json).unwrap_or(json_value_object());
+        let cron = config.get("cron").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        if cron.is_empty() {
+            continue;
+        }
+        let next_run_at = config.get("nextRunAt").and_then(|v| v.as_str());
+        let due = match next_run_at {
+            Some(stored) => stored
+                .parse::<chrono::DateTime<chrono::Utc>>()
+                .map(|due| due <= now)
+                .unwrap_or(true),
+            None => true,
+        };
+        if !due {
+            continue;
+        }
+        let next = crate::scheduler::next_run_after(&cron, now).map(|dt| dt.to_rfc3339());
+        let next_config = serde_json::json!({ "cron": cron, "nextRunAt": next });
+        sqlx::query("UPDATE workflow_triggers SET config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+            .bind(next_config.to_string())
+            .bind(&trigger_id)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let input = serde_json::json!({
+            "trigger": "cron",
+            "triggerId": trigger_id,
+            "firedAt": now.to_rfc3339(),
+        });
+        match start_workflow_run_record(pool, &workflow_id, input, "cron", "scheduler").await {
+            Ok(_) => fired += 1,
+            Err(message) => log::warn!("Scheduled workflow {workflow_id} failed to start: {message}"),
+        }
+    }
+    Ok(fired)
+}
+
+fn json_value_object() -> serde_json::Value {
+    serde_json::Value::Object(Default::default())
+}
+
+// ---------- MCP-friendly API request helpers ----------
+
+pub(crate) async fn list_api_request_summaries(
+    pool: &SqlitePool,
+) -> Result<Vec<serde_json::Value>, String> {
+    let rows = sqlx::query(
+        "SELECT id, name, method, url, collection_id FROM api_requests
+         WHERE workspace_id = 'default' ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.try_get::<String, _>(0).unwrap_or_default(),
+                "name": row.try_get::<String, _>(1).unwrap_or_default(),
+                "method": row.try_get::<String, _>(2).unwrap_or_default(),
+                "url": row.try_get::<String, _>(3).unwrap_or_default(),
+                "collectionId": row.try_get::<Option<String>, _>(4).unwrap_or(None),
+            })
+        })
+        .collect())
+}
+
+/// Like run_api_node but reports the real HTTP status instead of failing on
+/// >= 400 — an agent diagnosing an endpoint needs the response, not a stack
+/// of "returned status 404".
+pub(crate) async fn send_api_request_lenient(
+    pool: &SqlitePool,
+    request_id: &str,
+) -> Result<serde_json::Value, String> {
+    let request: Option<crate::api_client::ApiRequestRecord> = sqlx::query_as(
+        "SELECT id, name, method, url, headers, query_params, variables, request_options,
+            pre_request_script, test_script, response_mappings, body_type, body,
+            auth_type, auth_config, collection_id, created_at, updated_at
+         FROM api_requests WHERE (id = ?1 OR name = ?1) AND workspace_id = 'default'
+         ORDER BY (id = ?1) DESC LIMIT 1",
+    )
+    .bind(request_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let request = request.ok_or_else(|| format!("API request not found: {}", request_id))?;
+    let payload = crate::api_client::SendApiRequestPayload {
+        request_id: Some(request.id.clone()),
+        collection_id: request.collection_id.clone(),
+        environment_id: None,
+        method: Some(request.method.clone()),
+        url: Some(request.url.clone()),
+        headers: serde_json::from_str(&request.headers).ok(),
+        query_params: serde_json::from_str(&request.query_params).ok(),
+        variables: serde_json::from_str(&request.variables).ok(),
+        request_options: serde_json::from_str(&request.request_options).ok(),
+        pre_request_script: Some(request.pre_request_script.clone()),
+        test_script: Some(request.test_script.clone()),
+        response_mappings: serde_json::from_str(&request.response_mappings).ok(),
+        body_type: Some(request.body_type.clone()),
+        body: Some(request.body.clone()),
+        auth_type: Some(request.auth_type.clone()),
+        auth_config: serde_json::from_str(&request.auth_config).ok(),
+    };
+    let prepared = crate::api_client::prepare_request(pool, &payload).await?;
+    let response = crate::api_client::execute_prepared(&prepared).await?;
+    Ok(serde_json::json!({
+        "status": response.status,
+        "statusText": response.status_text,
+        "headers": response.headers,
+        "body": response.body,
+        "duration": response.duration,
+    }))
+}
 
 #[cfg(test)]
 mod tests {
@@ -2238,8 +2837,8 @@ mod tests {
         let pool = test_pool().await;
         let definition = serde_json::json!({
             "schemaVersion": 1,
-            "name": "AgentPending",
-            "nodes": [ { "id": "r", "type": "agent", "name": "R", "config": { "profileId": "p", "prompt": "hi" } } ],
+            "name": "PluginPending",
+            "nodes": [ { "id": "r", "type": "plugin:demo:step", "name": "R", "config": {} } ],
             "edges": []
         });
         let id = create_and_publish(&pool, definition).await;
@@ -2258,7 +2857,7 @@ mod tests {
         let definition = serde_json::json!({
             "schemaVersion": 1,
             "name": "Retry",
-            "nodes": [ { "id": "r", "type": "agent", "name": "R", "config": { "profileId": "p", "prompt": "hi" } } ],
+            "nodes": [ { "id": "r", "type": "plugin:demo:step", "name": "R", "config": {} } ],
             "edges": []
         });
         let id = create_and_publish(&pool, definition).await;
@@ -2267,7 +2866,7 @@ mod tests {
             .unwrap();
         assert_eq!(failed.status, STATUS_FAILED);
         // Retry re-drives the node (and fails again deterministically for the
-        // unmigrated agent type), proving state reset instead of a stale read.
+        // unsupported plugin type), proving state reset instead of a stale read.
         let retried = retry_node_record(&pool, &failed.id, "r").await.unwrap();
         assert_eq!(retried.status, STATUS_FAILED);
         let node = retried.node_runs.iter().find(|n| n.node_id == "r").unwrap();
@@ -2280,6 +2879,188 @@ mod tests {
             .await
             .unwrap();
         assert!(retry_node_record(&pool, &ok.id, "n1").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn workflow_agent_node_errors_without_profile() {
+        let pool = test_pool().await;
+        let definition = serde_json::json!({
+            "schemaVersion": 1,
+            "name": "AgentNode",
+            "nodes": [ { "id": "a", "type": "agent", "name": "A", "config": { "profileId": "ghost", "prompt": "hi" } } ],
+            "edges": []
+        });
+        let id = create_and_publish(&pool, definition).await;
+        let detail = run_workflow_record(&pool, &id, serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(detail.status, STATUS_FAILED);
+        let node = &detail.node_runs[0];
+        assert_eq!(node.status, STATUS_FAILED);
+        assert!(node.error_json.as_ref().unwrap().contains("Agent profile not found"));
+    }
+
+    #[tokio::test]
+    async fn workflow_approval_pause_then_approve_resumes_and_reject_fails() {
+        let pool = test_pool().await;
+        let definition = serde_json::json!({
+            "schemaVersion": 1,
+            "name": "Gated",
+            "nodes": [
+                { "id": "gate", "type": "approval", "name": "Gate", "config": { "prompt": "Proceed?" } },
+                { "id": "after", "type": "transform", "name": "After", "config": { "mappings": { "ok": true } } }
+            ],
+            "edges": [ { "id": "e1", "source": "gate", "target": "after" } ]
+        });
+        let id = create_and_publish(&pool, definition.clone()).await;
+
+        // First run pauses at the approval gate and is resumed by approval.
+        let paused = run_workflow_record(&pool, &id, serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(paused.status, STATUS_PAUSED);
+        let node = paused.node_runs.iter().find(|n| n.node_id == "gate").unwrap();
+        assert_eq!(node.status, STATUS_WAITING_APPROVAL);
+
+        let resumed = resolve_workflow_approval_record(&pool, &paused.id, "gate", true, "qa-lead")
+            .await
+            .unwrap();
+        // Resume runs in the background; wait for completion.
+        let mut final_detail = resumed.clone();
+        for _ in 0..50 {
+            final_detail = get_run_detail(&pool, &paused.id).await.unwrap();
+            if final_detail.status != "running" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert_eq!(final_detail.status, STATUS_SUCCEEDED);
+        let after = final_detail.node_runs.iter().find(|n| n.node_id == "after").unwrap();
+        assert_eq!(after.status, STATUS_SUCCEEDED);
+
+        // Double-resolving is rejected.
+        assert!(resolve_workflow_approval_record(&pool, &paused.id, "gate", true, "qa-lead")
+            .await
+            .is_err());
+
+        // Second run rejected at the gate fails the run with the decision.
+        let paused2 = run_workflow_record(&pool, &id, serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(paused2.status, STATUS_PAUSED);
+        let rejected = resolve_workflow_approval_record(&pool, &paused2.id, "gate", false, "qa-lead")
+            .await
+            .unwrap();
+        assert_eq!(rejected.status, STATUS_FAILED);
+        let gate = rejected.node_runs.iter().find(|n| n.node_id == "gate").unwrap();
+        assert_eq!(gate.status, STATUS_FAILED);
+        assert!(gate.error_json.as_ref().unwrap().contains("Rejected"));
+    }
+
+    #[tokio::test]
+    async fn workflow_background_start_returns_running_then_completes() {
+        let pool = test_pool().await;
+        let definition = serde_json::json!({
+            "schemaVersion": 1,
+            "name": "Background",
+            "nodes": [ { "id": "d", "type": "delay", "name": "D", "config": { "durationMs": 0 } } ],
+            "edges": []
+        });
+        let id = create_and_publish(&pool, definition).await;
+        let started = start_workflow_run_record(&pool, &id, serde_json::json!({ "k": "v" }), "mcp", "ai-agent")
+            .await
+            .unwrap();
+        assert_eq!(started.status, "running");
+
+        let mut final_detail = started.clone();
+        for _ in 0..50 {
+            final_detail = get_run_detail(&pool, &started.id).await.unwrap();
+            if final_detail.status != "running" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert_eq!(final_detail.status, STATUS_SUCCEEDED);
+
+        let trigger_type: String = sqlx::query_scalar("SELECT trigger_type FROM workflow_runs WHERE id = ?")
+            .bind(&started.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(trigger_type, "mcp");
+    }
+
+    #[tokio::test]
+    async fn workflow_cron_trigger_save_validate_and_fire() {
+        let pool = test_pool().await;
+        let definition = definition_fixture();
+        let id = create_and_publish(&pool, definition).await;
+
+        // Invalid cron is rejected when enabling.
+        let bad = save_workflow_trigger_record(
+            &pool,
+            SaveWorkflowTriggerPayload {
+                workflow_id: id.clone(),
+                trigger_type: "cron".to_string(),
+                cron: Some("not a cron".to_string()),
+                enabled: true,
+            },
+        )
+        .await;
+        assert!(bad.is_err());
+
+        let saved = save_workflow_trigger_record(
+            &pool,
+            SaveWorkflowTriggerPayload {
+                workflow_id: id.clone(),
+                trigger_type: "cron".to_string(),
+                cron: Some("0 9 * * 1-5".to_string()),
+                enabled: true,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(saved.enabled);
+        assert_eq!(saved.config["cron"].as_str().unwrap(), "0 9 * * 1-5");
+        assert!(saved.config["nextRunAt"].is_string());
+
+        // Not due yet: nothing fires.
+        let fired = tick_workflow_triggers(&pool).await.unwrap();
+        assert_eq!(fired, 0);
+
+        // Force the trigger due, then the scheduler starts a run.
+        let config = serde_json::json!({ "cron": "0 9 * * 1-5", "nextRunAt": "2020-01-01T00:00:00Z" });
+        sqlx::query("UPDATE workflow_triggers SET config_json = ? WHERE workflow_id = ?")
+            .bind(config.to_string())
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let fired = tick_workflow_triggers(&pool).await.unwrap();
+        assert_eq!(fired, 1);
+
+        let runs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM workflow_runs WHERE workflow_id = ? AND trigger_type = 'cron'")
+            .bind(&id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(runs, 1);
+
+        let triggers = list_workflow_triggers_record(&pool, &id).await.unwrap();
+        assert_eq!(triggers.len(), 1);
+        // nextRunAt advanced past the forced past date.
+        assert_ne!(
+            triggers[0].config["nextRunAt"].as_str().unwrap(),
+            "2020-01-01T00:00:00Z"
+        );
+    }
+
+    #[tokio::test]
+    async fn workflow_api_request_helpers_list_and_lenient_send() {
+        let pool = test_pool().await;
+        let summaries = list_api_request_summaries(&pool).await.unwrap();
+        assert!(summaries.is_empty());
+        assert!(send_api_request_lenient(&pool, "ghost").await.is_err());
     }
 
     #[tokio::test]

@@ -276,7 +276,7 @@ pub async fn get_scripts(pool: State<'_, SqlitePool>) -> Result<Vec<Script>, Str
     load_scripts(&pool).await
 }
 
-async fn load_scripts(pool: &SqlitePool) -> Result<Vec<Script>, String> {
+pub(crate) async fn load_scripts(pool: &SqlitePool) -> Result<Vec<Script>, String> {
     let mut scripts = sqlx::query_as::<_, Script>(
         "SELECT id, name, filename, description, language, interpreter, NULL AS content, parameters, created_at, updated_at, last_run, schedule_cron, schedule_enabled, collection_id, gist_id, gist_url, sync_to_gist, timeout_ms, require_webhook_signature, webhook_secret IS NOT NULL AS webhook_secret_set, source_path, source_available, json('[]') AS tags FROM scripts ORDER BY name",
     )

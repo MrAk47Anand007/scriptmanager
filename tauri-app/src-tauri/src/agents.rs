@@ -164,10 +164,11 @@ pub async fn create_agent_profile(
     create_profile_core(&pool, payload).await
 }
 
-pub async fn list_runs_core(pool: &SqlitePool) -> Result<Vec<AgentRunView>, String> {
+pub async fn list_runs_core(pool: &SqlitePool, limit: i64) -> Result<Vec<AgentRunView>, String> {
     let rows = sqlx::query(
-        "SELECT r.id, r.profile_id, r.status, r.provider, r.created_at FROM agent_runs r ORDER BY r.created_at DESC",
+        "SELECT r.id, r.profile_id, r.status, r.provider, r.created_at FROM agent_runs r ORDER BY r.created_at DESC LIMIT ?",
     )
+    .bind(limit.clamp(1, 100))
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
@@ -187,7 +188,7 @@ pub async fn list_runs_core(pool: &SqlitePool) -> Result<Vec<AgentRunView>, Stri
 
 #[tauri::command]
 pub async fn list_agent_runs(pool: State<'_, SqlitePool>) -> Result<Vec<AgentRunView>, String> {
-    list_runs_core(&pool).await
+    list_runs_core(&pool, 50).await
 }
 
 pub async fn read_run_core(pool: &SqlitePool, id: &str) -> Result<Option<AgentRunDetailView>, String> {
@@ -334,12 +335,11 @@ fn truncate_for_storage(line: &str) -> String {
 /// the monitor task can read them concurrently.
 async fn spawn_provider_process(
     provider: &str,
+    executable: &str,
     prompt: &str,
     cwd: &str,
     run_id: &str,
 ) -> Result<(LiveSessionHandle, LiveSessionStreams), String> {
-    let executable = discover_provider_on_path(provider)
-        .ok_or_else(|| format!("'{provider}' executable not found on PATH"))?;
     let args = provider_process_args(provider, prompt, cwd)?;
     let mut command = tokio::process::Command::new(&executable);
     command
@@ -645,46 +645,51 @@ pub async fn run_agent_core(
     )
     .await?;
 
-    match spawn_provider_process(&provider, payload.prompt.trim(), payload.cwd.trim(), &run_id)
-        .await
-    {
+    let _ = launch_provider_session(app_handle, pool, &run_id, &provider, payload.prompt.trim(), payload.cwd.trim()).await;
+
+    list_runs_core(pool, 50)
+        .await?
+        .into_iter()
+        .find(|run| run.id == run_id)
+        .ok_or_else(|| "Agent run creation failed".to_string())
+}
+
+/// Spawn the provider process for an existing run row and monitor it in the
+/// background. On spawn failure the run is marked failed and a system message
+/// records the error; the caller receives the message as Err.
+async fn launch_provider_session(
+    app_handle: Option<&AppHandle>,
+    pool: &SqlitePool,
+    run_id: &str,
+    provider: &str,
+    prompt: &str,
+    cwd: &str,
+) -> Result<(), String> {
+    // Resolution is async (settings override lives in the DB), so it happens
+    // here where the pool is available rather than inside the spawn call.
+    let executable = resolve_provider_executable(pool, provider).await?;
+    match spawn_provider_process(provider, &executable, prompt, cwd, run_id).await {
         Ok((handle, streams)) => {
             // The run continues in the background; the renderer follows it
             // through `agent-event` refreshes.
-            if let Some(handle_app) = app_handle {
-                let pool_for_task = pool.clone();
-                let app = handle_app.clone();
-                let run_for_task = run_id.clone();
-                tauri::async_runtime::spawn(async move {
-                    let _ = run_provider_monitor(
-                        Some(app),
-                        pool_for_task,
-                        run_for_task,
-                        handle,
-                        streams,
-                    )
+            let app = app_handle.cloned();
+            let pool_for_task = pool.clone();
+            let run_for_task = run_id.to_string();
+            tauri::async_runtime::spawn(async move {
+                let _ = run_provider_monitor(app, pool_for_task, run_for_task, handle, streams)
                     .await;
-                });
-            } else {
-                let pool_for_task = pool.clone();
-                let run_for_task = run_id.clone();
-                tauri::async_runtime::spawn(async move {
-                    let _ =
-                        run_provider_monitor(None, pool_for_task, run_for_task, handle, streams)
-                            .await;
-                });
-            }
+            });
+            Ok(())
         }
         Err(error) => {
             sqlx::query("UPDATE agent_runs SET status = 'failed' WHERE id = ?")
-                .bind(&run_id)
+                .bind(run_id)
                 .execute(pool)
                 .await
                 .map_err(|e| e.to_string())?;
-            let migration_pending = provider != "codex" && provider != "claude";
             insert_agent_message(
                 pool,
-                &run_id,
+                run_id,
                 "system",
                 &error,
                 serde_json::json!({
@@ -692,18 +697,12 @@ pub async fn run_agent_core(
                     "role": "system",
                     "content": error,
                     "status": "failed",
-                    "migrationPending": migration_pending,
                 }),
             )
             .await?;
+            Err(error)
         }
     }
-
-    list_runs_core(pool)
-        .await?
-        .into_iter()
-        .find(|run| run.id == run_id)
-        .ok_or_else(|| "Agent run creation failed".to_string())
 }
 
 async fn record_pending_control_core(
@@ -715,9 +714,14 @@ async fn record_pending_control_core(
     let run = read_run_core(pool, run_id)
         .await?
         .ok_or_else(|| "Agent run not found".to_string())?;
-    let message = format!(
-        "Agent {action} is migration-pending in the Tauri desktop app (ACP process control not ported)."
-    );
+    let message = if run.run.status == "running" {
+        // The live session registry is the source of truth; a running status
+        // with no live handle means the monitor already persisted a terminal
+        // state that has not refreshed in the renderer yet.
+        format!("Agent {action} has no live provider process; the run already finished.")
+    } else {
+        format!("Agent run is already {status}; nothing to {action}.", status = run.run.status, action = action)
+    };
 
     if let Some(prompt) = prompt.map(str::trim).filter(|prompt| !prompt.is_empty()) {
         insert_agent_message(
@@ -746,7 +750,6 @@ async fn record_pending_control_core(
             "content": message,
             "action": action,
             "status": run.run.status,
-            "migrationPending": true,
         }),
     )
     .await?;
@@ -755,7 +758,7 @@ async fn record_pending_control_core(
         "runId": run_id,
         "status": run.run.status,
         "action": action,
-        "migrationPending": true,
+        "requested": false,
         "message": message,
     }))
 }
@@ -791,23 +794,407 @@ pub fn discover_provider_on_path(provider: &str) -> Option<String> {
     None
 }
 
+/// Directories where the CLI shims of the supported providers are commonly
+/// installed but which GUI-launched processes may not have on PATH (npm
+/// global, Volta, nvm, scoop, bun, cargo).
+fn well_known_provider_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from);
+    let appdata = std::env::var_os("APPDATA").map(std::path::PathBuf::from);
+    let localappdata = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from);
+    if let Some(appdata) = &appdata {
+        dirs.push(appdata.join("npm"));
+    }
+    if let Some(local) = &localappdata {
+        dirs.push(local.join("npm"));
+        dirs.push(local.join("pnpm"));
+        dirs.push(local.join("Volta").join("bin"));
+    }
+    if let Some(home) = &home {
+        dirs.push(home.join(".volta").join("bin"));
+        dirs.push(home.join(".bun").join("bin"));
+        dirs.push(home.join(".cargo").join("bin"));
+        dirs.push(home.join("scoop").join("shims"));
+        dirs.push(home.join(".local").join("bin"));
+        dirs.push(home.join(".npm-global").join("bin"));
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        dirs.push(std::path::PathBuf::from("/usr/local/bin"));
+        dirs.push(std::path::PathBuf::from("/opt/homebrew/bin"));
+    }
+    dirs
+}
+
+fn well_known_provider_executable(provider: &str) -> Option<String> {
+    if !ALLOWED_PROVIDERS.contains(&provider) {
+        return None;
+    }
+    let extensions: Vec<&str> = if cfg!(target_os = "windows") {
+        vec![".cmd", ".exe", ""]
+    } else {
+        vec![""]
+    };
+    for dir in well_known_provider_dirs() {
+        for ext in &extensions {
+            let candidate = dir.join(format!("{provider}{ext}"));
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Detect desktop (GUI) installations of a provider. Desktop apps cannot be
+/// driven headlessly by ScriptManager — only their CLI counterparts can — but
+/// surfacing them turns "Not found" into actionable guidance.
+fn detect_desktop_install(provider: &str) -> Option<String> {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from)?;
+    #[cfg(target_os = "windows")]
+    {
+        let local = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)?;
+        match provider {
+            "claude" => {
+                let candidate = local.join("AnthropicClaude").join("claude.exe");
+                if candidate.is_file() {
+                    return Some(candidate.to_string_lossy().to_string());
+                }
+            }
+            "codex" => {
+                if let Ok(entries) = std::fs::read_dir(local.join("Programs")) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name().to_string_lossy().to_lowercase();
+                        if name.contains("codex") {
+                            if let Ok(exes) = std::fs::read_dir(entry.path()) {
+                                for exe in exes.flatten() {
+                                    let exe_name = exe.file_name().to_string_lossy().to_lowercase();
+                                    if exe_name.ends_with(".exe")
+                                        && (exe_name.contains("codex") || exe_name.contains(&name))
+                                    {
+                                        return Some(exe.path().to_string_lossy().to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let applications = home.join("Applications");
+        let global = std::path::PathBuf::from("/Applications");
+        let app_name = match provider {
+            "claude" => "Claude.app",
+            "codex" => "Codex.app",
+            _ => "",
+        };
+        if !app_name.is_empty() {
+            for base in [applications, global] {
+                let candidate = base.join(app_name);
+                if candidate.is_dir() {
+                    return Some(candidate.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    let _ = home;
+    None
+}
+
+fn install_hint(provider: &str) -> &'static str {
+    match provider {
+        "codex" => "Install the Codex CLI: npm install -g @openai/codex",
+        "claude" => "Install the Claude Code CLI: npm install -g @anthropic-ai/claude-code",
+        _ => "",
+    }
+}
+
+/// Ask a discovered CLI for its version. Desktop binaries are never probed.
+async fn probe_provider_version(executable: &str) -> Option<String> {
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::process::Command::new(executable).arg("--version").output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let line = text.lines().next().unwrap_or("").trim().to_string();
+    if line.is_empty() {
+        None
+    } else {
+        Some(line)
+    }
+}
+
+pub const AGENT_CLI_PATH_PREFIX: &str = "agent_cli_path_";
+
+fn settings_key(provider: &str) -> String {
+    format!("{AGENT_CLI_PATH_PREFIX}{provider}")
+}
+
+/// Resolve a provider executable for launching: manual override from settings
+/// first, then PATH, then well-known install locations. The error message
+/// always explains what to do next (install the CLI or set a path).
+pub async fn resolve_provider_executable(pool: &SqlitePool, provider: &str) -> Result<String, String> {
+    if !ALLOWED_PROVIDERS.contains(&provider) {
+        return Err(format!("Unsupported agent provider: {provider}"));
+    }
+    if let Some(override_path) = crate::settings::get_setting(pool, &settings_key(provider))
+        .await?
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+    {
+        if std::path::Path::new(&override_path).is_file() {
+            return Ok(override_path);
+        }
+        return Err(format!(
+            "Configured {provider} CLI path does not exist: {override_path}. Update or clear it in the Agents panel."
+        ));
+    }
+    if let Some(on_path) = discover_provider_on_path(provider) {
+        return Ok(on_path);
+    }
+    if let Some(known) = well_known_provider_executable(provider) {
+        return Ok(known);
+    }
+    let desktop_note = match detect_desktop_install(provider) {
+        Some(_) => format!(
+            " A {provider} desktop app is installed, but desktop apps cannot be automated headlessly — the CLI is required."
+        ),
+        None => String::new(),
+    };
+    Err(format!(
+        "'{provider}' CLI not found.{desktop_note} {}. Or set the CLI path manually in the Agents panel.",
+        install_hint(provider)
+    ))
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderDiscovery {
+    pub provider: String,
+    pub available: bool,
+    pub executable: Option<String>,
+    pub source: Option<String>,
+    pub version: Option<String>,
+    pub desktop_detected: Option<String>,
+    pub install_hint: Option<String>,
+    pub error: Option<String>,
+}
+
+async fn discover_provider_detailed(provider: &str) -> ProviderDiscovery {
+    if !ALLOWED_PROVIDERS.contains(&provider) {
+        return ProviderDiscovery {
+            provider: provider.to_string(),
+            available: false,
+            executable: None,
+            source: None,
+            version: None,
+            desktop_detected: None,
+            install_hint: None,
+            error: Some(format!("Unsupported agent provider: {provider}")),
+        };
+    }
+    if let Some(executable) = discover_provider_on_path(provider) {
+        return ProviderDiscovery {
+            provider: provider.to_string(),
+            available: true,
+            version: probe_provider_version(&executable).await,
+            executable: Some(executable.clone()),
+            source: Some("path".to_string()),
+            desktop_detected: detect_desktop_install(provider),
+            install_hint: None,
+            error: None,
+        };
+    }
+    if let Some(executable) = well_known_provider_executable(provider) {
+        return ProviderDiscovery {
+            provider: provider.to_string(),
+            available: true,
+            version: probe_provider_version(&executable).await,
+            executable: Some(executable.clone()),
+            source: Some("well-known".to_string()),
+            desktop_detected: None,
+            install_hint: None,
+            error: None,
+        };
+    }
+    ProviderDiscovery {
+        provider: provider.to_string(),
+        available: false,
+        executable: None,
+        source: None,
+        version: None,
+        desktop_detected: detect_desktop_install(provider),
+        install_hint: Some(install_hint(provider).to_string()),
+        error: Some(format!("'{provider}' CLI not found on PATH")),
+    }
+}
+
+
 #[tauri::command]
-pub async fn discover_agent_providers() -> Result<Vec<Value>, String> {
-    Ok(ALLOWED_PROVIDERS
-        .iter()
-        .map(|provider| match discover_provider_on_path(provider) {
-            Some(executable) => serde_json::json!({
-                "provider": provider,
-                "available": true,
-                "executable": executable,
-            }),
-            None => serde_json::json!({
-                "provider": provider,
-                "available": false,
-                "error": format!("'{provider}' executable not found on PATH"),
-            }),
-        })
-        .collect())
+pub async fn discover_agent_providers() -> Result<Vec<ProviderDiscovery>, String> {
+    let mut out = Vec::new();
+    for provider in ALLOWED_PROVIDERS {
+        out.push(discover_provider_detailed(provider).await);
+    }
+    Ok(out)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetProviderPathPayload {
+    pub provider: String,
+    /// Empty string clears the override.
+    pub path: String,
+}
+
+/// Store or clear a manual CLI executable path for a provider. The path is
+/// probed for existence so a typo cannot silently break launches later.
+#[tauri::command]
+pub async fn set_agent_provider_path(
+    pool: State<'_, SqlitePool>,
+    payload: SetProviderPathPayload,
+) -> Result<Value, String> {
+    let provider = payload.provider.as_str();
+    if !ALLOWED_PROVIDERS.contains(&provider) {
+        return Err(format!("Unsupported agent provider: {provider}"));
+    }
+    let path = payload.path.trim().to_string();
+    if path.is_empty() {
+        crate::settings::delete_setting(&pool, &settings_key(provider)).await?;
+        return Ok(serde_json::json!({
+            "provider": provider,
+            "override": null,
+            "message": format!("Manual {provider} CLI path cleared."),
+        }));
+    }
+    if !std::path::Path::new(&path).is_file() {
+        return Err(format!("Path is not a file: {path}"));
+    }
+    crate::settings::set_setting(&pool, &settings_key(provider), &path).await?;
+    let version = probe_provider_version(&path).await;
+    Ok(serde_json::json!({
+        "provider": provider,
+        "override": path,
+        "version": version,
+        "message": format!("{provider} CLI path saved."),
+    }))
+}
+
+#[tauri::command]
+pub async fn get_agent_provider_paths(
+    pool: State<'_, SqlitePool>,
+) -> Result<Value, String> {
+    let mut paths = serde_json::Map::new();
+    for provider in ALLOWED_PROVIDERS {
+        let value = crate::settings::get_setting(&pool, &settings_key(provider)).await?;
+        paths.insert(provider.to_string(), Value::String(value.unwrap_or_default()));
+    }
+    Ok(Value::Object(paths))
+}
+
+/// Run a provider CLI to completion and collect its final reply. Used by the
+/// workflow `agent` node where there is no interactive session to stream to.
+pub struct ProviderCollectResult {
+    pub reply: String,
+    pub exit_code: Option<i32>,
+    pub stderr_tail: String,
+}
+
+/// Extract the assistant's final message from provider output.
+/// Claude `-p --output-format json` emits one JSON object with `result`;
+/// Codex `exec --json` streams JSONL items whose agent_message holds text.
+pub(crate) fn parse_provider_reply(provider: &str, stdout: &[String]) -> Option<String> {
+    for line in stdout.iter().rev() {
+        let Ok(event) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let candidate = match provider {
+            "claude" => event.get("result").and_then(Value::as_str),
+            "codex" => {
+                let item = event.get("item").or_else(|| event.get("msg"));
+                let kind = item
+                    .and_then(|item| item.get("itemType").or_else(|| item.get("type")))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let is_message = kind == "agent_message"
+                    || kind == "agent_message_delta"
+                    || kind == "message";
+                if is_message {
+                    item.and_then(|item| {
+                        item.get("text")
+                            .or_else(|| item.get("content"))
+                            .and_then(Value::as_str)
+                    })
+                } else {
+                    event.get("text").and_then(Value::as_str)
+                }
+            }
+            _ => None,
+        };
+        if let Some(text) = candidate.filter(|text| !text.trim().is_empty()) {
+            return Some(text.trim().to_string());
+        }
+    }
+    None
+}
+
+pub async fn run_provider_collect(
+    pool: &SqlitePool,
+    provider: &str,
+    prompt: &str,
+    cwd: &str,
+) -> Result<ProviderCollectResult, String> {
+    let executable = resolve_provider_executable(pool, provider).await?;
+    let args = provider_process_args(provider, prompt, cwd)?;
+    let output = tokio::process::Command::new(&executable)
+        .args(&args)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .output()
+        .await
+        .map_err(|error| format!("Failed to launch {provider} provider process: {error}"))?;
+    let stdout: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let exit_code = output.status.code();
+    let reply = parse_provider_reply(provider, &stdout).unwrap_or_else(|| {
+        stdout
+            .iter()
+            .map(|line| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string()
+    });
+    if !output.status.success() {
+        let tail: String = stderr.lines().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+        return Err(format!(
+            "{provider} CLI exited with code {}: {}",
+            exit_code.unwrap_or(-1),
+            truncate_for_storage(&tail)
+        ));
+    }
+    let stderr_tail = stderr.lines().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+    Ok(ProviderCollectResult {
+        reply: truncate_for_storage(&reply),
+        exit_code,
+        stderr_tail: truncate_for_storage(&stderr_tail),
+    })
 }
 
 #[tauri::command]
@@ -856,12 +1243,135 @@ pub async fn interrupt_agent_run(pool: State<'_, SqlitePool>, id: String) -> Res
     record_pending_control_core(&pool, &id, "interrupt", None).await
 }
 
+/// Resume a finished agent run: relaunch the provider with a transcript of
+/// the prior conversation plus the follow-up instruction. Runs execute as
+/// fresh provider processes (the CLIs are ephemeral), so the continuation is
+/// prompt-based — honest about what the transport supports while keeping one
+/// persistent ScriptManager run thread.
 #[tauri::command]
 pub async fn resume_agent_run(
+    app_handle: AppHandle,
     pool: State<'_, SqlitePool>,
     payload: ResumeAgentPayload,
 ) -> Result<Value, String> {
-    record_pending_control_core(&pool, &payload.run_id, "resume", payload.prompt.as_deref()).await
+    let detail = read_run_core(&pool, &payload.run_id)
+        .await?
+        .ok_or_else(|| "Agent run not found".to_string())?;
+    if detail.run.status == "running" {
+        return Err("Agent run is still active; interrupt it before resuming".to_string());
+    }
+    let provider = detail.run.provider.clone();
+    if !ALLOWED_PROVIDERS.contains(&provider.as_str()) {
+        return Err(format!("Unsupported agent provider: {provider}"));
+    }
+
+    let cwd = detail
+        .messages
+        .iter()
+        .filter_map(|message| message.get("cwd").and_then(Value::as_str))
+        .last()
+        .unwrap_or("")
+        .to_string();
+    if cwd.trim().is_empty() || !std::path::Path::new(cwd.trim()).is_dir() {
+        return Err("Cannot resume: the original working directory is unavailable. Launch the profile again with a project folder.".to_string());
+    }
+
+    let follow_up = payload
+        .prompt
+        .as_deref()
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .unwrap_or("Continue where you left off and finish the task.");
+
+    // Transcript for the continuation prompt: prior user turns and the most
+    // recent assistant/system content, each capped so the CLI prompt stays
+    // within a sane command-line size.
+    const TURN_CAP: usize = 2000;
+    let mut transcript = String::new();
+    for message in &detail.messages {
+        let role = message.get("role").and_then(Value::as_str).unwrap_or("");
+        let content = message
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if content.is_empty() || message.get("resumeAttempt").is_some() {
+            continue;
+        }
+        if role == "user" {
+            transcript.push_str(&format!("User: {}\n", truncate_turn(content)));
+        } else if role == "assistant" {
+            transcript.push_str(&format!("Assistant: {}\n", truncate_turn(content)));
+        }
+    }
+    let transcript = truncate_for_storage_tail(&transcript, TURN_CAP * 4);
+
+    let prompt = if transcript.trim().is_empty() {
+        follow_up.to_string()
+    } else {
+        format!(
+            "Continue the following task.\n\n== Prior conversation ==\n{transcript}\n\n== Follow-up ==\n{follow_up}"
+        )
+    };
+
+    sqlx::query("UPDATE agent_runs SET status = 'running' WHERE id = ?")
+        .bind(&payload.run_id)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    insert_agent_message(
+        &pool,
+        &payload.run_id,
+        "user",
+        follow_up,
+        serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "role": "user",
+            "content": follow_up,
+            "cwd": cwd,
+            "resumeAttempt": true,
+        }),
+    )
+    .await?;
+
+    match launch_provider_session(
+        Some(&app_handle),
+        &pool,
+        &payload.run_id,
+        &provider,
+        &prompt,
+        cwd.trim(),
+    )
+    .await
+    {
+        Ok(()) => Ok(serde_json::json!({
+            "runId": payload.run_id,
+            "status": "running",
+            "action": "resume",
+            "resumed": true,
+            "message": "Agent run resumed with the prior conversation context.",
+        })),
+        Err(error) => Err(error),
+    }
+}
+
+fn truncate_turn(content: &str) -> String {
+    let content = content.trim();
+    let capped: String = content.chars().take(2000).collect();
+    if capped.len() < content.len() {
+        format!("{capped}…")
+    } else {
+        capped.to_string()
+    }
+}
+
+fn truncate_for_storage_tail(content: &str, max_chars: usize) -> String {
+    let count = content.chars().count();
+    if count <= max_chars {
+        return content.to_string();
+    }
+    let tail: String = content.chars().skip(count - max_chars).collect();
+    format!("…{tail}")
 }
 
 #[tauri::command]
@@ -935,7 +1445,7 @@ mod tests {
             .await
             .unwrap();
 
-        let runs = list_runs_core(&pool).await.unwrap();
+        let runs = list_runs_core(&pool, 50).await.unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status, "failed");
 
@@ -1101,11 +1611,28 @@ mod tests {
 
         // Controlling a finished run falls back to the durable record path.
         let after = interrupt_agent_record_only(&pool, "r-live").await.unwrap();
-        assert_eq!(after["migrationPending"], true);
+        assert_eq!(after["requested"], false);
+        assert!(after["message"].as_str().unwrap().contains("nothing to"));
     }
 
     async fn interrupt_agent_record_only(pool: &SqlitePool, id: &str) -> Result<Value, String> {
         record_pending_control_core(pool, id, "interrupt", None).await
+    }
+
+    #[test]
+    fn parse_provider_reply_handles_claude_and_codex() {
+        let claude = vec![
+            serde_json::json!({ "type": "result", "result": "Done!", "session_id": "s1" }).to_string(),
+        ];
+        assert_eq!(parse_provider_reply("claude", &claude).as_deref(), Some("Done!"));
+
+        let codex = vec![
+            serde_json::json!({ "type": "item.completed", "item": { "itemType": "reasoning", "text": "thinking" } }).to_string(),
+            serde_json::json!({ "type": "item.completed", "item": { "itemType": "agent_message", "text": "All set." } }).to_string(),
+        ];
+        assert_eq!(parse_provider_reply("codex", &codex).as_deref(), Some("All set."));
+
+        assert_eq!(parse_provider_reply("codex", &[]), None);
     }
 
     #[tokio::test]
@@ -1123,11 +1650,11 @@ mod tests {
         let interrupt = record_pending_control_core(&pool, "r-1", "interrupt", None)
             .await
             .unwrap();
-        assert_eq!(interrupt["migrationPending"], true);
+        assert_eq!(interrupt["requested"], false);
         assert!(interrupt["message"]
             .as_str()
             .unwrap()
-            .contains("migration-pending"));
+            .contains("nothing to interrupt"));
 
         let resume = record_pending_control_core(&pool, "r-1", "resume", Some("continue"))
             .await

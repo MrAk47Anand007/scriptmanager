@@ -91,6 +91,12 @@ async fn load_requests(pool: &SqlitePool, status: Option<&str>) -> Result<Vec<Ap
     Ok(views)
 }
 
+/// Pending approvals only — used by the MCP tool surface so agents can see
+/// which runs are blocked on a human decision.
+pub(crate) async fn list_pending_approvals(pool: &SqlitePool) -> Result<Vec<ApprovalView>, String> {
+    load_requests(pool, Some("pending")).await
+}
+
 #[tauri::command]
 pub async fn list_approvals(
     pool: State<'_, SqlitePool>,

@@ -9,6 +9,7 @@ mod execution;
 mod fs_ops;
 mod gist;
 mod git_ops;
+mod mcp;
 mod models;
 mod notifications;
 mod observability;
@@ -31,6 +32,15 @@ mod workspace_access;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // MCP stdio mode: the binary doubles as an MCP server so Claude Desktop,
+    // Codex, and any other MCP client can use saved workflows, scripts, and
+    // API requests as tools. Never starts the GUI in this mode.
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|arg| mcp::MCP_FLAG_ALIASES.contains(&arg.as_str())) {
+        let code = tauri::async_runtime::block_on(mcp::run_stdio_server());
+        std::process::exit(code);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_log::Builder::new().build())
@@ -128,6 +138,10 @@ pub fn run() {
             workflows::read_workflow_run,
             workflows::retry_workflow_node,
             workflows::cancel_workflow_run,
+            workflows::resolve_workflow_approval,
+            workflows::list_workflow_triggers,
+            workflows::save_workflow_trigger,
+            workflows::delete_workflow_trigger,
             api_client::list_api_collections,
             api_client::save_api_collection,
             api_client::delete_api_collection,
@@ -197,6 +211,10 @@ pub fn run() {
             agents::interrupt_agent_run,
             agents::resume_agent_run,
             agents::terminate_agent_run,
+            agents::set_agent_provider_path,
+            agents::get_agent_provider_paths,
+            mcp::get_mcp_status,
+            mcp::install_mcp_config,
             plugins::list_plugins,
             plugins::update_plugin,
             plugins::remove_plugin,

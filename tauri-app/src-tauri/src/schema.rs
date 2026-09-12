@@ -786,6 +786,19 @@ async fn ensure_column(
     Ok(())
 }
 
+
+/// Shared in-memory schema pool used by module tests across the crate.
+#[cfg(test)]
+pub(crate) async fn test_pool() -> sqlx::SqlitePool {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("create in-memory sqlite pool");
+    ensure_schema(&pool).await.expect("ensure schema");
+    pool
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
