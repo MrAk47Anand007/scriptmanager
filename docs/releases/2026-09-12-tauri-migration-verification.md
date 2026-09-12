@@ -24,6 +24,7 @@
 ### Agent live session control
 
 - Provider processes now launch through tokio (`tokio::process`) with piped streams; the previous blocking `std::process::Command::output()` call stalled an async worker for the whole provider run.
+- Git subprocesses (`run_git_action`, `git_probe`, `git_clone_project`) now run through the blocking pool so network fetch/push/clone operations cannot stall async workers either.
 - Runs execute in background monitor tasks tracked by a live session registry; interrupt/terminate target the live process and persist `interrupted`/`terminated` terminal states with audit messages.
 - Provider stdout/stderr stream to the renderer as `agent-event` refreshes and persist as structured messages (JSONL lines keep their parsed event; long lines are truncated).
 - Claude is wired to its documented non-interactive print mode (`claude -p <prompt> --output-format json`) with the same fixed-identity argument-array safety model as Codex.
