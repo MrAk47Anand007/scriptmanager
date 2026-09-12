@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sqlx::SqlitePool;
 use tauri::State;
 use uuid::Uuid;
@@ -448,6 +447,7 @@ pub async fn import_scanned_scripts(
 mod tests {
     use super::*;
     use crate::schema::ensure_schema;
+    use serde_json::Value;
     use sqlx::sqlite::SqlitePoolOptions;
     use std::fs;
 

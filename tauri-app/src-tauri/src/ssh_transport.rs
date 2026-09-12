@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 use russh::keys::{HashAlg, PrivateKeyWithHashAlg};
 use russh_sftp::client::SftpSession;
-use russh_sftp::protocol::OpenFlags;
 use sqlx::{Row, SqlitePool};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -303,7 +302,7 @@ impl SshSession {
             .map_err(|e| format!("Failed to start SFTP session: {e}"))
     }
 
-    pub async fn disconnect(mut self) {
+    pub async fn disconnect(self) {
         let _ = self
             .handle
             .disconnect(russh::Disconnect::ByApplication, "done", "en")
@@ -332,7 +331,7 @@ pub async fn sftp_upload(
     content: &[u8],
     permissions: Option<&str>,
 ) -> Result<(), String> {
-    let mut sftp = session.open_sftp().await?;
+    let sftp = session.open_sftp().await?;
     let upload = async {
         let mut file = sftp
             .create(remote_path)
@@ -373,7 +372,7 @@ pub async fn sftp_download(
     session: &mut SshSession,
     remote_path: &str,
 ) -> Result<Vec<u8>, String> {
-    let mut sftp = session.open_sftp().await?;
+    let sftp = session.open_sftp().await?;
     let download = async {
         let mut file = sftp
             .open(remote_path)

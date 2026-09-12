@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::Arc;
-use tauri::{command, Emitter, Window};
+use tauri::{command, Window};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use std::process::Stdio;

@@ -1089,7 +1089,7 @@ fn remote_interpreter_for_language(language: &str) -> &'static str {
         "node" | "javascript" | "typescript" => "node",
         "shell" | "bash" => "bash",
         "python" => "python3",
-        other => "python3",
+        _ => "python3",
     }
 }
 

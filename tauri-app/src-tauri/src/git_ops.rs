@@ -753,7 +753,16 @@ pub async fn run_git_action(
     pool: tauri::State<'_, SqlitePool>,
     payload: RunGitActionPayload,
 ) -> Result<serde_json::Value, String> {
-    dispatch_git_action(&pool, &payload.project_id, payload.action).await
+    // Git subprocesses are synchronous and can be slow (network fetch/push);
+    // run them on the blocking pool so the async runtime stays responsive.
+    let pool = pool.inner().clone();
+    let project_id = payload.project_id;
+    let action = payload.action;
+    tauri::async_runtime::spawn_blocking(move || {
+        tauri::async_runtime::block_on(dispatch_git_action(&pool, &project_id, action))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[command]
@@ -761,7 +770,69 @@ pub async fn git_probe(url: String, token: Option<String>) -> Result<serde_json:
     if url.trim().is_empty() {
         return Err("Repository URL is required".to_string());
     }
-    Ok(probe_remote(url.trim(), token.as_deref()))
+    let url = url.trim().to_string();
+    tauri::async_runtime::spawn_blocking(move || probe_remote(&url, token.as_deref()))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Run the `git clone` subprocess and read back the default branch.
+/// Blocking work, so callers run it through the blocking pool.
+fn clone_repository_blocking(
+    target: &str,
+    authed_url: &str,
+    branch: Option<&str>,
+) -> Result<String, String> {
+    let resolved = PathBuf::from(target);
+    if resolved.exists() {
+        let entries = std::fs::read_dir(&resolved).map_err(|e| e.to_string())?;
+        if entries.count() > 0 {
+            return Err(format!("Destination directory \"{}\" already exists and is not empty.", resolved.display()));
+        }
+    } else if let Some(parent) = resolved.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+    }
+
+    // Build final argv without ever logging `authed`.
+    let mut argv_owned: Vec<String> = vec!["clone".to_string()];
+    if let Some(b) = branch {
+        argv_owned.push("-b".to_string());
+        argv_owned.push(b.to_string());
+    }
+    argv_owned.push(authed_url.to_string());
+    argv_owned.push(resolved.to_string_lossy().to_string());
+
+    let output = std::process::Command::new("git")
+        .args(&argv_owned)
+        .output()
+        .map_err(|e| format!("Git is not available: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+        if stderr.contains("could not read username")
+            || stderr.contains("authentication failed")
+            || stderr.contains("401")
+            || stderr.contains("403")
+        {
+            return Err("Authentication failed while cloning. Please check your Access Token.".to_string());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Git clone failed.".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    Ok(run_git(
+        &resolved.to_string_lossy(),
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+    )
+    .map(|o| o.stdout.trim().to_string())
+    .ok()
+    .filter(|s| !s.is_empty())
+    .unwrap_or_else(|| "main".to_string()))
 }
 
 #[command]
@@ -782,70 +853,16 @@ pub async fn git_clone_project(
     let token = payload.token.as_deref().map(|t| t.trim()).filter(|t| !t.is_empty());
     let branch = payload.branch.as_deref().map(|b| b.trim()).filter(|b| !b.is_empty());
 
-    let resolved = PathBuf::from(&target);
-    if resolved.exists() {
-        let entries = std::fs::read_dir(&resolved).map_err(|e| e.to_string())?;
-        if entries.count() > 0 {
-            return Err(format!("Destination directory \"{}\" already exists and is not empty.", resolved.display()));
-        }
-    } else if let Some(parent) = resolved.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-    }
-
     let authed = inject_git_auth(&url, token);
-    let mut args: Vec<&str> = vec!["clone"];
-    let mut owned_branch: Option<String> = None;
-    if let Some(b) = branch {
-        args.push("-b");
-        owned_branch = Some(b.to_string());
-    }
-    let mut owned: Vec<String> = Vec::new();
-    if let Some(b) = owned_branch.as_ref() {
-        owned.push(b.clone());
-    }
-    // Build final argv without ever logging `authed`.
-    let mut argv: Vec<&str> = vec!["clone"];
-    if owned_branch.is_some() {
-        argv.push("-b");
-        argv.push(owned.first().map(|s| s.as_str()).unwrap_or(""));
-    }
-    let resolved_str = resolved.to_string_lossy().to_string();
-    argv.push(authed.as_str());
-    argv.push(resolved_str.as_str());
-    let _ = args;
+    let branch_owned = branch.map(|b| b.to_string());
 
-    let output = std::process::Command::new("git")
-        .args(&argv)
-        .output()
-        .map_err(|e| format!("Git is not available: {}", e))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
-        if stderr.contains("could not read username")
-            || stderr.contains("authentication failed")
-            || stderr.contains("401")
-            || stderr.contains("403")
-        {
-            return Err("Authentication failed while cloning. Please check your Access Token.".to_string());
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            "Git clone failed.".to_string()
-        } else {
-            stderr
-        });
-    }
-
-    let default_branch = run_git(
-        &resolved.to_string_lossy(),
-        &["rev-parse", "--abbrev-ref", "HEAD"],
-    )
-    .map(|o| o.stdout.trim().to_string())
-    .ok()
-    .filter(|s| !s.is_empty())
-    .unwrap_or_else(|| "main".to_string());
-
+    // Cloning is a network-bound subprocess; keep it off the async workers.
+    let clone_target = target.clone();
+    let default_branch = tauri::async_runtime::spawn_blocking(move || {
+        clone_repository_blocking(&clone_target, &authed, branch_owned.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     let safe_url = sanitize_git_url(&url);
     let name = payload
         .project_name_camel
@@ -866,7 +883,7 @@ pub async fn git_clone_project(
     .bind(&id)
     .bind(&name)
     .bind(&description)
-    .bind(resolved.to_string_lossy().to_string())
+    .bind(&target)
     .bind(&default_branch)
     .bind(&safe_url)
     .bind(&policy_text)

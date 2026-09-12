@@ -319,13 +319,6 @@ fn live_session(run_id: &str) -> Option<LiveSessionHandle> {
         .cloned()
 }
 
-fn live_session_active(run_id: &str) -> bool {
-    LIVE_SESSIONS
-        .lock()
-        .expect("live session registry lock")
-        .contains_key(run_id)
-}
-
 /// Best-effort cleanup on unexpected drop paths: any run still registered
 /// when a new run for the same id appears is stale.
 fn truncate_for_storage(line: &str) -> String {
@@ -1104,7 +1097,7 @@ mod tests {
             .messages
             .iter()
             .any(|m| m["content"].as_str().unwrap_or("").contains("interrupted by user control")));
-        assert!(!live_session_active("r-live"));
+        assert!(live_session("r-live").is_none());
 
         // Controlling a finished run falls back to the durable record path.
         let after = interrupt_agent_record_only(&pool, "r-live").await.unwrap();

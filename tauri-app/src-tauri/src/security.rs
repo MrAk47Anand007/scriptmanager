@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
-use aes_gcm::aead::{Aead, KeyInit, OsRng};
+use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::Deserialize;
 use serde_json::Value;
 use sqlx::{Row, SqlitePool};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 use crate::state::AppPaths;
