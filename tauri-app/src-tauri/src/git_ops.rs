@@ -1021,9 +1021,13 @@ mod tests {
         pool
     }
 
-    async fn insert_git_project(pool: &SqlitePool, repository_root: &str) -> String {
+    async fn insert_git_project_with_policy(
+        pool: &SqlitePool,
+        repository_root: &str,
+        policy: serde_json::Value,
+    ) -> String {
         let id = uuid::Uuid::new_v4().to_string();
-        let policy = crate::projects::default_workspace_policy().to_string();
+        let policy = policy.to_string();
         sqlx::query(
             "INSERT INTO projects (id, workspace_id, name, repository_root, workspace_policy)
              VALUES (?, 'default', 'Git Test', ?, ?)",
@@ -1035,6 +1039,26 @@ mod tests {
         .await
         .unwrap();
         id
+    }
+
+    async fn insert_git_project(pool: &SqlitePool, repository_root: &str) -> String {
+        insert_git_project_with_policy(
+            pool,
+            repository_root,
+            crate::projects::default_workspace_policy(),
+        )
+        .await
+    }
+
+    fn action(name: &str) -> GitActionPayload {
+        GitActionPayload {
+            action: name.to_string(),
+            path: None,
+            branch: None,
+            message: None,
+            remote: None,
+            force: None,
+        }
     }
 
     #[test]
@@ -1115,5 +1139,171 @@ mod tests {
         assert!(!after_approval.contains("requires approval"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn native_git_action_dispatcher_covers_common_flows() {
+        let pool = test_pool().await;
+        let dir = init_temp_repo("dispatcher");
+        let dir_str = dir.to_string_lossy().to_string();
+        let bare = std::env::temp_dir().join(format!(
+            "sm-git-dispatcher-origin-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&bare);
+        let bare_str = bare.to_string_lossy().to_string();
+        run_git_capture(&std::env::temp_dir().to_string_lossy(), &["init", "--bare", &bare_str])
+            .unwrap();
+        run_git_capture(&dir_str, &["remote", "add", "origin", &bare_str]).unwrap();
+
+        let mut policy = crate::projects::default_workspace_policy();
+        policy["requireApprovalForPush"] = serde_json::Value::Bool(false);
+        policy["requireApprovalForCleanup"] = serde_json::Value::Bool(false);
+        let project_id = insert_git_project_with_policy(&pool, &dir_str, policy).await;
+
+        let status = dispatch_git_action(&pool, &project_id, action("status"))
+            .await
+            .unwrap();
+        assert_eq!(status["data"]["clean"], serde_json::Value::Bool(true));
+
+        let log = dispatch_git_action(&pool, &project_id, action("log"))
+            .await
+            .unwrap();
+        assert_eq!(log["data"].as_array().unwrap().len(), 1);
+
+        let branches = dispatch_git_action(&pool, &project_id, action("branches"))
+            .await
+            .unwrap();
+        assert!(branches["data"]["local"].as_array().unwrap().len() >= 1);
+
+        std::fs::write(dir.join("f.txt"), "hello\nchanged\n").unwrap();
+        let diff = dispatch_git_action(
+            &pool,
+            &project_id,
+            GitActionPayload {
+                action: "diff".to_string(),
+                path: Some("f.txt".to_string()),
+                branch: None,
+                message: None,
+                remote: None,
+                force: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(diff["data"].as_array().unwrap().len(), 1);
+
+        dispatch_git_action(
+            &pool,
+            &project_id,
+            GitActionPayload {
+                action: "add".to_string(),
+                path: Some("f.txt".to_string()),
+                branch: None,
+                message: None,
+                remote: None,
+                force: None,
+            },
+        )
+        .await
+        .unwrap();
+        let staged = dispatch_git_action(&pool, &project_id, action("status"))
+            .await
+            .unwrap();
+        assert_eq!(staged["data"]["staged"].as_array().unwrap().len(), 1);
+
+        dispatch_git_action(
+            &pool,
+            &project_id,
+            GitActionPayload {
+                action: "reset".to_string(),
+                path: Some("f.txt".to_string()),
+                branch: None,
+                message: None,
+                remote: None,
+                force: None,
+            },
+        )
+        .await
+        .unwrap();
+        let unstaged = dispatch_git_action(&pool, &project_id, action("status"))
+            .await
+            .unwrap();
+        assert_eq!(unstaged["data"]["unstaged"].as_array().unwrap().len(), 1);
+
+        dispatch_git_action(
+            &pool,
+            &project_id,
+            GitActionPayload {
+                action: "add".to_string(),
+                path: Some("f.txt".to_string()),
+                branch: None,
+                message: None,
+                remote: None,
+                force: None,
+            },
+        )
+        .await
+        .unwrap();
+        dispatch_git_action(
+            &pool,
+            &project_id,
+            GitActionPayload {
+                action: "commit".to_string(),
+                path: None,
+                branch: None,
+                message: Some("update f".to_string()),
+                remote: None,
+                force: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        dispatch_git_action(
+            &pool,
+            &project_id,
+            GitActionPayload {
+                action: "push".to_string(),
+                path: None,
+                branch: Some("master".to_string()),
+                message: None,
+                remote: Some("origin".to_string()),
+                force: None,
+            },
+        )
+        .await
+        .unwrap();
+        dispatch_git_action(
+            &pool,
+            &project_id,
+            GitActionPayload {
+                action: "fetch".to_string(),
+                path: None,
+                branch: None,
+                message: None,
+                remote: Some("origin".to_string()),
+                force: None,
+            },
+        )
+        .await
+        .unwrap();
+        dispatch_git_action(
+            &pool,
+            &project_id,
+            GitActionPayload {
+                action: "pull".to_string(),
+                path: None,
+                branch: Some("master".to_string()),
+                message: None,
+                remote: Some("origin".to_string()),
+                force: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&bare);
     }
 }

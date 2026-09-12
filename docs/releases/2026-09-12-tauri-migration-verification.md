@@ -27,6 +27,7 @@
 - Preserved plugin registry metadata while explicitly disabling plugin execution host claims.
 - Documented the remote execution SSH/SFTP target architecture: `russh` plus `russh-sftp`.
 - Added native protected-Git approval integration: protected Git actions create/reuse approval requests, block while pending, honor rejected decisions, and proceed after an approved matching request.
+- Added native Git dispatcher verification for status, log, branches, diff, add/stage, reset/unstage, commit, push, fetch, and pull using a temporary local repo and bare origin.
 - Updated operator/troubleshooting/docs language from Electron-hosted assumptions to Tauri-hosted behavior.
 
 ## Remaining Manual Or External Verification

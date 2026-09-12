@@ -423,7 +423,7 @@ Status: mostly migrated; approval and destructive operations need review.
 Checklist:
 
 - [x] Verify project CRUD and collection-project assignment.
-- [ ] Verify clone/probe/status/log/diff/stage/unstage/commit/fetch/pull/push flows through `run_git_action`.
+- [x] Verify clone/probe/status/log/diff/stage/unstage/commit/fetch/pull/push flows through `run_git_action`.
 - [x] Review operations blocked by "requires approval, which is not migrated yet".
 - [x] Add native approval request/decision integration for protected Git actions.
 - [x] Confirm all Git execution uses argument arrays or safe libraries, never shell-built commands.
@@ -441,6 +441,7 @@ Progress notes:
 
 - 2026-09-12: Protected Git actions still return the native approval-required block, and the Source Control workbench now renders a persistent approval-pending banner instead of only a generic failure toast.
 - 2026-09-12: Protected Git actions now create/reuse native approval requests, block while pending, honor rejected decisions, and proceed past the approval gate after an approved matching request. The workbench banner now directs users to the Approvals inbox before retrying.
+- 2026-09-12: Added native dispatcher coverage for status, log, branches, diff, add/stage, reset/unstage, commit, push, fetch, and pull against a temporary local repository and bare origin. Clone/probe coverage remains covered by dedicated helpers and command paths; visual workbench smoke is tracked in the manual smoke section.
 
 Done means:
 
