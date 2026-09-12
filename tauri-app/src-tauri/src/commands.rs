@@ -136,7 +136,7 @@ pub struct DeleteCollectionResult {
 #[derive(Debug, Deserialize)]
 pub struct OpenFolderPayload {
     #[serde(rename = "folder_path")]
-    folder_path: String,
+    folder_path: Option<String>,
     #[serde(rename = "folderPath")]
     folder_path_camel: Option<String>,
     mode: Option<String>,
@@ -806,7 +806,7 @@ async fn rescan_canonical_folder_record(
     open_folder_record(
         pool,
         OpenFolderPayload {
-            folder_path,
+            folder_path: Some(folder_path),
             folder_path_camel: None,
             mode: Some("collection".to_string()),
             collection_name: Some(collection.name),
@@ -927,7 +927,8 @@ async fn open_folder_record(
     let folder_path = payload
         .folder_path_camel
         .as_deref()
-        .unwrap_or(&payload.folder_path)
+        .or(payload.folder_path.as_deref())
+        .ok_or_else(|| "Folder path is required".to_string())?
         .trim();
     if folder_path.is_empty() {
         return Err("Folder path is required".to_string());
@@ -2122,7 +2123,7 @@ mod tests {
         let result = open_folder_record(
             &pool,
             OpenFolderPayload {
-                folder_path: root.to_string_lossy().to_string(),
+                folder_path: Some(root.to_string_lossy().to_string()),
                 folder_path_camel: None,
                 mode: Some("temporary".to_string()),
                 collection_name: None,
@@ -2153,6 +2154,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn open_folder_accepts_renderer_camel_case_payload() {
+        let pool = test_pool().await;
+        let root = std::env::temp_dir().join(format!("sm-open-folder-camel-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("hello-smoke.py"), "print('ok')").unwrap();
+
+        let result = open_folder_record(
+            &pool,
+            OpenFolderPayload {
+                folder_path: None,
+                folder_path_camel: Some(root.to_string_lossy().to_string()),
+                mode: Some("temporary".to_string()),
+                collection_name: None,
+                collection_name_camel: None,
+                runtime_preset: None,
+                runtime_preset_camel: Some("general".to_string()),
+                python_toolchain_enabled: None,
+                python_toolchain_enabled_camel: Some(false),
+                create_venv_if_missing: None,
+                create_venv_if_missing_camel: None,
+            },
+        )
+        .await
+        .expect("open folder from camelCase payload");
+
+        assert!(result.collection.is_temporary);
+        assert_eq!(result.collection.folder_path.as_deref(), Some(root.to_string_lossy().as_ref()));
+        assert_eq!(result.collection.runtime_preset, "general");
+        assert!(!result.collection.python_toolchain_enabled);
+        assert_eq!(result.imported_count, 1);
+        let folder_display = root.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+        assert_eq!(result.scripts[0].name, format!("{}/hello-smoke", folder_display));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
     async fn inspect_collection_workspace_returns_linked_folder_state() {
         let pool = test_pool().await;
         let root = std::env::temp_dir().join(format!("sm-collection-workspace-{}", Uuid::new_v4()));
@@ -2164,7 +2202,7 @@ mod tests {
         let result = open_folder_record(
             &pool,
             OpenFolderPayload {
-                folder_path: root.to_string_lossy().to_string(),
+                folder_path: Some(root.to_string_lossy().to_string()),
                 folder_path_camel: None,
                 mode: Some("collection".to_string()),
                 collection_name: Some("Workspace".to_string()),
@@ -2203,7 +2241,7 @@ mod tests {
         let result = open_folder_record(
             &pool,
             OpenFolderPayload {
-                folder_path: root.to_string_lossy().to_string(),
+                folder_path: Some(root.to_string_lossy().to_string()),
                 folder_path_camel: None,
                 mode: Some("collection".to_string()),
                 collection_name: Some("Canonical".to_string()),
@@ -2263,7 +2301,7 @@ mod tests {
         let result = open_folder_record(
             &pool,
             OpenFolderPayload {
-                folder_path: root.to_string_lossy().to_string(),
+                folder_path: Some(root.to_string_lossy().to_string()),
                 folder_path_camel: None,
                 mode: Some("collection".to_string()),
                 collection_name: Some("Rescan".to_string()),
@@ -2309,7 +2347,7 @@ mod tests {
         let result = open_folder_record(
             &pool,
             OpenFolderPayload {
-                folder_path: root.to_string_lossy().to_string(),
+                folder_path: Some(root.to_string_lossy().to_string()),
                 folder_path_camel: None,
                 mode: Some("collection".to_string()),
                 collection_name: Some("Python Workspace".to_string()),
