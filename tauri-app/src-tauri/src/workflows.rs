@@ -1102,7 +1102,6 @@ fn unsupported_node_error(node_type: &str) -> String {
             "Plugin workflow nodes are not migrated yet".to_string()
         }
         "remote" => "Remote workflow nodes are not migrated yet".to_string(),
-        "notification" => "Notification workflow nodes are not migrated yet".to_string(),
         "agent" => "Agent workflow nodes are not migrated yet".to_string(),
         "approval" => "Approval workflow nodes pause here until the approvals inbox is migrated".to_string(),
         other => format!("Unsupported workflow node: {}", other),

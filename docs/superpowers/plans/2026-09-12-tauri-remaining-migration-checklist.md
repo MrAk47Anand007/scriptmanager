@@ -267,7 +267,6 @@ Already present:
 Still pending:
 
 - Remote workflow nodes.
-- Notification workflow nodes.
 - Agent workflow nodes.
 - Plugin workflow nodes.
 
@@ -491,14 +490,14 @@ Done means:
 
 Status: profile/history migrated; provider execution pending.
 
-Current Tauri code supports profiles/runs/history and provider discovery. Actual run/interrupt/resume/terminate returns migration-pending errors. Event streaming is exposed as a Tauri event subscription, but provider execution does not emit events until ACP process control is ported.
+Current Tauri code supports profiles/runs/history and provider discovery. Run attempts persist a failed migration-pending record and control attempts append durable migration-pending messages to the targeted run. Event streaming is exposed as a Tauri event subscription, but real provider execution/control does not stream ACP events until process control is ported.
 
 Checklist:
 
 - [x] Remove `window.__ELECTRON__` dependency from `AgentsView`.
 - [x] Implement `agents.onEvent` Tauri event stream or remove the renderer subscription.
 - [ ] Implement provider process launch for allowlisted Codex/Claude provider identities.
-- [ ] Implement run, interrupt, resume, and terminate. Current native commands are explicit migration-pending stubs covered by tests.
+- [ ] Implement run, interrupt, resume, and terminate. Current native commands persist migration-pending launch/control attempts and are covered by tests, but do not start or control provider processes.
 - [ ] Rebuild approval/permission integration for ACP events.
 - [ ] Persist streamed events and final run state.
 - [x] Keep browser/web mode as inspect-only.
@@ -515,6 +514,7 @@ Progress notes:
 - 2026-09-12: Added `agents.onEvent` bridge subscription, added `terminate_agent_run`, and covered all execution commands as typed migration-pending stubs with a focused Rust test.
 - 2026-09-12: Confirmed `AgentsView` requires the desktop bridge for launch, follow-up, interrupt, and resume actions, leaving non-desktop mode as inspect-only.
 - 2026-09-12: Native agent launch attempts now persist a failed migration-pending run with user/system messages and emit an `agent-event` so the renderer can refresh durable history. Real provider process launch/run/interrupt/resume/terminate remains pending.
+- 2026-09-12: Native interrupt/resume/terminate attempts now validate the run id and append migration-pending system messages; resume also persists the follow-up prompt as a user message. Real provider process control remains pending.
 
 Done means:
 

@@ -190,7 +190,7 @@ window.scriptManagerDesktop = {
       run: (payload: unknown) => invokeTauri('run_agent', { payload: payload as Record<string, unknown> }),
       interruptRun: (id: string) => invokeTauri('interrupt_agent_run', { id }),
       resumeRun: (payload: unknown) => invokeTauri('resume_agent_run', { payload: payload as Record<string, unknown> }),
-      terminateRun: (runId: string) => invokeTauri('terminate_agent_run', { runId }),
+      terminateRun: (id: string) => invokeTauri('terminate_agent_run', { id }),
       onEvent: (listener: DesktopListener<{ sessionId: string; event: unknown }>) =>
         subscribe('agent-event', listener),
     },

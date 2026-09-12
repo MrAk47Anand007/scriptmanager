@@ -93,6 +93,13 @@ pub struct RunAgentPayload {
     pub cwd: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ResumeAgentPayload {
+    #[serde(rename = "runId", alias = "run_id")]
+    pub run_id: String,
+    pub prompt: Option<String>,
+}
+
 const ACCESS_LEVELS: [&str; 3] = ["observe", "develop", "full"];
 
 pub async fn create_profile_core(
@@ -306,6 +313,60 @@ pub async fn run_agent_core(
         .ok_or_else(|| "Agent run creation failed".to_string())
 }
 
+async fn record_pending_control_core(
+    pool: &SqlitePool,
+    run_id: &str,
+    action: &str,
+    prompt: Option<&str>,
+) -> Result<Value, String> {
+    let run = read_run_core(pool, run_id)
+        .await?
+        .ok_or_else(|| "Agent run not found".to_string())?;
+    let message = format!(
+        "Agent {action} is migration-pending in the Tauri desktop app (ACP process control not ported)."
+    );
+
+    if let Some(prompt) = prompt.map(str::trim).filter(|prompt| !prompt.is_empty()) {
+        insert_agent_message(
+            pool,
+            run_id,
+            "user",
+            prompt,
+            serde_json::json!({
+                "id": Uuid::new_v4().to_string(),
+                "role": "user",
+                "content": prompt,
+                "resumeAttempt": true,
+            }),
+        )
+        .await?;
+    }
+
+    insert_agent_message(
+        pool,
+        run_id,
+        "system",
+        &message,
+        serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "role": "system",
+            "content": message,
+            "action": action,
+            "status": run.run.status,
+            "migrationPending": true,
+        }),
+    )
+    .await?;
+
+    Ok(serde_json::json!({
+        "runId": run_id,
+        "status": run.run.status,
+        "action": action,
+        "migrationPending": true,
+        "message": message,
+    }))
+}
+
 #[tauri::command]
 pub async fn read_agent_run(
     pool: State<'_, SqlitePool>,
@@ -380,18 +441,21 @@ pub async fn run_agent(
 }
 
 #[tauri::command]
-pub async fn interrupt_agent_run() -> Result<Value, String> {
-    Err("Agent provider execution is migration-pending in the Tauri desktop app".to_string())
+pub async fn interrupt_agent_run(pool: State<'_, SqlitePool>, id: String) -> Result<Value, String> {
+    record_pending_control_core(&pool, &id, "interrupt", None).await
 }
 
 #[tauri::command]
-pub async fn resume_agent_run() -> Result<Value, String> {
-    Err("Agent provider execution is migration-pending in the Tauri desktop app".to_string())
+pub async fn resume_agent_run(
+    pool: State<'_, SqlitePool>,
+    payload: ResumeAgentPayload,
+) -> Result<Value, String> {
+    record_pending_control_core(&pool, &payload.run_id, "resume", payload.prompt.as_deref()).await
 }
 
 #[tauri::command]
-pub async fn terminate_agent_run() -> Result<Value, String> {
-    Err("Agent provider execution is migration-pending in the Tauri desktop app".to_string())
+pub async fn terminate_agent_run(pool: State<'_, SqlitePool>, id: String) -> Result<Value, String> {
+    record_pending_control_core(&pool, &id, "terminate", None).await
 }
 
 #[cfg(test)]
@@ -472,22 +536,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agent_execution_commands_return_pending_errors() {
-        assert!(interrupt_agent_run()
-            .await
-            .unwrap_err()
-            .contains("migration-pending"));
-        assert!(resume_agent_run()
-            .await
-            .unwrap_err()
-            .contains("migration-pending"));
-        assert!(terminate_agent_run()
-            .await
-            .unwrap_err()
-            .contains("migration-pending"));
-    }
-
-    #[tokio::test]
     async fn run_agent_persists_failed_migration_pending_run() {
         let pool = test_pool().await;
         let profile = create_profile_core(
@@ -525,5 +573,48 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("migration-pending"));
+    }
+
+    #[tokio::test]
+    async fn agent_control_attempts_persist_migration_pending_messages() {
+        let pool = test_pool().await;
+        sqlx::query("INSERT INTO agent_profiles (id, name, provider, access_level) VALUES ('p-1', 'Test', 'codex', 'observe')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO agent_runs (id, profile_id, status, provider) VALUES ('r-1', 'p-1', 'failed', 'codex')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let interrupt = record_pending_control_core(&pool, "r-1", "interrupt", None)
+            .await
+            .unwrap();
+        assert_eq!(interrupt["migrationPending"], true);
+        assert!(interrupt["message"]
+            .as_str()
+            .unwrap()
+            .contains("migration-pending"));
+
+        let resume = record_pending_control_core(&pool, "r-1", "resume", Some("continue"))
+            .await
+            .unwrap();
+        assert_eq!(resume["action"], "resume");
+
+        let terminate = record_pending_control_core(&pool, "r-1", "terminate", None)
+            .await
+            .unwrap();
+        assert_eq!(terminate["action"], "terminate");
+
+        let detail = read_run_core(&pool, "r-1").await.unwrap().unwrap();
+        assert_eq!(detail.messages.len(), 4);
+        assert_eq!(detail.messages[0]["action"], "interrupt");
+        assert_eq!(detail.messages[1]["resumeAttempt"], true);
+        assert_eq!(detail.messages[2]["action"], "resume");
+        assert_eq!(detail.messages[3]["action"], "terminate");
+        assert!(record_pending_control_core(&pool, "missing", "interrupt", None)
+            .await
+            .unwrap_err()
+            .contains("not found"));
     }
 }
