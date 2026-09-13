@@ -5,6 +5,7 @@ import {
   installMcpConfigRuntime,
   type McpStatusRuntime,
 } from '@/lib/agentRuntimeClient'
+import { toast } from '@/components/ui/toast'
 
 function copyToClipboard(text: string) {
   if (window.scriptManagerDesktop?.copyText) {
@@ -27,6 +28,7 @@ export function McpAccessCard() {
   const [copied, setCopied] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [accessLevel, setAccessLevel] = useState('develop')
 
   const load = useCallback(async () => {
     try {
@@ -34,7 +36,23 @@ export function McpAccessCard() {
     } catch {
       // MCP status needs the desktop bridge; hide the card content otherwise.
     }
+    try {
+      const settings = await window.scriptManagerDesktop?.runtime?.readSettings?.()
+      const level = settings?.mcp_access_level
+      if (level === 'observe' || level === 'develop' || level === 'full') setAccessLevel(level)
+    } catch {
+      // default level
+    }
   }, [])
+
+  const persistAccessLevel = async (level: string) => {
+    try {
+      await window.scriptManagerDesktop?.runtime?.saveSettings?.({ mcp_access_level: level })
+      toast.success(`Agent access set to ${level}`)
+    } catch {
+      toast.error('Failed to save access level')
+    }
+  }
 
   useEffect(() => {
     void load()
@@ -95,6 +113,26 @@ export function McpAccessCard() {
             ScriptManager ships a built-in MCP server. AI agents can then ask to run
             workflows, scripts, and API requests on your command — nothing runs by itself.
           </p>
+
+          <label className="block space-y-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Agent access level</span>
+            <select
+              value={accessLevel}
+              onChange={(event) => {
+                const level = event.target.value
+                setAccessLevel(level)
+                void persistAccessLevel(level)
+              }}
+              className="h-7 w-full rounded-md border border-wb-border bg-background px-2 text-[11px] outline-none focus:border-accent-brand"
+            >
+              <option value="observe">Observe — read-only inventory</option>
+              <option value="develop">Develop — run workflows, scripts, API calls</option>
+              <option value="full">Full — also cancel and edit (edits need approval)</option>
+            </select>
+            <span className="block text-[9.5px] text-muted-foreground">
+              Applies to every MCP client until you change it.
+            </span>
+          </label>
 
           <div className="flex gap-1.5">
             <button

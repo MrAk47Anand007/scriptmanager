@@ -420,6 +420,18 @@ fn tool_catalogue() -> Vec<ToolSpec> {
             }),
         },
         ToolSpec {
+            name: "script_save",
+            description: "Update the content of a stored script (full access; requires human approval per script on first write — approve in ScriptManager's Approvals inbox, then retry).",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "scriptId": { "type": "string" },
+                    "content": { "type": "string", "description": "The complete new script content." }
+                },
+                "required": ["scriptId", "content"]
+            }),
+        },
+        ToolSpec {
             name: "approval_list",
             description: "List pending human approvals (workflow approval nodes and remote-execution gates) that may be blocking runs.",
             schema: json!({ "type": "object", "properties": {} }),
@@ -441,6 +453,82 @@ fn tool_definitions() -> Value {
 // ---------------------------------------------------------------------------
 // Tool execution
 // ---------------------------------------------------------------------------
+
+pub const MCP_ACCESS_LEVEL_KEY: &str = "mcp_access_level";
+const ACCESS_LEVELS: [&str; 3] = ["observe", "develop", "full"];
+
+async fn access_level(pool: &SqlitePool) -> String {
+    match crate::settings::get_setting(pool, MCP_ACCESS_LEVEL_KEY).await {
+        Ok(Some(level)) => {
+            let level = level.trim().to_lowercase();
+            if ACCESS_LEVELS.contains(&level.as_str()) {
+                level
+            } else {
+                "develop".to_string()
+            }
+        }
+        _ => "develop".to_string(),
+    }
+}
+
+fn level_rank(level: &str) -> usize {
+    ACCESS_LEVELS.iter().position(|item| *item == level).unwrap_or(1)
+}
+
+/// Minimum access level per tool: observe is read-only inventory; develop can
+/// run things; full can cancel and mutate stored artifacts (write tools are
+/// additionally approval-gated per resource).
+fn tool_level(name: &str) -> &'static str {
+    match name {
+        "app_overview"
+        | "workflow_list"
+        | "workflow_get"
+        | "workflow_run_status"
+        | "workflow_runs_list"
+        | "script_list"
+        | "script_get"
+        | "api_request_list"
+        | "agent_run_list"
+        | "approval_list"
+        | "mock_server_list" => "observe",
+        "workflow_run_cancel"
+        | "script_save" => "full",
+        _ => "develop",
+    }
+}
+
+/// Fail-closed approval gate for mutating tools: consume an existing approved
+/// decision (allow_once) or create a fresh pending request and return an
+/// error the agent can surface to the human.
+async fn ensure_resource_approval(
+    pool: &SqlitePool,
+    operation: &str,
+    resource: &str,
+    risk: &str,
+    reason: &str,
+    preview: Value,
+) -> Result<(), String> {
+    match crate::approvals::check_approval_for_resource(pool, operation, resource).await {
+        Ok(()) => Ok(()),
+        Err(message) if message == "no-approval-record" => {
+            let id = crate::approvals::create_request_with_actor(
+                pool,
+                operation,
+                resource,
+                risk,
+                reason,
+                preview,
+                "ai-agent",
+                Some("MCP agent"),
+            )
+            .await?;
+            Err(format!(
+                "Approval required: request {id} is pending. Approve it in ScriptManager's Approvals inbox, then retry."
+            ))
+        }
+        Err(message) => Err(message),
+    }
+}
 
 fn truncate_text(text: String) -> String {
     if text.chars().count() <= MAX_TOOL_TEXT_CHARS {
@@ -627,6 +715,42 @@ async fn call_tool(pool: &SqlitePool, name: &str, arguments: Value) -> Value {
             },
             None => error_result("serverId is required".to_string()),
         },
+        "script_save" => {
+            let Some(script_id) = args.get("scriptId").and_then(Value::as_str) else {
+                return error_result("scriptId is required".to_string());
+            };
+            let Some(content) = args.get("content").and_then(Value::as_str) else {
+                return error_result("content is required".to_string());
+            };
+            if content.trim().is_empty() {
+                return error_result("content must not be empty".to_string());
+            }
+            // Approval gate: a human approves the first write per script.
+            let preview = json!({
+                "scriptId": script_id,
+                "newLengthChars": content.chars().count(),
+                "preview": truncate_text(content.chars().take(400).collect()),
+            });
+            if let Err(message) =
+                ensure_resource_approval(pool, "mcp.script_save", script_id, "high", "MCP agent requested a script content change", preview).await
+            {
+                return error_result(message);
+            }
+            let result = sqlx::query(
+                "UPDATE scripts SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            )
+            .bind(content)
+            .bind(script_id)
+            .execute(pool)
+            .await;
+            match result {
+                Ok(updated) if updated.rows_affected() > 0 => {
+                    text_result(json!({ "saved": true, "scriptId": script_id }))
+                }
+                Ok(_) => error_result(format!("Script not found: {script_id}")),
+                Err(error) => error_result(error.to_string()),
+            }
+        }
         "approval_list" => match crate::approvals::list_pending_approvals(pool).await {
             Ok(approvals) => text_result(json!({ "count": approvals.len(), "approvals": approvals })),
             Err(message) => error_result(message),
@@ -723,6 +847,18 @@ async fn handle_request(pool: &SqlitePool, request: Value) -> Option<String> {
             let known = tool_catalogue().iter().any(|spec| spec.name == name);
             if !known {
                 return Some(jsonrpc_error(id, ERR_METHOD, &format!("Unknown tool: {name}")));
+            }
+            // Guardrail: every tool declares its minimum access level and the
+            // configured MCP access level gates the call.
+            let level = access_level(pool).await;
+            let required = tool_level(&name);
+            if level_rank(&level) < level_rank(required) {
+                return Some(jsonrpc_ok(
+                    id,
+                    error_result(format!(
+                        "Tool '{name}' requires '{required}' MCP access, but the current level is '{level}'. Raise it in ScriptManager → Agents → AI Access."
+                    )),
+                ));
             }
             let result = call_tool(pool, &name, arguments).await;
             Some(jsonrpc_ok(id, result))
@@ -911,6 +1047,99 @@ mod tests {
         // JSON-RPC text content.
         assert!(response.contains(r#"\"count\":0"#));
         assert!(response.contains(r#""isError":false"#));
+    }
+
+    async fn set_access_level(pool: &sqlx::SqlitePool, level: &str) {
+        crate::settings::set_setting(pool, MCP_ACCESS_LEVEL_KEY, level).await.unwrap();
+    }
+
+    fn call_arguments(name: &str, arguments: Value) -> Value {
+        json!({
+            "jsonrpc": "2.0", "id": 99,
+            "method": "tools/call",
+            "params": { "name": name, "arguments": arguments }
+        })
+    }
+
+    #[tokio::test]
+    async fn guard_blocks_tools_below_configured_level() {
+        let pool = crate::schema::test_pool().await;
+        set_access_level(&pool, "observe").await;
+
+        // script_run is a develop tool: blocked at observe, reported as a tool
+        // error (isError), not a protocol error.
+        let response = handle_request(&pool, call_arguments("script_run", json!({ "scriptId": "x" })))
+            .await
+            .expect("guard response");
+        assert!(response.contains(r#""isError":true"#));
+        assert!(response.contains("requires 'develop' MCP access"));
+
+        // observe tools keep working.
+        let response = handle_request(&pool, call_arguments("workflow_list", json!({})))
+            .await
+            .expect("list response");
+        assert!(response.contains(r#""isError":false"#));
+    }
+
+    #[tokio::test]
+    async fn guard_allows_develop_level_runtime_tools() {
+        let pool = crate::schema::test_pool().await;
+        set_access_level(&pool, "develop").await;
+        let response = handle_request(&pool, call_arguments("script_run", json!({ "scriptId": "ghost" })))
+            .await
+            .expect("script_run response");
+        assert!(response.contains(r#""isError":true"#));
+        assert!(response.contains("Script not found") || response.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn script_save_is_approval_gated_fail_closed() {
+        let pool = crate::schema::test_pool().await;
+        set_access_level(&pool, "full").await;
+        sqlx::query("INSERT INTO scripts (id, name, filename, language, content) VALUES ('s-1', 'Gated', 'g.py', 'python', 'print(1)')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // First attempt: creates a pending approval, fails closed.
+        let first = handle_request(&pool, call_arguments("script_save", json!({ "scriptId": "s-1", "content": "print(2)" })))
+            .await
+            .expect("first save");
+        assert!(first.contains(r#""isError":true"#), "first: {first}");
+        assert!(first.contains("pending"), "first: {first}");
+
+        let content: String =
+            sqlx::query_scalar("SELECT content FROM scripts WHERE id = 's-1'").fetch_one(&pool).await.unwrap();
+        assert_eq!(content, "print(1)", "content must not change before approval");
+
+        // Approve with allow_once.
+        let request_id: String = sqlx::query_scalar(
+            "SELECT id FROM approval_requests WHERE operation = 'mcp.script_save' AND status = 'pending'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        crate::approvals::decide_approval_core(
+            &pool,
+            crate::approvals::DecideApprovalPayload { id: request_id, decision: "allow_once".into(), note: None },
+        )
+        .await
+        .unwrap();
+
+        // Retry consumes the decision and succeeds.
+        let second = handle_request(&pool, call_arguments("script_save", json!({ "scriptId": "s-1", "content": "print(2)" })))
+            .await
+            .expect("second save");
+        assert!(second.contains(r#""isError":false"#));
+        let content: String =
+            sqlx::query_scalar("SELECT content FROM scripts WHERE id = 's-1'").fetch_one(&pool).await.unwrap();
+        assert_eq!(content, "print(2)");
+
+        // A further write needs a fresh approval (allow_once consumed).
+        let third = handle_request(&pool, call_arguments("script_save", json!({ "scriptId": "s-1", "content": "print(3)" })))
+            .await
+            .expect("third save");
+        assert!(third.contains("pending"));
     }
 
     #[tokio::test]

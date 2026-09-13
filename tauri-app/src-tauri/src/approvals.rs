@@ -178,13 +178,30 @@ pub async fn create_request(
     reason: &str,
     preview: Value,
 ) -> Result<String, String> {
+    create_request_with_actor(pool, operation, resource, risk, reason, preview, "local-admin", None).await
+}
+
+/// Create an approval request attributed to a specific actor (e.g. an MCP
+/// agent).
+pub async fn create_request_with_actor(
+    pool: &SqlitePool,
+    operation: &str,
+    resource: &str,
+    risk: &str,
+    reason: &str,
+    preview: Value,
+    actor_id: &str,
+    actor_name: Option<&str>,
+) -> Result<String, String> {
     let id = Uuid::new_v4().to_string();
     sqlx::query(
-        "INSERT INTO approval_requests (id, operation, resource, risk, reason, preview_json, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO approval_requests (id, operation, resource, capability, actor_id, actor_name, risk, reason, preview_json, expires_at) VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(operation)
     .bind(resource)
+    .bind(actor_id)
+    .bind(actor_name)
     .bind(risk)
     .bind(reason)
     .bind(preview.to_string())
@@ -193,6 +210,58 @@ pub async fn create_request(
     .await
     .map_err(|e| e.to_string())?;
     Ok(id)
+}
+
+/// Look up an unconsumed approval decision for an operation/resource pair.
+/// `allow_once` decisions are consumed (status -> 'consumed') on first use;
+/// `allow_run`/`allow_workspace` stay reusable. A still-pending request fails
+/// with its id so the agent can surface it; no record at all fails with
+/// "no-approval-record" so the caller can create one.
+pub async fn check_approval_for_resource(
+    pool: &SqlitePool,
+    operation: &str,
+    resource: &str,
+) -> Result<(), String> {
+    let pending: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM approval_requests WHERE operation = ? AND resource = ? AND status = 'pending'
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(operation)
+    .bind(resource)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    if let Some(id) = pending {
+        return Err(format!(
+            "Approval required: request {id} is pending. Approve it in ScriptManager's Approvals inbox, then retry."
+        ));
+    }
+    let decided: Option<(String, String)> = sqlx::query_as(
+        "SELECT r.id, COALESCE(d.decision, 'allow_once') AS decision
+         FROM approval_requests r
+         LEFT JOIN approval_decisions d ON d.request_id = r.id
+         WHERE r.operation = ?1 AND r.resource = ?2 AND r.status = 'approved'
+         ORDER BY r.decided_at DESC, d.created_at DESC
+         LIMIT 1",
+    )
+    .bind(operation)
+    .bind(resource)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    match decided {
+        Some((id, decision)) => {
+            if decision == "allow_once" {
+                sqlx::query("UPDATE approval_requests SET status = 'consumed' WHERE id = ?")
+                    .bind(&id)
+                    .execute(pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        }
+        None => Err("no-approval-record".to_string()),
+    }
 }
 
 #[cfg(test)]
