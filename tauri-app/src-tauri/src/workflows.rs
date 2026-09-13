@@ -4,7 +4,7 @@ use sqlx::{FromRow, Row, SqlitePool};
 use std::collections::{HashMap, HashSet};
 
 const WORKSPACE_ID: &str = "default";
-const KNOWN_NODE_TYPES: [&str; 11] = [
+const KNOWN_NODE_TYPES: [&str; 14] = [
     "script",
     "api",
     "remote",
@@ -16,6 +16,9 @@ const KNOWN_NODE_TYPES: [&str; 11] = [
     "join",
     "notification",
     "agent",
+    "foreach",
+    "sub_workflow",
+    "try",
 ];
 
 // Run / node statuses mirror the web worker vocabulary.
@@ -260,7 +263,11 @@ pub(crate) fn parse_definition(value: &serde_json::Value) -> Result<WfDefinition
             }
         }
         if let Some(port) = edge_obj.get("sourcePort") {
-            if port != "true" && port != "false" {
+            let valid = port == "true"
+                || port == "false"
+                || port == "success"
+                || port == "failure";
+            if !valid {
                 return Err(format!("edges[{}].sourcePort is invalid", index));
             }
         }
@@ -292,6 +299,9 @@ fn validate_node_config(
         "approval" => &["prompt"],
         "notification" => &["channel", "message"],
         "agent" => &["profileId", "prompt"],
+        "foreach" => &["items", "steps"],
+        "sub_workflow" => &["workflowId"],
+        "try" => &["steps"],
         _ => &[],
     };
     for key in required {
@@ -344,16 +354,22 @@ pub(crate) fn validate_graph(def: &WfDefinition) -> Vec<(String, String)> {
             ));
         }
         if let Some(port) = edge.source_port.as_ref() {
-            let source_is_condition = def
+            let source_node_type = def
                 .nodes
                 .iter()
                 .find(|n| n.id == edge.source)
-                .map(|n| n.node_type == "condition")
-                .unwrap_or(false);
-            if (port == "true" || port == "false") && !source_is_condition {
+                .map(|n| n.node_type.as_str())
+                .unwrap_or("");
+            // try nodes expose success/failure output ports.
+            let port_allowed = match source_node_type {
+                "condition" => port == "true" || port == "false",
+                "try" => port == "success" || port == "failure",
+                _ => false,
+            };
+            if !port_allowed {
                 issues.push((
                     "invalid_source_port".to_string(),
-                    "Only condition nodes may use true/false output ports".to_string(),
+                    format!("Node type {source_node_type} does not have a \"{port}\" output port"),
                 ));
             }
         }
@@ -800,10 +816,12 @@ pub(crate) async fn get_workflow_record(
     let row = sqlx::query_as::<_, WorkflowRow>(
         "SELECT id, name, description, published_version, project_id, draft_definition,
             created_at, updated_at
-         FROM workflows WHERE workspace_id = ? AND (id = ?1 OR name = ?1)
-         ORDER BY (id = ?1) DESC LIMIT 1",
+         FROM workflows WHERE workspace_id = ? AND (id = ? OR name = ?)
+         ORDER BY (id = ?) DESC LIMIT 1",
     )
     .bind(WORKSPACE_ID)
+    .bind(id_or_name)
+    .bind(id_or_name)
     .bind(id_or_name)
     .fetch_optional(pool)
     .await
@@ -1429,6 +1447,124 @@ async fn agent_node_cwd(
     Ok(scratch.to_string_lossy().to_string())
 }
 
+/// Parse a `steps` body ({nodes: [...], edges: [...]}) into a definition.
+fn parse_body_steps(value: &Value) -> Result<WfDefinition, String> {
+    let nodes = value
+        .get("nodes")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "steps.nodes must be an array".to_string())?;
+    let edges = value.get("edges").cloned().unwrap_or_else(|| Value::Array(Vec::new()));
+    let wrapped = serde_json::json!({
+        "schemaVersion": 1,
+        "name": "body",
+        "description": "",
+        "variables": {},
+        "nodes": nodes,
+        "edges": edges,
+    });
+    parse_definition(&wrapped)
+}
+
+/// Execute a body sub-definition in memory (no per-child node rows): walks
+/// the planned layers, honours condition ports and dead-source skips, and
+/// returns the outputs map. Cancellation is checked between nodes.
+async fn execute_body_steps(
+    pool: &SqlitePool,
+    run_id: &str,
+    body: &WfDefinition,
+    base_context: &Value,
+    base_outputs: &HashMap<String, Value>,
+) -> Result<Value, String> {
+    let layers = plan_layers(body)?;
+    let node_by_id: HashMap<&str, &WfNode> = body.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let mut outputs: HashMap<String, Value> = base_outputs.clone();
+    let mut selected_ports: HashMap<String, String> = HashMap::new();
+
+    for layer in &layers {
+        for node_id in layer {
+            if is_cancel_requested(pool, run_id).await {
+                return Err("Workflow run cancelled".to_string());
+            }
+            let node = *node_by_id.get(node_id.as_str()).ok_or_else(|| format!("Unknown body node: {node_id}"))?;
+            let incoming: Vec<&WfEdge> = body.edges.iter().filter(|e| e.target == *node_id).collect();
+            let active: Vec<&&WfEdge> = incoming
+                .iter()
+                .filter(|e| match e.source_port.as_deref() {
+                    None => true,
+                    Some(port) => selected_ports.get(&e.source).map(|selected| selected == port).unwrap_or(false),
+                })
+                .collect();
+            if !incoming.is_empty() && active.is_empty() {
+                continue;
+            }
+            let mut parent_outputs = serde_json::Map::new();
+            for edge in &active {
+                if let Some(out) = outputs.get(&edge.source) {
+                    parent_outputs.insert(edge.source.clone(), out.clone());
+                }
+            }
+            let context = serde_json::json!({
+                "trigger": base_context.get("item").cloned().unwrap_or(Value::Null),
+                "variables": base_context.get("variables").cloned().unwrap_or(Value::Null),
+                "nodes": outputs,
+                "item": base_context.get("item").cloned().unwrap_or(Value::Null),
+                "index": base_context.get("index").cloned().unwrap_or(Value::Null),
+                "parentNodes": parent_outputs,
+            });
+            let input = match node.config.get("inputs") {
+                Some(inputs) => resolve_mappings(inputs, &context),
+                None => base_context.get("item").cloned().unwrap_or(Value::Null),
+            };
+            let timeout_ms: u64 = node.timeout_ms.filter(|t| *t > 0).map(|t| t as u64).unwrap_or(60_000).min(300_000);
+            // Type-erased to break the compile-time recursion cycle
+            // (execute_node -> run_body_for_node -> execute_body_steps).
+            let execution = execute_node_boxed(pool, run_id, node, &input, &body.variables, &outputs, &context);
+            let outcome = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), execution)
+                .await
+                .map_err(|_| format!("Body node {node_id} timed out"))??;
+            match outcome {
+                NodeOutcome::Succeeded { output, selected_port } => {
+                    outputs.insert(node_id.clone(), output);
+                    if let Some(port) = selected_port {
+                        selected_ports.insert(node_id.clone(), port);
+                    }
+                }
+                NodeOutcome::Paused { .. } => {
+                    return Err(
+                        "Approval nodes inside a body are not supported — move approvals to the top level".to_string(),
+                    );
+                }
+            }
+        }
+    }
+    Ok(Value::Object(
+        outputs
+            .into_iter()
+            .filter(|(key, _)| body.nodes.iter().any(|node| &node.id == key))
+            .collect::<serde_json::Map<String, Value>>(),
+    ))
+}
+
+/// Run a workflow node's `steps` body once with the given base context.
+async fn run_body_for_node(
+    pool: &SqlitePool,
+    run_id: &str,
+    config: &Value,
+    base_context: &Value,
+    base_outputs: &HashMap<String, Value>,
+) -> Result<Value, String> {
+    let steps = config
+        .get("steps")
+        .filter(|steps| steps.is_object())
+        .ok_or_else(|| "nodes config.steps must be an object with nodes/edges".to_string())?;
+    let body = parse_body_steps(steps)?;
+    let issues = validate_graph(&body);
+    if let Some((code, message)) = issues.into_iter().next() {
+        return Err(format!("steps graph invalid ({code}): {message}"));
+    }
+    execute_body_steps(pool, run_id, &body, base_context, base_outputs).await
+}
+
 enum NodeOutcome {
     Succeeded {
         output: serde_json::Value,
@@ -1437,6 +1573,20 @@ enum NodeOutcome {
     Paused {
         output: serde_json::Value,
     },
+}
+
+/// Boxed entry point for recursive body execution: keeps the async-fn
+/// return types from forming a compile-time cycle.
+fn execute_node_boxed<'a>(
+    pool: &'a SqlitePool,
+    run_id: &'a str,
+    node: &'a WfNode,
+    input: &'a Value,
+    variables: &'a Value,
+    outputs: &'a HashMap<String, Value>,
+    context: &'a Value,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<NodeOutcome, String>> + Send + 'a>> {
+    Box::pin(execute_node(pool, run_id, node, input, variables, outputs, context))
 }
 
 async fn execute_node(
@@ -1448,7 +1598,13 @@ async fn execute_node(
     outputs: &HashMap<String, serde_json::Value>,
     trigger: &serde_json::Value,
 ) -> Result<NodeOutcome, String> {
-    let context = serde_json::json!({ "trigger": trigger, "variables": variables, "nodes": outputs });
+    let mut context = serde_json::json!({ "trigger": trigger, "variables": variables, "nodes": outputs });
+    // Body execution (foreach/try steps) threads the current item through the
+    // trigger slot; expose it for {{item}}/{{index}} mappings.
+    if let Some(item) = trigger.get("item") {
+        context["item"] = item.clone();
+        context["index"] = trigger.get("index").cloned().unwrap_or(Value::Null);
+    }
     match node.node_type.as_str() {
         "delay" => {
             let duration_ms = node
@@ -1543,6 +1699,114 @@ async fn execute_node(
                 output,
                 selected_port: None,
             })
+        }
+        "foreach" => {
+            let items_value = resolve_mappings(node.config.get("items").unwrap_or(&Value::Null), &context);
+            let items: Vec<Value> = match items_value {
+                Value::Array(array) => array,
+                Value::Null => Vec::new(),
+                other => vec![other],
+            };
+            if items.is_empty() {
+                return Ok(NodeOutcome::Succeeded {
+                    output: serde_json::json!({ "iterations": 0, "results": [] }),
+                    selected_port: None,
+                });
+            }
+            let max_iterations = node
+                .config
+                .get("maxIterations")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(100)
+                .clamp(1, 100) as usize;
+            let mut results = Vec::with_capacity(items.len());
+            for (index, item) in items.into_iter().take(max_iterations).enumerate() {
+                if is_cancel_requested(pool, run_id).await {
+                    return Err("Workflow run cancelled".to_string());
+                }
+                let item_context = serde_json::json!({
+                    "item": item,
+                    "index": index,
+                    "variables": variables,
+                    "nodes": outputs,
+                });
+                match run_body_for_node(pool, run_id, &node.config, &item_context, outputs).await {
+                    Ok(output) => results.push(output),
+                    Err(message) if message == "Workflow run cancelled" => return Err(message),
+                    Err(message) => {
+                        return Err(format!("iteration {} failed: {message}", index + 1));
+                    }
+                }
+            }
+            Ok(NodeOutcome::Succeeded {
+                output: serde_json::json!({ "iterations": results.len(), "results": results }),
+                selected_port: None,
+            })
+        }
+        "sub_workflow" => {
+            let workflow_id = node
+                .config
+                .get("workflowId")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "nodes config.workflowId is required".to_string())?;
+            let depth = context
+                .get("trigger")
+                .and_then(|trigger| trigger.get("_subworkflowDepth"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                + 1;
+            if depth > 5 {
+                return Err("Sub-workflow nesting exceeds the depth limit (5)".to_string());
+            }
+            let child_input = serde_json::json!({
+                "parentRunId": run_id,
+                "_subworkflowDepth": depth,
+                "input": input,
+            });
+            let child = start_workflow_run_record(pool, workflow_id, child_input, "subworkflow", "workflow").await?;
+            let child_run_id = child.id.clone();
+            let timeout_ms: u64 = node.timeout_ms.filter(|t| *t > 0).map(|t| t as u64).unwrap_or(60_000).min(300_000);
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+            let final_status = loop {
+                if is_cancel_requested(pool, run_id).await {
+                    let _ = cancel_workflow_run_core(pool, &child_run_id).await;
+                    return Err("Workflow run cancelled".to_string());
+                }
+                let child_detail = get_run_detail(pool, &child_run_id).await?;
+                let status = child_detail.status.clone();
+                if !matches!(status.as_str(), "running" | "paused" | "pending") {
+                    break status;
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    let _ = cancel_workflow_run_core(pool, &child_run_id).await;
+                    return Err(format!("Sub-workflow {} timed out", workflow_id));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            };
+            if final_status == STATUS_SUCCEEDED {
+                let child_detail = get_run_detail(pool, &child_run_id).await?;
+                Ok(NodeOutcome::Succeeded {
+                    output: serde_json::json!({ "runId": child_run_id, "status": final_status, "nodes": child_detail.node_runs.iter().map(|n| (n.node_id.clone(), serde_json::Value::String(n.status.clone()))).collect::<serde_json::Map<String, Value>>() }),
+                    selected_port: None,
+                })
+            } else {
+                Err(format!("Sub-workflow {} finished with status {final_status}", workflow_id))
+            }
+        }
+        "try" => {
+            match run_body_for_node(pool, run_id, &node.config, &context, outputs).await {
+                Ok(output) => Ok(NodeOutcome::Succeeded {
+                    output: serde_json::json!({ "ok": true, "result": output }),
+                    selected_port: Some("success".to_string()),
+                }),
+                Err(message) if message == "Workflow run cancelled" => Err(message),
+                Err(message) => Ok(NodeOutcome::Succeeded {
+                    output: serde_json::json!({ "ok": false, "error": message }),
+                    selected_port: Some("failure".to_string()),
+                }),
+            }
         }
         "approval" => Ok(NodeOutcome::Paused {
             output: serde_json::json!({
@@ -1765,7 +2029,17 @@ async fn prepare_workflow_run(
     trigger_type: &str,
     actor_id: &str,
 ) -> Result<PreparedRun, String> {
-    let workflow = get_workflow_row(pool, workflow_id)
+    // Resolve by id first; builders (and AI drafts) may pass the display name.
+    let resolved_id = match get_workflow_row(pool, workflow_id).await? {
+        Some(row) => row.id,
+        None => {
+            get_workflow_record(pool, workflow_id)
+                .await
+                .ok_or_else(|| "Workflow not found".to_string())?
+                .id
+        }
+    };
+    let workflow = get_workflow_row(pool, &resolved_id)
         .await?
         .ok_or_else(|| "Workflow not found".to_string())?;
     let version_number = workflow
@@ -1803,7 +2077,7 @@ async fn prepare_workflow_run(
          VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)",
     )
     .bind(&run_id)
-    .bind(workflow_id)
+    .bind(&resolved_id)
     .bind(&version_id)
     .bind(trigger_type)
     .bind(actor_id)
@@ -1858,27 +2132,40 @@ pub async fn start_workflow_run_record(
 ) -> Result<WorkflowRunDetail, String> {
     let prepared = prepare_workflow_run(pool, workflow_id, input, trigger_type, actor_id).await?;
     let detail = get_run_detail(pool, &prepared.run_id).await?;
-    let run_pool = pool.clone();
+    spawn_background_execution(
+        pool.clone(),
+        prepared,
+        "Workflow run".to_string(),
+    );
+    Ok(detail)
+}
+
+/// Plain-fn boundary so the recursive execute_layers future type never leaks
+/// into the callers' async generators (keeps their futures Send).
+fn spawn_background_execution(
+    pool: SqlitePool,
+    prepared: PreparedRun,
+    label: String,
+) {
     tauri::async_runtime::spawn(async move {
         let PreparedRun { run_id, def, layers, trigger } = prepared;
-        if let Err(message) = execute_layers(&run_pool, &run_id, &def, &layers, &trigger, None).await
+        if let Err(message) = execute_layers(&pool, &run_id, &def, &layers, &trigger, None).await
         {
             // Safety net: a driver crash (not a node failure) would otherwise
             // leave the run row stuck in 'running' forever.
             let status: Option<String> = sqlx::query_scalar("SELECT status FROM workflow_runs WHERE id = ?")
                 .bind(&run_id)
-                .fetch_optional(&run_pool)
+                .fetch_optional(&pool)
                 .await
                 .ok()
                 .flatten();
             if status.as_deref() == Some("running") {
                 let error = serde_json::json!({ "message": message });
-                let _ = finish_run(&run_pool, &run_id, STATUS_FAILED, None, Some(&error)).await;
+                let _ = finish_run(&pool, &run_id, STATUS_FAILED, None, Some(&error)).await;
             }
-            log::warn!("Workflow run {run_id} background execution ended: {message}");
+            log::warn!("{label} {run_id} background execution ended: {message}");
         }
     });
-    Ok(detail)
 }
 
 // ---------- Tauri commands ----------
@@ -3348,6 +3635,136 @@ Done!";
         let nested = "prefix {\"a\": {\"b\": 1}, \"c\": \"}\"} suffix";
         assert_eq!(extract_json_object(nested).unwrap(), "{\"a\": {\"b\": 1}, \"c\": \"}\"}");
         assert_eq!(extract_json_object("no json here"), None);
+    }
+
+    #[tokio::test]
+    async fn workflow_foreach_iterates_body_over_items() {
+        let pool = test_pool().await;
+        let definition = serde_json::json!({
+            "schemaVersion": 1,
+            "name": "Fan",
+            "nodes": [
+                {
+                    "id": "loop", "type": "foreach",
+                    "config": {
+                        "items": ["a", "b", "c"],
+                        "maxIterations": 10,
+                        "steps": {
+                            "nodes": [
+                                { "id": "b1", "type": "transform", "config": { "mappings": { "value": "{{item}}", "at": "{{index}}" } } }
+                            ],
+                            "edges": []
+                        }
+                    }
+                }
+            ],
+            "edges": []
+        });
+        let id = create_and_publish(&pool, definition).await;
+        let detail = run_workflow_record(&pool, &id, serde_json::json!({})).await.unwrap();
+        assert_eq!(detail.status, STATUS_SUCCEEDED, "detail: {detail:?}");
+        let node = detail.node_runs.iter().find(|n| n.node_id == "loop").unwrap();
+        let output = node.output_json.as_ref().unwrap();
+        assert!(output.contains("\"iterations\":3"), "output: {output}");
+        eprintln!("FOREACH-OUT: {output}");
+        assert!(output.contains("\"value\":\"b\""));
+    }
+
+    #[tokio::test]
+    async fn workflow_try_routes_failure_without_failing_run() {
+        let pool = test_pool().await;
+        let definition = serde_json::json!({
+            "schemaVersion": 1,
+            "name": "Guarded",
+            "nodes": [
+                {
+                    "id": "guard", "type": "try",
+                    "config": {
+                        "steps": {
+                            "nodes": [
+                                { "id": "boom", "type": "script", "config": { "scriptId": "missing-script-xyz" } }
+                            ],
+                            "edges": []
+                        }
+                    }
+                },
+                { "id": "recovered", "type": "transform", "name": "Recovered", "config": { "mappings": { "ok": "{{nodes.guard.ok}}" } } }
+            ],
+            "edges": [ { "id": "e1", "source": "guard", "target": "recovered", "sourcePort": "failure" } ]
+        });
+        let id = create_and_publish(&pool, definition).await;
+        let detail = run_workflow_record(&pool, &id, serde_json::json!({})).await.unwrap();
+        assert_eq!(detail.status, STATUS_SUCCEEDED, "run must succeed via failure port: {detail:?}");
+        let guard = detail.node_runs.iter().find(|n| n.node_id == "guard").unwrap();
+        assert_eq!(guard.selected_port.as_deref(), Some("failure"));
+        let recovered = detail.node_runs.iter().find(|n| n.node_id == "recovered").unwrap();
+        assert!(recovered.output_json.as_ref().unwrap().contains("\"ok\":false"));
+    }
+
+    #[tokio::test]
+    async fn workflow_sub_workflow_runs_child_and_enforces_depth() {
+        let pool = test_pool().await;
+        // Child: simple transform.
+        let child = serde_json::json!({
+            "schemaVersion": 1,
+            "name": "Child",
+            "nodes": [ { "id": "t", "type": "transform", "config": { "mappings": { "ran": true } } } ],
+            "edges": []
+        });
+        let child_id = create_and_publish(&pool, child).await;
+        // Parent: calls the child.
+        let parent = serde_json::json!({
+            "schemaVersion": 1,
+            "name": "Parent",
+            "nodes": [ { "id": "call", "type": "sub_workflow", "config": { "workflowId": child_id } } ],
+            "edges": []
+        });
+        let parent_id = create_and_publish(&pool, parent).await;
+        let detail = run_workflow_record(&pool, &parent_id, serde_json::json!({})).await.unwrap();
+        assert_eq!(detail.status, STATUS_SUCCEEDED, "detail: {detail:?}");
+        let call = detail.node_runs.iter().find(|n| n.node_id == "call").unwrap();
+        assert!(call.output_json.as_ref().unwrap().contains("runId"));
+
+        // Depth: a self-referencing workflow must abort at depth 5, not hang.
+        let created = create_workflow_record(
+            &pool,
+            CreateWorkflowPayload {
+                name: "Recursive".to_string(),
+                description: None,
+                definition: serde_json::json!({
+                    "schemaVersion": 1,
+                    "name": "Recursive",
+                    "nodes": [ { "id": "again", "type": "sub_workflow", "config": { "workflowId": "SELF" }, "timeoutMs": 2000 } ],
+                    "edges": []
+                }),
+                project_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        let recursive_id = created.id;
+        save_workflow_record(
+            &pool,
+            SaveWorkflowPayload {
+                id: recursive_id.clone(),
+                definition: serde_json::json!({
+                    "schemaVersion": 1,
+                    "name": "Recursive",
+                    "nodes": [ { "id": "again", "type": "sub_workflow", "config": { "workflowId": recursive_id }, "timeoutMs": 2000 } ],
+                    "edges": []
+                }),
+                project_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        publish_workflow_record(&pool, &recursive_id).await
+            .map(|_| ())
+            .unwrap_or(());
+        let detail = run_workflow_record(&pool, &recursive_id, serde_json::json!({})).await.unwrap();
+        assert_eq!(detail.status, STATUS_FAILED, "recursion must fail via depth limit");
+        let call = detail.node_runs.iter().find(|n| n.node_id == "again").unwrap();
+        assert!(call.error_json.as_ref().unwrap().contains("depth") || call.error_json.as_ref().unwrap().contains("timed out"));
     }
 
     #[tokio::test]

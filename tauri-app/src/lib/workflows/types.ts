@@ -1,6 +1,6 @@
 import type { WorkflowEditorMetadata } from './editorTypes'
 
-export type WorkflowNodeType = 'script' | 'api' | 'remote' | 'condition' | 'transform' | 'delay' | 'approval' | 'parallel' | 'join' | 'notification' | 'agent' | `plugin:${string}:${string}`
+export type WorkflowNodeType = 'script' | 'api' | 'remote' | 'condition' | 'transform' | 'delay' | 'approval' | 'parallel' | 'join' | 'notification' | 'agent' | 'foreach' | 'sub_workflow' | 'try' | `plugin:${string}:${string}`
 export type ConditionOperator = 'equals' | 'not_equals' | 'truthy' | 'falsy' | 'greater_than' | 'less_than'
 
 export type WorkflowNode = {

@@ -1,6 +1,6 @@
 import {
-  Bell, Bot, Braces, CheckCircle2, Clock3, Code2, GitFork, GitMerge,
-  Globe2, ServerCog, Split, type LucideIcon,
+  Bell, Bot, Braces, CheckCircle2, Clock3, Code2, GitBranch, GitFork, GitMerge,
+  Globe2, ListOrdered, ServerCog, ShieldAlert, Split, type LucideIcon,
 } from 'lucide-react'
 import type { ValidationIssue, WorkflowDefinition, WorkflowNode, WorkflowNodeType } from './types'
 import { validateWorkflowGraph } from './graph'
@@ -55,6 +55,9 @@ const specs: WorkflowNodeSpec[] = [
   { type: 'join', label: 'Join', description: 'Wait for parallel branches.', category: 'flow', icon: GitMerge, color: 'teal', keywords: ['merge', 'converge', 'wait'], defaults: {}, inputs: input, outputs: output, fields: [] },
   { type: 'notification', label: 'Notification', description: 'Send a workflow update.', category: 'communication', icon: Bell, color: 'rose', keywords: ['notify', 'message', 'alert'], defaults: { channel: 'desktop', message: 'Workflow update' }, inputs: input, outputs: output, fields: [{ key: 'channel', label: 'Channel', kind: 'select', required: true, options: ['desktop', 'webhook', 'slack', 'smtp', 'teams'].map((value) => ({ label: value, value })) }, { key: 'message', label: 'Message', kind: 'textarea', required: true }] },
   { type: 'agent', label: 'AI agent', description: 'Run a configured ACP agent.', category: 'agents', icon: Bot, color: 'indigo', keywords: ['codex', 'claude', 'acp', 'ai'], defaults: { profileId: '', prompt: '' }, inputs: input, outputs: output, fields: [{ key: 'profileId', label: 'Agent profile', kind: 'resource', resource: 'agentProfiles', required: true }, { key: 'prompt', label: 'Prompt', kind: 'textarea', required: true }] },
+  { type: 'foreach', label: 'For each', description: 'Run the steps body once per item.', category: 'flow', icon: ListOrdered, color: 'cyan', keywords: ['loop', 'each', 'iterate', 'batch'], defaults: { items: [], maxIterations: 100, steps: { nodes: [], edges: [] } }, inputs: input, outputs: output, fields: [{ key: 'items', label: 'Items (array or {{nodes.x.y}})', kind: 'textarea', required: true }, { key: 'maxIterations', label: 'Max iterations (1-100)', kind: 'number' }, { key: 'steps', label: 'Steps body (nodes/edges JSON — use {{item}} and {{index}})', kind: 'json', required: true }] },
+  { type: 'sub_workflow', label: 'Sub-workflow', description: 'Run another published workflow and wait for it.', category: 'flow', icon: GitBranch, color: 'violet', keywords: ['nested', 'child', 'reuse'], defaults: { workflowId: '' }, inputs: input, outputs: output, fields: [{ key: 'workflowId', label: 'Workflow id (or exact name)', kind: 'text', required: true }] },
+  { type: 'try', label: 'Try / catch', description: 'Run steps; failures route down the failure port.', category: 'flow', icon: ShieldAlert, color: 'amber', keywords: ['error', 'catch', 'fallback'], defaults: { steps: { nodes: [], edges: [] } }, inputs: input, outputs: [{ id: 'success', label: 'Success' }, { id: 'failure', label: 'Failure' }], fields: [{ key: 'steps', label: 'Steps body (nodes/edges JSON)', kind: 'json', required: true }] },
 ]
 
 const byType = new Map(specs.map((spec) => [spec.type, spec]))
@@ -110,6 +113,9 @@ export function summarizeNode(node: WorkflowNode): string {
     case 'approval': return safe(node.config.prompt) ?? 'Approval required'
     case 'notification': return safe(node.config.channel) ? `Channel: ${node.config.channel}` : 'Choose a channel'
     case 'agent': return safe(node.config.profileId) ? `Agent: ${node.config.profileId}` : 'Choose an agent profile'
+    case 'foreach': return safe(node.config.items) ? `For each ${Array.isArray(node.config.items) ? `${node.config.items.length} items` : 'items'}` : 'Choose items to loop'
+    case 'sub_workflow': return safe(node.config.workflowId) ? `Sub-workflow: ${node.config.workflowId}` : 'Choose a workflow to run'
+    case 'try': return 'Run steps with failure routing'
     default: return getWorkflowNodeSpec(node.type).description
   }
 }
