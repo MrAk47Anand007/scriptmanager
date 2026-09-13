@@ -4,6 +4,10 @@
 
 ### Added
 
+- **Dark and light mode:** the theme switcher (titlebar sun/moon menu and Settings → Appearance) now actually works — `ThemeProvider` was never mounted in the Tauri entry, so `.dark` never applied and toggles were silent no-ops. Defaults to system preference, persists per device, applies before first paint (no wrong-theme flash), and keeps the native Windows titlebar in sync. React Flow canvases (workflow builder) follow the theme via `colorMode` — minimap, zoom controls, and attribution were previously stuck light in dark mode.
+
+### Fixed
+
 - **AI Access (MCP):** the desktop binary now doubles as an MCP stdio server (`--mcp`), exposing 14 tools — workflows (list/get/run/status/cancel), scripts (list/get/run), API requests (list/send), agent runs, and pending approvals — to any MCP client (Claude Desktop, Codex, Zed). One-click install into Claude Desktop and Codex config files plus copyable snippets live in the Agents panel's AI Access card. Access is strictly on-demand: agents only act when the user asks.
 - **Workflow agent nodes:** the `agent` node type runs at runtime — it resolves the profile's provider CLI, templates the prompt against run context, and exposes the reply as node output.
 - **Workflow approvals:** approval nodes pause runs and can be approved/rejected from the execution drawer; approval resumes downstream nodes in the background, rejection fails the run.

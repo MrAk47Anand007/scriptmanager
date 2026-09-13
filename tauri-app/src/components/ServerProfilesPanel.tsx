@@ -312,8 +312,8 @@ export function ServerProfilesPanel() {
                                             {project && (
                                                 <span className={cn(
                                                     "text-[9px] rounded px-1 font-medium",
-                                                    ENV_BADGE_COLORS[project.environment]?.bg ?? 'bg-slate-100',
-                                                    ENV_BADGE_COLORS[project.environment]?.text ?? 'text-slate-500',
+                                                    ENV_BADGE_COLORS[project.environment]?.bg ?? 'bg-slate-100 dark:bg-slate-800',
+                                                    ENV_BADGE_COLORS[project.environment]?.text ?? 'text-slate-500 dark:text-slate-400',
                                                 )}>
                                                     {project.name}
                                                 </span>

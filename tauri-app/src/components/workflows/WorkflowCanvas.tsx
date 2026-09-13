@@ -1,6 +1,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus } from 'lucide-react'
+import { useTheme } from 'next-themes'
 import {
   Background, BackgroundVariant, Controls, MiniMap, ReactFlow, ReactFlowProvider,
   addEdge, applyEdgeChanges, applyNodeChanges, useReactFlow, type Connection, type Edge, type EdgeChange, type NodeChange, type OnReconnect,
@@ -21,6 +22,8 @@ function CanvasInner() {
   const validation = useAppSelector(selectWorkflowValidation)
   const viewport = useAppSelector(selectWorkflowViewport)
   const execution = useAppSelector(selectSelectedExecution)
+  const { resolvedTheme } = useTheme()
+  const colorMode = resolvedTheme === 'dark' ? 'dark' : 'light'
   const { fitView } = useReactFlow()
   const [launcher, setLauncher] = useState<{ open: boolean; x: number; y: number; connection?: Connection }>({ open: false, x: 80, y: 80 })
 
@@ -65,6 +68,7 @@ function CanvasInner() {
     {workflow.definition.nodes.length===0&&<div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"><div className="pointer-events-auto max-w-xs text-center"><div className="text-sm font-semibold">Start your workflow</div><p className="mt-1 text-xs text-muted-foreground">Add the first step, then drag from its output to keep building.</p><button aria-label="Add first node" onClick={()=>setLauncher({open:true,x:120,y:120})} className="mt-4 rounded-md bg-accent-brand px-3 py-2 text-xs text-white">Add first node</button></div></div>}
     <WorkflowNodeLauncher open={launcher.open} origin={{ x: launcher.x, y: launcher.y }} onClose={()=>setLauncher((value)=>({...value,open:false}))} onSelect={(spec, position)=>{const action=addNode({ type: spec.type, name: spec.label, config: spec.defaults, position });dispatch(action);if(launcher.connection?.source)dispatch(connectNodes({source:launcher.connection.source,target:action.payload.id,sourcePort:launcher.connection.sourceHandle as 'true'|'false'|undefined}))}}/>
     <ReactFlow
+      colorMode={colorMode}
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
@@ -101,8 +105,9 @@ function CanvasInner() {
         aria-label="Workflow minimap"
         style={{ width: 112, height: 72 }}
         nodeStrokeWidth={3}
-        nodeColor="#3b82f6"
-        maskColor="rgba(0, 0, 0, 0.2)"
+        nodeColor={colorMode === 'dark' ? 'hsl(15 63% 60% / 0.85)' : '#3b82f6'}
+        nodeStrokeColor={colorMode === 'dark' ? 'hsl(50 6% 93% / 0.4)' : undefined}
+        maskColor={colorMode === 'dark' ? 'hsl(50 4% 11% / 0.72)' : 'rgba(0, 0, 0, 0.2)'}
       />
     </ReactFlow>
   </div>
