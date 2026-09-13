@@ -34,6 +34,7 @@ mod ssh_transport;
 mod ssh_test_server;
 mod terminal;
 mod workflows;
+mod workspace_sync;
 mod workspace_access;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -276,6 +277,9 @@ pub fn run() {
             plugins::run_plugin,
             plugins::get_plugin_source,
             plugins::save_plugin_source,
+            workspace_sync::export_workspace_bundle,
+            workspace_sync::import_workspace_bundle,
+            workspace_sync::publish_workspace_to_git,
             workspace_access::list_workspace_access,
             workspace_access::create_workspace_invitation,
             workspace_access::revoke_workspace_grants,
