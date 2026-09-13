@@ -175,6 +175,8 @@ declare global {
         listApiHistory: () => Promise<unknown[]>
         clearApiHistory: () => Promise<unknown>
         listApiCollectionRuns: () => Promise<unknown[]>
+        listApiAssertions: (requestId: string) => Promise<unknown[]>
+        saveApiAssertions: (payload: { requestId: string; assertions: unknown[] }) => Promise<unknown[]>
         runApiCollection: (payload: { collectionId: string; environmentId: string | null }) => Promise<unknown>
         listProjects: () => Promise<unknown[]>
         saveProject: (payload: unknown) => Promise<unknown>

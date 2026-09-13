@@ -1484,6 +1484,109 @@ pub async fn clear_api_history(
     Ok(serde_json::json!({ "success": true }))
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct ApiAssertionInputRow {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub kind: String,
+    #[serde(default)]
+    pub target: Option<String>,
+    pub operator: String,
+    #[serde(default)]
+    pub expected: Option<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiAssertionRecord {
+    pub id: String,
+    pub request_id: String,
+    pub name: Option<String>,
+    pub kind: String,
+    pub target: Option<String>,
+    pub operator: String,
+    pub expected: String,
+    pub enabled: bool,
+    pub position: i64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct SaveApiAssertionsPayload {
+    #[serde(rename = "requestId")]
+    pub request_id: String,
+    #[serde(default)]
+    pub assertions: Vec<ApiAssertionInputRow>,
+}
+
+#[tauri::command]
+pub async fn list_api_assertions(
+    pool: tauri::State<'_, SqlitePool>,
+    request_id: String,
+) -> Result<Vec<ApiAssertionRecord>, String> {
+    sqlx::query_as::<_, ApiAssertionRecord>(
+        "SELECT id, request_id, name, kind, target, operator, expected_json AS expected,
+            enabled, position
+         FROM api_assertions WHERE request_id = ? ORDER BY position ASC",
+    )
+    .bind(&request_id)
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Replace the assertion set of a request atomically. The saved set is what
+/// execute_api_request_full evaluates on every send.
+#[tauri::command]
+pub async fn save_api_assertions(
+    pool: tauri::State<'_, SqlitePool>,
+    payload: SaveApiAssertionsPayload,
+) -> Result<Vec<ApiAssertionRecord>, String> {
+    let kinds = ["status", "latency_ms", "header", "body_path"];
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM api_assertions WHERE request_id = ?")
+        .bind(&payload.request_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    for (index, row) in payload.assertions.iter().enumerate() {
+        if !kinds.contains(&row.kind.as_str()) {
+            return Err(format!("Unknown assertion kind: {}", row.kind));
+        }
+        sqlx::query(
+            "INSERT INTO api_assertions (id, request_id, name, kind, target, operator, expected_json, enabled, position)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(&payload.request_id)
+        .bind(row.name.as_deref().filter(|n| !n.trim().is_empty()))
+        .bind(&row.kind)
+        .bind(row.target.as_deref().filter(|t| !t.trim().is_empty()))
+        .bind(&row.operator)
+        .bind(row.expected.as_deref().unwrap_or(""))
+        .bind(row.enabled)
+        .bind(index as i64)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    sqlx::query_as::<_, ApiAssertionRecord>(
+        "SELECT id, request_id, name, kind, target, operator, expected_json AS expected,
+            enabled, position
+         FROM api_assertions WHERE request_id = ? ORDER BY position ASC",
+    )
+    .bind(&payload.request_id)
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn list_api_collection_runs(
     pool: tauri::State<'_, SqlitePool>,

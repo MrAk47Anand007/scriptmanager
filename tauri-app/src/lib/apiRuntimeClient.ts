@@ -194,3 +194,35 @@ export async function runApiCollectionRuntime(payload: { collectionId: string; e
   const response = await axios.post(`/api/api-collections/${payload.collectionId}/run`, { environmentId: payload.environmentId })
   return response.data
 }
+
+export type ApiAssertionRuntime = {
+  id: string
+  requestId: string
+  name?: string | null
+  kind: 'status' | 'latency_ms' | 'header' | 'body_path'
+  target?: string | null
+  operator: string
+  expected: string
+  enabled: boolean
+  position: number
+}
+
+export async function listApiAssertionsRuntime(requestId: string): Promise<ApiAssertionRuntime[]> {
+  if (isTauri()) {
+    return invokeTauri<ApiAssertionRuntime[]>('list_api_assertions', { requestId })
+  }
+  if (window.scriptManagerDesktop?.runtime?.listApiAssertions) {
+    return window.scriptManagerDesktop.runtime.listApiAssertions(requestId) as Promise<ApiAssertionRuntime[]>
+  }
+  return []
+}
+
+export async function saveApiAssertionsRuntime(payload: { requestId: string; assertions: Array<Partial<ApiAssertionRuntime>> }): Promise<ApiAssertionRuntime[]> {
+  if (isTauri()) {
+    return invokeTauri<ApiAssertionRuntime[]>('save_api_assertions', { payload })
+  }
+  if (window.scriptManagerDesktop?.runtime?.saveApiAssertions) {
+    return window.scriptManagerDesktop.runtime.saveApiAssertions(payload) as Promise<ApiAssertionRuntime[]>
+  }
+  throw new Error('Desktop runtime unavailable')
+}

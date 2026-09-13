@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ApiChecksPanel } from './ApiChecksPanel'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { KeyValueTable } from './KeyValueTable'
 import { MethodBadge } from './MethodBadge'
@@ -225,7 +226,7 @@ export function ApiRequestEditor() {
   const collections = useAppSelector(selectApiCollections)
   const { resolvedTheme } = useTheme()
   const [editingName, setEditingName] = useState(false)
-  const [activeTab, setActiveTab] = useState<'params' | 'headers' | 'body' | 'auth' | 'variables' | 'pre-request' | 'post-request'>('params')
+  const [activeTab, setActiveTab] = useState<'params' | 'checks' | 'headers' | 'body' | 'auth' | 'variables' | 'pre-request' | 'post-request'>('params')
   const [urlInput, setUrlInput] = useState('')
   const [copied, setCopied] = useState(false)
   const [curlDialogOpen, setCurlDialogOpen] = useState(false)
@@ -569,7 +570,7 @@ export function ApiRequestEditor() {
 
           {/* Tab bar */}
           <TabsList className="h-9 px-3 rounded-none border-b border-slate-100 dark:border-slate-800 justify-start bg-transparent shrink-0 gap-0">
-            {(['params', 'headers', 'body', 'auth', 'variables', 'pre-request', 'post-request'] as const).map(tab => {
+            {(['params', 'checks', 'headers', 'body', 'auth', 'variables', 'pre-request', 'post-request'] as const).map(tab => {
               const count = tab === 'params' ? activeParamCount : tab === 'headers' ? activeHeaderCount : 0
               const indicator =
                 tab === 'body' && draft.bodyType !== 'none'
@@ -597,12 +598,13 @@ export function ApiRequestEditor() {
                       ? unresolvedCount > 0
                         ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
                         : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
-                      : tab === 'pre-request' || tab === 'post-request'
+                      : tab === 'checks' || tab === 'pre-request' || tab === 'post-request'
                         ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                     : 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
 
               const labels: Record<string, string> = {
                 params: 'Params',
+                checks: 'Checks',
                 headers: 'Headers',
                 body: 'Body',
                 auth: 'Auth',
@@ -1103,12 +1105,18 @@ export function ApiRequestEditor() {
               </TabsContent>
             )}
 
+            {activeTab === 'checks' && (
+              <TabsContent value="checks" forceMount className="h-full flex flex-col overflow-hidden m-0">
+                <ApiChecksPanel requestId={draft.id} />
+              </TabsContent>
+            )}
+
             {activeTab === 'post-request' && (
               <TabsContent value="post-request" forceMount className="h-full flex flex-col overflow-hidden m-0">
                 <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/30">
                   <p className="text-xs font-medium text-slate-600 dark:text-slate-300">Post-request Script</p>
                   <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
-                    Runs after the response returns. You can inspect `response`, log to the console, and use `test(name, fn)` with `expect(...)`.
+                    Runs after the response returns. `response.body` is parsed JSON when possible (`response.text` is raw). Use `test(name, fn)`, `expect(...)`, and `vars.set(...)` — checks from the Checks tab run alongside these.
                   </p>
                 </div>
                 <div className="flex-1 min-h-0">

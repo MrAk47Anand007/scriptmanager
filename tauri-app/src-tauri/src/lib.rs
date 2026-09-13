@@ -159,6 +159,8 @@ pub fn run() {
             api_client::clear_api_history,
             api_client::run_api_collection,
             api_client::list_api_collection_runs,
+            api_client::list_api_assertions,
+            api_client::save_api_assertions,
             settings::read_settings,
             settings::save_settings,
             settings::read_github_gist_settings,
