@@ -481,6 +481,29 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
     .await?;
 
     sqlx::query(
+        "CREATE TABLE IF NOT EXISTS api_assertions (
+            id TEXT PRIMARY KEY,
+            request_id TEXT NOT NULL REFERENCES api_requests(id) ON DELETE CASCADE,
+            name TEXT,
+            kind TEXT NOT NULL,
+            target TEXT,
+            operator TEXT NOT NULL,
+            expected_json TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_api_assertions_request ON api_assertions(request_id, position)",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS api_environments (
             id TEXT PRIMARY KEY,
             workspace_id TEXT NOT NULL DEFAULT 'default',

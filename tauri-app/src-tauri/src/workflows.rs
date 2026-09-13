@@ -1092,8 +1092,7 @@ async fn run_api_node(
         auth_type: Some(request.auth_type.clone()),
         auth_config: serde_json::from_str(&request.auth_config).ok(),
     };
-    let prepared = crate::api_client::prepare_request(pool, &payload).await?;
-    let response = crate::api_client::execute_prepared(&prepared).await?;
+    let (_prepared, response) = crate::api_client::execute_api_request_full(pool, &payload).await?;
     if response.status >= 200 && response.status < 400 {
         Ok(serde_json::json!({
             "status": response.status,
@@ -1101,6 +1100,7 @@ async fn run_api_node(
             "headers": response.headers,
             "body": response.body,
             "duration": response.duration,
+            "tests": response.test_results,
         }))
     } else {
         Err(format!("API request {} returned status {}", request_id, response.status))
@@ -2476,8 +2476,7 @@ pub(crate) async fn send_api_request_lenient(
         auth_type: Some(request.auth_type.clone()),
         auth_config: serde_json::from_str(&request.auth_config).ok(),
     };
-    let prepared = crate::api_client::prepare_request(pool, &payload).await?;
-    let response = crate::api_client::execute_prepared(&prepared).await?;
+    let (_prepared, response) = crate::api_client::execute_api_request_full(pool, &payload).await?;
     Ok(serde_json::json!({
         "status": response.status,
         "statusText": response.status_text,

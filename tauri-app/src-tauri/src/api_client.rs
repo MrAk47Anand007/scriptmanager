@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, SqlitePool};
+use serde_json::Value;
+use sqlx::{FromRow, Row, SqlitePool};
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -762,13 +763,96 @@ pub(crate) struct PreparedRequest {
     pub(crate) headers: HashMap<String, String>,
     pub(crate) body: String,
     pub(crate) request_id: Option<String>,
-    pub(crate) has_pre_request_script: bool,
-    pub(crate) has_test_script: bool,
+    pub(crate) environment_id: Option<String>,
+    /// Resolved variable map (globals < collection < environment < request <
+    /// runtime overrides) so pre/post scripts can read and extend it.
+    pub(crate) variables: HashMap<String, String>,
 }
 
 pub(crate) async fn prepare_request(
     pool: &SqlitePool,
     payload: &SendApiRequestPayload,
+) -> Result<PreparedRequest, String> {
+    prepare_request_with_vars(pool, payload, &HashMap::new()).await
+}
+
+/// Upsert a variable key into a `[{"key","value","enabled"}]` JSON column.
+fn upsert_variable_rows(rows_json: &str, key: &str, value: &str) -> String {
+    let mut rows: Vec<Value> = serde_json::from_str(rows_json).unwrap_or_default();
+    for row in rows.iter_mut() {
+        if row.get("key").and_then(Value::as_str) == Some(key) {
+            if let Some(obj) = row.as_object_mut() {
+                obj.insert("value".to_string(), Value::String(value.to_string()));
+                obj.insert("enabled".to_string(), Value::Bool(true));
+            }
+            return serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string());
+        }
+    }
+    rows.push(serde_json::json!({ "key": key, "value": value, "enabled": true }));
+    serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string())
+}
+
+async fn persist_mapping_value(
+    pool: &SqlitePool,
+    scope: &str,
+    environment_id: Option<&str>,
+    request_id: Option<&str>,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
+    match scope {
+        "request" => {
+            let Some(request_id) = request_id else {
+                return Err("Request-scope mapping needs a saved request".to_string());
+            };
+            let current: Option<String> =
+                sqlx::query_scalar("SELECT variables FROM api_requests WHERE id = ?")
+                    .bind(request_id)
+                    .fetch_optional(pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            let updated = upsert_variable_rows(current.as_deref().unwrap_or("[]"), key, value);
+            sqlx::query("UPDATE api_requests SET variables = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(&updated)
+                .bind(request_id)
+                .execute(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        "environment" => {
+            let Some(environment_id) = environment_id else {
+                return Err("Environment-scope mapping needs a selected environment".to_string());
+            };
+            let current: Option<String> =
+                sqlx::query_scalar("SELECT variables FROM api_environments WHERE id = ?")
+                    .bind(environment_id)
+                    .fetch_optional(pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            let updated = upsert_variable_rows(current.as_deref().unwrap_or("[]"), key, value);
+            sqlx::query("UPDATE api_environments SET variables = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(&updated)
+                .bind(environment_id)
+                .execute(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        "global" => {
+            let globals = read_globals_record(pool).await?;
+            let updated = upsert_variable_rows(&globals.variables, key, value);
+            save_globals_record(pool, &updated).await?;
+            Ok(())
+        }
+        other => Err(format!("Unknown mapping target scope: {other}")),
+    }
+}
+
+pub(crate) async fn prepare_request_with_vars(
+    pool: &SqlitePool,
+    payload: &SendApiRequestPayload,
+    runtime_vars: &HashMap<String, String>,
 ) -> Result<PreparedRequest, String> {
     let method = payload
         .method
@@ -814,7 +898,11 @@ pub(crate) async fn prepare_request(
         .map(parse_variable_value)
         .unwrap_or_default();
 
-    let vars = build_variable_map(&[global_rows, collection_rows, environment_rows, request_rows]);
+    // Runtime overrides (pre-request script writes, data-driven rows) win.
+    let mut vars = build_variable_map(&[global_rows, collection_rows, environment_rows, request_rows]);
+    for (key, value) in runtime_vars {
+        vars.insert(key.clone(), value.clone());
+    }
 
     let mut url = substitute_variables(&raw_url, &vars);
 
@@ -939,46 +1027,226 @@ pub(crate) async fn prepare_request(
         headers,
         body,
         request_id: payload.request_id.clone(),
-        has_pre_request_script: payload
-            .pre_request_script
-            .as_deref()
-            .map(|script| !script.trim().is_empty())
-            .unwrap_or(false),
-        has_test_script: payload
-            .test_script
-            .as_deref()
-            .map(|script| !script.trim().is_empty())
-            .unwrap_or(false),
+        environment_id: payload.environment_id.clone(),
+        variables: vars,
     })
 }
 
-fn migration_pending_script_results(
-    prepared: &PreparedRequest,
-) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
-    let mut console_logs = Vec::new();
-    let mut test_results = Vec::new();
+/// Response context handed to post-request scripts: body is parsed JSON when
+/// possible (so `response.body.token` works), `text` always carries the raw
+/// payload.
+fn response_script_context(response: &ApiSendResponse) -> Value {
+    let parsed: Value = serde_json::from_str(response.body.trim()).unwrap_or(Value::Null);
+    let body = if parsed.is_null() {
+        Value::String(response.body.clone())
+    } else {
+        parsed
+    };
+    serde_json::json!({
+        "status": response.status,
+        "statusText": response.status_text,
+        "headers": response.headers,
+        "body": body,
+        "text": response.body,
+        "duration": response.duration,
+        "size": response.size,
+    })
+}
 
-    if prepared.has_pre_request_script {
-        console_logs.push(serde_json::json!({
-            "phase": "pre-request",
-            "level": "warn",
-            "message": "Pre-request scripts are migration-pending in the Tauri desktop app."
-        }));
-    }
-    if prepared.has_test_script {
-        console_logs.push(serde_json::json!({
-            "phase": "test",
-            "level": "warn",
-            "message": "Post-request test scripts are migration-pending in the Tauri desktop app."
-        }));
-        test_results.push(serde_json::json!({
-            "name": "Post-request script",
-            "passed": false,
-            "message": "Post-request test scripts are migration-pending in the Tauri desktop app."
-        }));
+/// Full send pipeline: pre-request script → prepare (with script var writes)
+/// → HTTP → post-request script → declarative assertions → response mappings.
+/// Used by the manual send, collection runs, workflow API nodes, and MCP so
+/// every surface honors stored scripts identically.
+pub(crate) async fn execute_api_request_full(
+    pool: &SqlitePool,
+    payload: &SendApiRequestPayload,
+) -> Result<(PreparedRequest, ApiSendResponse), String> {
+    let mut console_logs: Vec<Value> = Vec::new();
+    let mut test_results: Vec<Value> = Vec::new();
+    let mut mapping_results: Vec<Value> = Vec::new();
+    let mut runtime_vars: HashMap<String, String> = HashMap::new();
+
+    let pre_script = payload
+        .pre_request_script
+        .as_deref()
+        .map(str::trim)
+        .filter(|script| !script.is_empty());
+    if let Some(script) = pre_script {
+        let seed = prepare_request_with_vars(pool, payload, &runtime_vars).await?;
+        let request_ctx = serde_json::json!({
+            "method": seed.method,
+            "url": seed.url,
+            "headers": seed.headers,
+            "body": seed.body,
+        });
+        let outcome = crate::js_engine::run_api_script(
+            crate::js_engine::ApiScriptInput {
+                code: script.to_string(),
+                vars: seed.variables.clone(),
+                request: request_ctx,
+                response: None,
+            },
+            std::time::Duration::from_secs(2),
+        );
+        for log in &outcome.logs {
+            console_logs.push(serde_json::json!({
+                "phase": "pre-request",
+                "level": log.get("level").cloned().unwrap_or(serde_json::json!("log")),
+                "message": log.get("text").cloned().unwrap_or_default(),
+            }));
+        }
+        if let Some(error) = &outcome.error {
+            console_logs.push(serde_json::json!({
+                "phase": "pre-request",
+                "level": "error",
+                "message": error,
+            }));
+        }
+        runtime_vars.extend(outcome.vars);
     }
 
-    (console_logs, test_results)
+    let prepared = prepare_request_with_vars(pool, payload, &runtime_vars).await?;
+    let mut response = execute_prepared(&prepared).await?;
+
+    let test_script = payload
+        .test_script
+        .as_deref()
+        .map(str::trim)
+        .filter(|script| !script.is_empty());
+    if let Some(script) = test_script {
+        let outcome = crate::js_engine::run_api_script(
+            crate::js_engine::ApiScriptInput {
+                code: script.to_string(),
+                vars: prepared.variables.clone(),
+                request: serde_json::json!({
+                    "method": prepared.method,
+                    "url": prepared.url,
+                    "headers": prepared.headers,
+                    "body": prepared.body,
+                }),
+                response: Some(response_script_context(&response)),
+            },
+            std::time::Duration::from_secs(2),
+        );
+        for test in &outcome.tests {
+            test_results.push(serde_json::json!({
+                "name": test.get("name").cloned().unwrap_or(serde_json::json!("test")),
+                "passed": test.get("passed").and_then(Value::as_bool).unwrap_or(false),
+                "message": test.get("message").cloned().unwrap_or_default(),
+            }));
+        }
+        for log in &outcome.logs {
+            console_logs.push(serde_json::json!({
+                "phase": "test",
+                "level": log.get("level").cloned().unwrap_or(serde_json::json!("log")),
+                "message": log.get("text").cloned().unwrap_or_default(),
+            }));
+        }
+        if let Some(error) = &outcome.error {
+            console_logs.push(serde_json::json!({
+                "phase": "test",
+                "level": "error",
+                "message": error,
+            }));
+        }
+    }
+
+    // Declarative assertions (api_assertions) merge into the same results.
+    if let Some(request_id) = payload.request_id.as_deref() {
+        let rows: Vec<Value> = sqlx::query(
+            "SELECT kind, target, operator, expected_json, enabled, name FROM api_assertions
+             WHERE request_id = ? ORDER BY position ASC",
+        )
+        .bind(request_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|row| {
+            serde_json::json!({
+                "kind": row.try_get::<String, _>("kind").unwrap_or_default(),
+                "target": row.try_get::<Option<String>, _>("target").unwrap_or_default(),
+                "operator": row.try_get::<String, _>("operator").unwrap_or_default(),
+                "expected_json": row.try_get::<String, _>("expected_json").ok().unwrap_or_default(),
+                "enabled": row.try_get::<i64, _>("enabled").unwrap_or(1) != 0,
+                "name": row.try_get::<Option<String>, _>("name").unwrap_or(None),
+            })
+        })
+        .collect();
+        if !rows.is_empty() {
+            for result in crate::js_engine::evaluate_assertions(&rows, &response_script_context(&response)) {
+                test_results.push(result);
+            }
+        }
+    }
+
+    // Response mappings: extract values from the response body into variable
+    // scopes (request < environment < global persisted stores).
+    if let Some(mappings) = payload.response_mappings.as_ref().and_then(Value::as_array) {
+        let parsed_body: Value = serde_json::from_str(response.body.trim()).unwrap_or(Value::Null);
+        for mapping in mappings {
+            let source_path = mapping.get("sourcePath").and_then(Value::as_str).unwrap_or_default();
+            let variable_name = mapping.get("variableName").and_then(Value::as_str).unwrap_or_default();
+            let target_scope = mapping
+                .get("targetScope")
+                .and_then(Value::as_str)
+                .unwrap_or("request")
+                .to_string();
+            let enabled = mapping.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+            if !enabled || source_path.is_empty() || variable_name.is_empty() {
+                continue;
+            }
+            match crate::js_engine::json_path(&parsed_body, source_path) {
+                Some(value) => {
+                    let extracted = match value {
+                        Value::String(text) => text.clone(),
+                        other => other.to_string(),
+                    };
+                    match persist_mapping_value(
+                        pool,
+                        &target_scope,
+                        payload.environment_id.as_deref(),
+                        payload.request_id.as_deref(),
+                        variable_name,
+                        &extracted,
+                    )
+                    .await
+                    {
+                        Ok(()) => mapping_results.push(serde_json::json!({
+                            "variableName": variable_name,
+                            "sourcePath": source_path,
+                            "targetScope": target_scope,
+                            "applied": true,
+                            "value": extracted,
+                        })),
+                        Err(reason) => mapping_results.push(serde_json::json!({
+                            "variableName": variable_name,
+                            "sourcePath": source_path,
+                            "targetScope": target_scope,
+                            "applied": false,
+                            "reason": reason,
+                        })),
+                    }
+                }
+                None => mapping_results.push(serde_json::json!({
+                    "variableName": variable_name,
+                    "sourcePath": source_path,
+                    "targetScope": target_scope,
+                    "applied": false,
+                    "reason": format!("path \"{source_path}\" not found in response body"),
+                })),
+            }
+        }
+    }
+
+    if !console_logs.is_empty() {
+        response.console_logs.splice(..0, console_logs);
+    }
+    if !test_results.is_empty() {
+        response.test_results = test_results;
+    }
+    response.mapping_results = mapping_results;
+    Ok((prepared, response))
 }
 
 pub(crate) async fn execute_prepared(prepared: &PreparedRequest) -> Result<ApiSendResponse, String> {
@@ -1027,7 +1295,9 @@ pub(crate) async fn execute_prepared(prepared: &PreparedRequest) -> Result<ApiSe
     // History is persisted by the caller so collection runs can skip per-request rows.
     let _ = request_headers_json;
 
-    let (console_logs, test_results) = migration_pending_script_results(prepared);
+    // Scripts, assertions, and mappings are applied by execute_api_request_full;
+    // this raw path stays script-free for callers that only want HTTP.
+    let console_logs = Vec::new();
 
     Ok(ApiSendResponse {
         status,
@@ -1040,7 +1310,7 @@ pub(crate) async fn execute_prepared(prepared: &PreparedRequest) -> Result<ApiSe
         truncated: false,
         cookie_jar_host: None,
         console_logs,
-        test_results,
+        test_results: Vec::new(),
         mapping_results: Vec::new(),
         timestamp: chrono::Utc::now().timestamp_millis(),
     })
@@ -1181,8 +1451,7 @@ pub async fn send_api_request(
     pool: tauri::State<'_, SqlitePool>,
     payload: SendApiRequestPayload,
 ) -> Result<SendApiRequestResult, String> {
-    let prepared = prepare_request(&pool, &payload).await?;
-    let response = execute_prepared(&prepared).await?;
+    let (prepared, response) = execute_api_request_full(&pool, &payload).await?;
     insert_history_record(&pool, &prepared, &response).await?;
     Ok(SendApiRequestResult { response })
 }
@@ -1316,42 +1585,33 @@ pub async fn run_api_collection(
             auth_type: Some(request.auth_type.clone()),
             auth_config: serde_json::from_str(&request.auth_config).ok(),
         };
-        match prepare_request(&pool, &send_payload).await {
-            Ok(prepared) => match execute_prepared(&prepared).await {
-                Ok(response) => {
-                    let ok = response.status >= 200 && response.status < 400;
-                    if ok {
-                        passed += 1;
-                    } else {
-                        failed += 1;
-                    }
-                    results.push(serde_json::json!({
-                        "request_id": request.id,
-                        "request_name": request.name,
-                        "status": response.status,
-                        "duration": response.duration,
-                        "passed": ok,
-                        "failed_tests": 0,
-                        "console_logs": [],
-                        "test_results": [],
-                        "error": null,
-                    }));
-                }
-                Err(message) => {
+        match execute_api_request_full(&pool, &send_payload).await {
+            Ok((_prepared, response)) => {
+                let status_ok = response.status >= 200 && response.status < 400;
+                let failed_tests = response
+                    .test_results
+                    .iter()
+                    .filter(|test| test.get("passed").and_then(Value::as_bool) != Some(true))
+                    .count() as i64;
+                let ok = status_ok && failed_tests == 0;
+                if ok {
+                    passed += 1;
+                } else {
                     failed += 1;
-                    results.push(serde_json::json!({
-                        "request_id": request.id,
-                        "request_name": request.name,
-                        "status": 500,
-                        "duration": 0,
-                        "passed": false,
-                        "failed_tests": 0,
-                        "console_logs": [],
-                        "test_results": [],
-                        "error": message,
-                    }));
                 }
-            },
+                results.push(serde_json::json!({
+                    "request_id": request.id,
+                    "request_name": request.name,
+                    "status": response.status,
+                    "duration": response.duration,
+                    "passed": ok,
+                    "failed_tests": failed_tests,
+                    "console_logs": response.console_logs,
+                    "test_results": response.test_results,
+                    "mapping_results": response.mapping_results,
+                    "error": null,
+                }));
+            }
             Err(message) => {
                 failed += 1;
                 results.push(serde_json::json!({
@@ -1363,6 +1623,7 @@ pub async fn run_api_collection(
                     "failed_tests": 0,
                     "console_logs": [],
                     "test_results": [],
+                    "mapping_results": [],
                     "error": message,
                 }));
             }
@@ -1630,8 +1891,8 @@ mod tests {
             headers: HashMap::new(),
             body: String::new(),
             request_id: None,
-            has_pre_request_script: false,
-            has_test_script: false,
+            environment_id: None,
+            variables: HashMap::new(),
         };
         let response = ApiSendResponse {
             status: 200,
@@ -1666,36 +1927,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn api_history_persists_script_pending_results() {
+    async fn api_history_persists_real_script_results() {
         let pool = test_pool().await;
-        let prepared = PreparedRequest {
-            method: "GET".to_string(),
-            url: "https://example.com".to_string(),
-            headers: HashMap::new(),
-            body: String::new(),
+        let (base_url, _rx) = spawn_capture_server(1);
+        let payload = SendApiRequestPayload {
             request_id: None,
-            has_pre_request_script: true,
-            has_test_script: true,
+            collection_id: None,
+            environment_id: None,
+            method: Some("GET".to_string()),
+            url: Some(format!("{base_url}/scripted")),
+            headers: None,
+            query_params: None,
+            variables: None,
+            request_options: None,
+            pre_request_script: Some("vars.set('greeting', 'hi');".to_string()),
+            test_script: Some(
+                "test('ok body', function () { expect(response.body.ok).toBe(true); });
+                 if (vars.get('greeting') !== 'hi') throw new Error('pre-script vars not visible');"
+                    .to_string(),
+            ),
+            response_mappings: None,
+            body_type: Some("none".to_string()),
+            body: Some(String::new()),
+            auth_type: Some("none".to_string()),
+            auth_config: None,
         };
-        let (console_logs, test_results) = migration_pending_script_results(&prepared);
-        let response = ApiSendResponse {
-            status: 200,
-            status_text: "OK".to_string(),
-            headers: HashMap::new(),
-            body: "hi".to_string(),
-            duration: 5,
-            size: 2,
-            error: None,
-            truncated: false,
-            cookie_jar_host: None,
-            console_logs,
-            test_results,
-            mapping_results: Vec::new(),
-            timestamp: 0,
-        };
-        insert_history_record(&pool, &prepared, &response)
-            .await
-            .unwrap();
+        let (prepared, response) = execute_api_request_full(&pool, &payload).await.unwrap();
+        assert_eq!(response.test_results.len(), 1);
+        assert_eq!(response.test_results[0]["passed"], serde_json::json!(true));
+        assert_eq!(prepared.variables.get("greeting").map(String::as_str), Some("hi"));
+        insert_history_record(&pool, &prepared, &response).await.unwrap();
         let row = sqlx::query(
             "SELECT console_logs, test_results FROM api_history WHERE workspace_id = ?",
         )
@@ -1703,12 +1964,9 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        let console_logs: String = row.try_get(0).unwrap();
         let test_results: String = row.try_get(1).unwrap();
-        assert!(console_logs.contains("pre-request"));
-        assert!(console_logs.contains("migration-pending"));
-        assert!(test_results.contains("Post-request script"));
-        assert!(test_results.contains("\"passed\":false"));
+        assert!(test_results.contains("ok body"));
+        assert!(test_results.contains("\"passed\":true"));
     }
 
     #[tokio::test]
@@ -1981,22 +2239,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn api_prepare_flags_script_execution_as_pending() {
+    async fn api_runtime_vars_override_prepared_request() {
         let pool = test_pool().await;
+        let (base_url, rx) = spawn_capture_server(1);
         let mut payload = send_payload_with_auth("none", serde_json::json!({}));
-        payload.pre_request_script = Some("console.log('before')".to_string());
-        payload.test_script = Some("test('status', () => expect(response.status).toBe(200))".to_string());
+        payload.url = Some(format!("{base_url}/override?who={{{{who}}}}"));
+        // The request defines {{who}} but a pre-request script replaces it at runtime.
+        payload.variables = Some(serde_json::json!([
+            { "key": "who", "value": "static", "enabled": true }
+        ]));
+        payload.pre_request_script = Some("vars.set('who', 'from-script');".to_string());
 
-        let prepared = prepare_request(&pool, &payload)
-            .await
-            .expect("prepare request");
-        assert!(prepared.has_pre_request_script);
-        assert!(prepared.has_test_script);
-
-        let (console_logs, test_results) = migration_pending_script_results(&prepared);
-        assert_eq!(console_logs.len(), 2);
-        assert_eq!(test_results.len(), 1);
-        assert_eq!(test_results[0]["passed"], false);
+        let (prepared, _response) = execute_api_request_full(&pool, &payload).await.unwrap();
+        assert_eq!(prepared.url.contains("who=from-script"), true, "url: {}", prepared.url);
+        let sent = rx.try_recv().expect("captured request");
+        assert!(sent.contains("who=from-script"));
     }
 
     #[tokio::test]
