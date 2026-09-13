@@ -220,6 +220,9 @@ declare global {
         approveRemoteExecution: (payload: { id: string; note?: string }) => Promise<{ ok: true; remoteExecId: string }>
         rejectRemoteExecution: (payload: { id: string }) => Promise<{ ok: true; remoteExecId: string }>
         listAuditLog: (payload?: unknown) => Promise<unknown>
+        startFleetRun: (payload: { profileIds: string[]; command: string; note?: string }) => Promise<unknown>
+        approveFleetRun: (fleetRunId: string) => Promise<unknown>
+        listFleetRuns: (limit?: number) => Promise<unknown[]>
         listStorageProviders?: () => Promise<unknown[]>
         saveStorageProvider?: (payload: unknown) => Promise<unknown>
         deleteStorageProvider?: (id: string) => Promise<unknown>

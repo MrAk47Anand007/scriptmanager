@@ -3475,7 +3475,7 @@ mod tests {
         assert_eq!(failed.status, STATUS_FAILED);
         // Retry re-drives the node (and fails again deterministically for the
         // unsupported plugin type), proving state reset instead of a stale read.
-        let retried = retry_node_record(&pool, &failed.id, "r").await.unwrap();
+        let retried = retry_node_record(&pool, &failed.id, "r", false).await.unwrap();
         assert_eq!(retried.status, STATUS_FAILED);
         let node = retried.node_runs.iter().find(|n| n.node_id == "r").unwrap();
         assert_eq!(node.attempt, 1);
@@ -3486,7 +3486,7 @@ mod tests {
         let ok = run_workflow_record(&pool, &ok_id, serde_json::json!({}))
             .await
             .unwrap();
-        assert!(retry_node_record(&pool, &ok.id, "n1").await.is_err());
+        assert!(retry_node_record(&pool, &ok.id, "n1", false).await.is_err());
     }
 
     #[tokio::test]

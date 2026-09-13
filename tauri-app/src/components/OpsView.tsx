@@ -32,6 +32,9 @@ const AuditTrailPanel = dynamic(
     () => import('./AuditTrailPanel').then((mod) => mod.AuditTrailPanel),
     { loading: () => <PaneSkeleton label="Loading audit trail" /> }
 )
+const FleetPanel = lazy(
+    () => import('./FleetPanel').then((mod) => ({ default: mod.FleetPanel }))
+)
 const ExecutionDashboard = lazy(
     () => import('@/components/observability/ExecutionDashboard').then((mod) => ({ default: mod.ExecutionDashboard }))
 )
@@ -178,8 +181,9 @@ export function OpsView() {
                     <TabsTrigger value="audit" className="text-xs">Audit</TabsTrigger>
                 </TabsList>
                 <TabsContent value="execute" className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
-                    <div className="mx-auto max-w-3xl">
+                    <div className="mx-auto max-w-3xl space-y-6">
                         <RemoteExecutionPanel />
+                        <FleetPanel profiles={serverProfiles.map((profile) => ({ id: profile.id, name: profile.name, host: profile.host, username: profile.username }))} />
                     </div>
                 </TabsContent>
                 <TabsContent value="servers" className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">

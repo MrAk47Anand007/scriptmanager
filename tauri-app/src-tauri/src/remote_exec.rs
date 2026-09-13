@@ -180,7 +180,7 @@ pub async fn delete_server_profile(pool: State<'_, SqlitePool>, id: String) -> R
     delete_profile_core(&pool, &id).await
 }
 
-async fn record_audit(
+pub(crate) async fn record_audit(
     pool: &SqlitePool,
     action: &str,
     actor: &str,
@@ -686,7 +686,7 @@ pub async fn reject_remote_execution(
     Ok(result)
 }
 
-fn emit_remote_exec_event(app_handle: Option<&AppHandle>, payload: Value) {
+pub(crate) fn emit_remote_exec_event(app_handle: Option<&AppHandle>, payload: Value) {
     if let Some(handle) = app_handle {
         handle.emit("remote-exec-event", payload).ok();
     }

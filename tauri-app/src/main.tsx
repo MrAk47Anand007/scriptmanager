@@ -189,6 +189,9 @@ window.scriptManagerDesktop = {
     approveRemoteExecution: (payload: { id: string; note?: string }) => invokeTauri('approve_remote_execution', { payload }),
     rejectRemoteExecution: (payload: { id: string }) => invokeTauri('reject_remote_execution', { payload }),
     listAuditLog: (params?: unknown) => invokeTauri('list_audit_log', { params: params ?? null }),
+    startFleetRun: (payload: { profileIds: string[]; command: string; note?: string }) => invokeTauri('start_fleet_run', { payload }),
+    approveFleetRun: (fleetRunId: string) => invokeTauri('approve_fleet_run', { fleetRunId }),
+    listFleetRuns: (limit?: number) => invokeTauri('list_fleet_runs', { payload: { limit: limit ?? 20 } }),
     onRemoteExecEvent: (listener: DesktopListener<ScriptManagerDesktopRemoteExecEvent>) =>
       subscribe('remote-exec-event', listener),
     listStorageProviders: () => invokeTauri('list_storage_providers'),

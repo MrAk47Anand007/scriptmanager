@@ -6,6 +6,7 @@ mod commands;
 mod db;
 mod error;
 mod execution;
+mod fleet;
 mod fs_ops;
 mod gist;
 mod git_ops;
@@ -239,6 +240,9 @@ pub fn run() {
             remote_exec::approve_remote_execution,
             remote_exec::reject_remote_execution,
             remote_exec::list_audit_log,
+            fleet::start_fleet_run,
+            fleet::approve_fleet_run,
+            fleet::list_fleet_runs,
             storage::list_storage_providers,
             storage::save_storage_provider,
             storage::delete_storage_provider,

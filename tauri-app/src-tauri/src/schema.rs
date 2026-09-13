@@ -481,6 +481,39 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
     .await?;
 
     sqlx::query(
+        "CREATE TABLE IF NOT EXISTS fleet_runs (
+            id TEXT PRIMARY KEY,
+            command TEXT NOT NULL DEFAULT '',
+            note TEXT,
+            status TEXT NOT NULL DEFAULT 'pending_approval',
+            total_targets INTEGER NOT NULL DEFAULT 0,
+            succeeded_targets INTEGER NOT NULL DEFAULT 0,
+            failed_targets INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            started_at TEXT,
+            finished_at TEXT
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS fleet_targets (
+            id TEXT PRIMARY KEY,
+            fleet_run_id TEXT NOT NULL REFERENCES fleet_runs(id) ON DELETE CASCADE,
+            profile_id TEXT NOT NULL,
+            profile_name TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            exit_code INTEGER,
+            output TEXT,
+            started_at TEXT,
+            finished_at TEXT
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS mock_servers (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
