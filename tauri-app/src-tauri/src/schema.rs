@@ -481,6 +481,44 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
     .await?;
 
     sqlx::query(
+        "CREATE TABLE IF NOT EXISTS mock_servers (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            collection_id TEXT,
+            port INTEGER NOT NULL DEFAULT 0,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            routes_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS mock_server_requests (
+            id TEXT PRIMARY KEY,
+            server_id TEXT NOT NULL REFERENCES mock_servers(id) ON DELETE CASCADE,
+            method TEXT NOT NULL,
+            path TEXT NOT NULL,
+            query_json TEXT NOT NULL DEFAULT '{}',
+            headers_json TEXT NOT NULL DEFAULT '{}',
+            body TEXT NOT NULL DEFAULT '',
+            status_sent INTEGER NOT NULL DEFAULT 0,
+            matched_route_id TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_mock_requests_server ON mock_server_requests(server_id, created_at)",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS data_sets (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,

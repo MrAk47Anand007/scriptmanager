@@ -9,6 +9,7 @@ mod execution;
 mod fs_ops;
 mod gist;
 mod git_ops;
+mod http_service;
 mod js_engine;
 mod mcp;
 mod models;
@@ -167,6 +168,18 @@ pub fn run() {
             openapi::import_openapi,
             api_client::save_data_set,
             api_client::delete_data_set,
+            http_service::list_mock_servers,
+            http_service::save_mock_server,
+            http_service::delete_mock_server,
+            http_service::start_mock_server,
+            http_service::stop_mock_server,
+            http_service::mock_server_status,
+            http_service::list_mock_requests,
+            http_service::clear_mock_requests,
+            http_service::start_webhook_listener,
+            http_service::stop_webhook_listener,
+            http_service::webhook_listener_status,
+            http_service::rotate_workflow_webhook,
             api_client::list_api_assertions,
             api_client::save_api_assertions,
             settings::read_settings,

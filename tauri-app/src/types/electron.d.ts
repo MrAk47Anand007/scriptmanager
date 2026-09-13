@@ -49,6 +49,13 @@ declare global {
         getProviderPaths: () => Promise<unknown>
         onEvent: (listener: (payload: { sessionId: string; event: unknown }) => void) => () => void
       }
+      listMockServers?: () => Promise<unknown[]>
+      saveMockServer?: (payload: unknown) => Promise<unknown>
+      deleteMockServer?: (id: string) => Promise<boolean>
+      startMockServer?: (id: string) => Promise<unknown>
+      stopMockServer?: (id: string) => Promise<unknown>
+      listMockRequests?: (serverId: string) => Promise<unknown[]>
+      clearMockRequests?: (serverId: string) => Promise<boolean>
       exportCollectionRunJunit?: (runId: string) => Promise<string>
       exportCollectionRunHtml?: (runId: string) => Promise<string>
       getMcpStatus?: () => Promise<unknown>

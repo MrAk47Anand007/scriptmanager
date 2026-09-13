@@ -397,6 +397,29 @@ fn tool_catalogue() -> Vec<ToolSpec> {
             }),
         },
         ToolSpec {
+            name: "mock_server_list",
+            description: "List local mock servers (canned HTTP endpoints) with running state, port, and routes.",
+            schema: json!({ "type": "object", "properties": {} }),
+        },
+        ToolSpec {
+            name: "mock_server_start",
+            description: "Start a local mock server so its routes serve HTTP on 127.0.0.1. Returns the assigned port.",
+            schema: json!({
+                "type": "object",
+                "properties": { "serverId": { "type": "string" } },
+                "required": ["serverId"]
+            }),
+        },
+        ToolSpec {
+            name: "mock_server_stop",
+            description: "Stop a running mock server.",
+            schema: json!({
+                "type": "object",
+                "properties": { "serverId": { "type": "string" } },
+                "required": ["serverId"]
+            }),
+        },
+        ToolSpec {
             name: "approval_list",
             description: "List pending human approvals (workflow approval nodes and remote-execution gates) that may be blocking runs.",
             schema: json!({ "type": "object", "properties": {} }),
@@ -586,6 +609,24 @@ async fn call_tool(pool: &SqlitePool, name: &str, arguments: Value) -> Value {
                 Err(message) => error_result(message),
             }
         }
+        "mock_server_list" => match crate::http_service::list_mock_servers_inner(pool).await {
+            Ok(servers) => text_result(json!({ "count": servers.len(), "servers": servers })),
+            Err(message) => error_result(message),
+        },
+        "mock_server_start" => match args.get("serverId").and_then(Value::as_str) {
+            Some(id) => match crate::http_service::mock_start_core(pool, id).await {
+                Ok(status) => text_result(serde_json::to_value(&status).unwrap_or(Value::Null)),
+                Err(message) => error_result(message),
+            },
+            None => error_result("serverId is required".to_string()),
+        },
+        "mock_server_stop" => match args.get("serverId").and_then(Value::as_str) {
+            Some(id) => match crate::http_service::mock_stop_core(pool, id).await {
+                Ok(status) => text_result(serde_json::to_value(&status).unwrap_or(Value::Null)),
+                Err(message) => error_result(message),
+            },
+            None => error_result("serverId is required".to_string()),
+        },
         "approval_list" => match crate::approvals::list_pending_approvals(pool).await {
             Ok(approvals) => text_result(json!({ "count": approvals.len(), "approvals": approvals })),
             Err(message) => error_result(message),

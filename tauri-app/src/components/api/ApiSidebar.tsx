@@ -88,7 +88,8 @@ import {
 import { cn } from '@/lib/utils'
 import { RunCollectionDataDialog } from './RunCollectionDataDialog'
 import { ImportOpenApiDialog } from './ImportOpenApiDialog'
-import { FileJson } from 'lucide-react'
+import { ApiMocksPanel } from './ApiMocksPanel'
+import { FileJson, Radio } from 'lucide-react'
 import { fetchApiCollections } from '@/features/api/apiSlice'
 import { getOperationError } from '@/lib/operationError'
 
@@ -502,7 +503,7 @@ export function ApiSidebar() {
   const activeEnvironmentId = useAppSelector(selectApiActiveEnvironmentId)
   const globalVariables = useAppSelector(selectApiGlobalVariables)
   const isRunningCollection = useAppSelector(selectApiIsRunningCollection)
-  const [activeSection, setActiveSection] = useState<'requests' | 'history' | 'runs'>('requests')
+  const [activeSection, setActiveSection] = useState<'requests' | 'history' | 'runs' | 'mocks'>('requests')
   const [newCollectionName, setNewCollectionName] = useState('')
   const [showNewCollection, setShowNewCollection] = useState(false)
   const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false)
@@ -919,9 +920,24 @@ export function ApiSidebar() {
           <Play className="h-3 w-3" />
           Runs
         </button>
+        <button
+          onClick={() => setActiveSection('mocks')}
+          className={cn(
+            'flex-1 text-[11px] py-1.5 font-medium transition-colors flex items-center justify-center gap-1',
+            activeSection === 'mocks'
+              ? 'text-slate-900 dark:text-slate-100 border-b-2 border-blue-500'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+          )}
+        >
+          <Radio className="h-3 w-3" />
+          Mocks
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0">
+        {activeSection === 'mocks' && (
+          <ApiMocksPanel />
+        )}
         {activeSection === 'requests' && (
           <div className="py-1">
             <div className="flex items-center justify-between px-3 pt-2 pb-1">
