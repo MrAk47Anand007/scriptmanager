@@ -138,6 +138,7 @@ window.scriptManagerDesktop = {
     runScriptDataDriven: (payload: unknown) => invokeTauri('run_script_data_driven', { payload: payload as Record<string, unknown> }),
     saveApiAssertions: (payload: unknown) => invokeTauri('save_api_assertions', { payload: payload as Record<string, unknown> }),
     exportCollectionRunJunit: (runId: string) => invokeTauri<string>('export_collection_run_junit', { runId }),
+    importOpenApi: (payload: unknown) => invokeTauri('import_openapi', { payload: payload as Record<string, unknown> }),
     exportCollectionRunHtml: (runId: string) => invokeTauri<string>('export_collection_run_html', { runId }),
     saveSettings: (payload: Record<string, string>) => invokeTauri('save_settings', { payload }),
     readGithubGistSettings: () => invokeTauri('read_github_gist_settings'),

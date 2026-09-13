@@ -13,6 +13,7 @@ mod js_engine;
 mod mcp;
 mod models;
 mod notifications;
+mod openapi;
 mod observability;
 mod projects;
 mod plugins;
@@ -163,6 +164,7 @@ pub fn run() {
             api_client::list_data_sets,
             api_client::export_collection_run_junit,
             api_client::export_collection_run_html,
+            openapi::import_openapi,
             api_client::save_data_set,
             api_client::delete_data_set,
             api_client::list_api_assertions,

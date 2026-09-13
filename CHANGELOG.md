@@ -4,6 +4,7 @@
 
 ### Added
 
+- **QA testing core (Phase 1):** stored API pre-request/post-request scripts and response mappings now execute (boa engine, web-compatible `test()`/`expect()`/`vars` contract), a no-code Checks tab gates sends and collection runs, data-driven runs fan collections and scripts over CSV/JSON rows with per-row results, collection runs export JUnit XML and standalone HTML reports, and OpenAPI 3 documents (JSON/YAML) import into collections with templated paths, pre-filled bodies, and status checks.
 - **Dark and light mode:** the theme switcher (titlebar sun/moon menu and Settings → Appearance) now actually works — `ThemeProvider` was never mounted in the Tauri entry, so `.dark` never applied and toggles were silent no-ops. Defaults to system preference, persists per device, applies before first paint (no wrong-theme flash), and keeps the native Windows titlebar in sync. React Flow canvases (workflow builder) follow the theme via `colorMode` — minimap, zoom controls, and attribution were previously stuck light in dark mode.
 
 ### Fixed

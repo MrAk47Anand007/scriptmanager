@@ -300,3 +300,13 @@ export async function exportCollectionRunHtmlRuntime(runId: string, collectionNa
   }
   downloadText(`${collectionName || 'collection'}-run-report.html`, html, 'text/html')
 }
+
+export async function importOpenApiRuntime(payload: { spec: string; name?: string; addChecks?: boolean }): Promise<{ collectionId: string; collectionName: string; requestCount: number }> {
+  if (isTauri()) {
+    return invokeTauri('import_openapi', { payload })
+  }
+  if (window.scriptManagerDesktop?.runtime?.importOpenApi) {
+    return window.scriptManagerDesktop.runtime.importOpenApi(payload) as Promise<{ collectionId: string; collectionName: string; requestCount: number }>
+  }
+  throw new Error('Desktop runtime unavailable')
+}

@@ -87,6 +87,9 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { RunCollectionDataDialog } from './RunCollectionDataDialog'
+import { ImportOpenApiDialog } from './ImportOpenApiDialog'
+import { FileJson } from 'lucide-react'
+import { fetchApiCollections } from '@/features/api/apiSlice'
 import { getOperationError } from '@/lib/operationError'
 
 function blankRow(): KeyValueRow {
@@ -621,6 +624,7 @@ export function ApiSidebar() {
   }
 
   const [dataRunCollection, setDataRunCollection] = useState<ApiCollection | null>(null)
+  const [importOpenApiOpen, setImportOpenApiOpen] = useState(false)
   const handleRunCollection = async (collection: ApiCollection, rows?: Array<Record<string, string>>) => {
     try {
       const result = await dispatch(runApiCollection({
@@ -817,6 +821,13 @@ export function ApiSidebar() {
           <Plus className="h-3 w-3" />
           New
         </Button>
+        <button
+          className="h-6 w-6 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+          title="Import OpenAPI"
+          onClick={() => setImportOpenApiOpen(true)}
+        >
+          <FileJson className="h-3.5 w-3.5 mx-auto" />
+        </button>
         <button
           className="h-6 w-6 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
           title="Import Postman JSON"
@@ -1246,6 +1257,11 @@ export function ApiSidebar() {
         open={runDialogOpen}
         onOpenChange={setRunDialogOpen}
         run={activeCollectionRun}
+      />
+      <ImportOpenApiDialog
+        open={importOpenApiOpen}
+        onOpenChange={setImportOpenApiOpen}
+        onImported={() => { void dispatch(fetchApiCollections()) }}
       />
       {dataRunCollection && (
         <RunCollectionDataDialog

@@ -184,6 +184,7 @@ declare global {
         runScriptDataDriven: (payload: { scriptId: string; rows: Record<string, string>[] }) => Promise<unknown>
         saveApiAssertions: (payload: { requestId: string; assertions: unknown[] }) => Promise<unknown[]>
         exportCollectionRunJunit: (runId: string) => Promise<string>
+        importOpenApi: (payload: { spec: string; name?: string; addChecks?: boolean }) => Promise<{ collectionId: string; collectionName: string; requestCount: number }>
         exportCollectionRunHtml: (runId: string) => Promise<string>
         runApiCollection: (payload: { collectionId: string; environmentId: string | null }) => Promise<unknown>
         listProjects: () => Promise<unknown[]>

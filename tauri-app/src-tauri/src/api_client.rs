@@ -537,7 +537,7 @@ async fn list_collection_records(pool: &SqlitePool) -> Result<Vec<ApiCollectionR
     .map_err(|e| e.to_string())
 }
 
-async fn save_collection_record(
+pub(crate) async fn save_collection_record(
     pool: &SqlitePool,
     payload: SaveApiCollectionPayload,
 ) -> Result<ApiCollectionRecord, String> {
@@ -611,7 +611,7 @@ async fn get_collection_record(
     .map_err(|e| e.to_string())
 }
 
-async fn delete_collection_record(pool: &SqlitePool, id: &str) -> Result<String, String> {
+pub(crate) async fn delete_collection_record(pool: &SqlitePool, id: &str) -> Result<String, String> {
     let res = sqlx::query("DELETE FROM api_collections WHERE id = ? AND workspace_id = ?")
         .bind(id)
         .bind(WORKSPACE_ID)
@@ -655,7 +655,7 @@ async fn list_request_records(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn save_request_record(
+pub(crate) async fn save_request_record(
     pool: &SqlitePool,
     payload: SaveApiRequestPayload,
 ) -> Result<ApiRequestRecord, String> {
