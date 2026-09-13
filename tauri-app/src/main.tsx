@@ -233,6 +233,8 @@ window.scriptManagerDesktop = {
     saveWorkflowTrigger: (payload: { workflowId: string; type?: string; cron?: string; enabled: boolean }) =>
       invokeTauri('save_workflow_trigger', { payload }),
     deleteWorkflowTrigger: (triggerId: string) => invokeTauri('delete_workflow_trigger', { triggerId }),
+    rotateWorkflowWebhook: (workflowId: string) => invokeTauri('rotate_workflow_webhook', { workflowId }),
+    webhookListenerStatus: () => invokeTauri<number | null>('webhook_listener_status'),
     readSettings: () => invokeTauri('get_settings'),
     warmTerminal: (payload?: { sessionId?: string }) =>
       invokeTauri('create_terminal', { sessionId: payload?.sessionId ?? 'default' }),

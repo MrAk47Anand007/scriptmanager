@@ -55,6 +55,7 @@ pub fn run() {
                     .await
                     .expect("Failed to initialize database");
                 scheduler::spawn(handle.clone(), pool.clone());
+                http_service::spawn_webhook_startup(handle.clone(), pool.clone());
                 handle.manage(pool);
 
                 let paths = state::AppPaths::resolve(&handle)

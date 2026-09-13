@@ -2216,7 +2216,7 @@ pub(crate) async fn list_workflow_triggers_record(
     workflow_id: &str,
 ) -> Result<Vec<WorkflowTriggerRecord>, String> {
     let rows = sqlx::query(
-        "SELECT id, workflow_id, type, enabled, config_json, created_at, updated_at
+        "SELECT id, workflow_id, type, enabled, config_json, created_at, updated_at, webhook_token
          FROM workflow_triggers WHERE workflow_id = ? ORDER BY created_at",
     )
     .bind(workflow_id)
@@ -2225,7 +2225,7 @@ pub(crate) async fn list_workflow_triggers_record(
     .map_err(|e| e.to_string())?;
     rows.into_iter()
         .map(|row| {
-            Ok(trigger_row_to_record(
+            let mut record = trigger_row_to_record(
                 row.try_get(0).map_err(|e| e.to_string())?,
                 row.try_get(1).map_err(|e| e.to_string())?,
                 row.try_get(2).map_err(|e| e.to_string())?,
@@ -2233,7 +2233,20 @@ pub(crate) async fn list_workflow_triggers_record(
                 row.try_get(4).map_err(|e| e.to_string())?,
                 row.try_get(5).map_err(|e| e.to_string())?,
                 row.try_get(6).map_err(|e| e.to_string())?,
-            ))
+            );
+            // Webhook triggers surface their (public) token so the UI can show
+            // the URL; the HMAC secret stays encrypted and is only revealed at
+            // rotation time.
+            if record.trigger_type == "webhook" {
+                let token: Option<String> = row.try_get(7).map_err(|e| e.to_string())?;
+                let mut config = record.config.as_object().cloned().unwrap_or_default();
+                if let Some(token) = token {
+                    config.insert("token".to_string(), serde_json::Value::String(token));
+                }
+                config.insert("secret".to_string(), serde_json::Value::String("(hidden — rotate to get a new one)".to_string()));
+                record.config = serde_json::Value::Object(config);
+            }
+            Ok(record)
         })
         .collect()
 }

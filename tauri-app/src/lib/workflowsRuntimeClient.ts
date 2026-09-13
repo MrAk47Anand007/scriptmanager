@@ -236,3 +236,29 @@ export async function deleteWorkflowTriggerRuntime(triggerId: string): Promise<b
   }
   return false
 }
+
+export type WebhookInfoRuntime = {
+  listenerRunning: boolean | null
+  port: number
+  token: string
+  secret: string
+}
+
+export async function rotateWorkflowWebhookRuntime(workflowId: string): Promise<WebhookInfoRuntime> {
+  if (isTauri()) {
+    const result = await invokeTauri<{ token: string; secret: string }>('rotate_workflow_webhook', { workflowId })
+    return { listenerRunning: null, port: 8787, ...result }
+  }
+  if (window.scriptManagerDesktop?.runtime?.rotateWorkflowWebhook) {
+    return window.scriptManagerDesktop.runtime.rotateWorkflowWebhook(workflowId) as Promise<WebhookInfoRuntime>
+  }
+  throw new Error('Desktop runtime unavailable')
+}
+
+export async function webhookListenerStatusRuntime(): Promise<number | null> {
+  if (isTauri()) return invokeTauri<number | null>('webhook_listener_status')
+  if (window.scriptManagerDesktop?.runtime?.webhookListenerStatus) {
+    return window.scriptManagerDesktop.runtime.webhookListenerStatus()
+  }
+  return null
+}

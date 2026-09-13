@@ -753,6 +753,20 @@ async fn webhook_port(pool: &SqlitePool) -> u16 {
         .unwrap_or(DEFAULT_WEBHOOK_PORT)
 }
 
+/// Start the webhook listener in the background at app launch so external
+/// systems can trigger runs without anyone clicking anything. Failures (port
+/// taken) are logged, never fatal.
+pub fn spawn_webhook_startup(app_handle: AppHandle, pool: SqlitePool) {
+    tauri::async_runtime::spawn(async move {
+        let port = webhook_port(&pool).await;
+        let app_state = Arc::new(WebhookAppState { pool, app_handle });
+        match spawn_listener("webhook", "127.0.0.1", port, webhook_router(app_state)).await {
+            Ok(actual) => log::info!("Webhook listener ready on 127.0.0.1:{actual}"),
+            Err(error) => log::warn!("Webhook listener not started: {error}"),
+        }
+    });
+}
+
 #[tauri::command]
 pub async fn start_webhook_listener(
     pool: tauri::State<'_, SqlitePool>,

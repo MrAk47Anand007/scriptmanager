@@ -90,6 +90,8 @@ declare global {
         listWorkflowTriggers: (workflowId: string) => Promise<unknown[]>
         saveWorkflowTrigger: (payload: { workflowId: string; type?: string; cron?: string; enabled: boolean }) => Promise<unknown>
         deleteWorkflowTrigger: (triggerId: string) => Promise<boolean>
+        rotateWorkflowWebhook: (workflowId: string) => Promise<{ token: string; secret: string }>
+        webhookListenerStatus: () => Promise<number | null>
         listNotificationChannels: () => Promise<unknown[]>
         createNotificationChannel: (payload: { name: string; kind: string; config?: unknown }) => Promise<unknown>
         listNotificationRules: () => Promise<unknown[]>
