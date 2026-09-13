@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import { LoaderCircle, Play } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { listPluginsRuntime, removePluginRuntime, updatePluginRuntime } from '@/lib/pluginsRuntimeClient'
 import {
   getPluginSourceRuntime,

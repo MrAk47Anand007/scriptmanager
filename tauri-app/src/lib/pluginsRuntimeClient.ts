@@ -48,7 +48,7 @@ export async function savePluginSourceRuntime(pluginId: string, entryPoint: stri
 export async function runPluginRuntime(payload: { pluginId: string; input?: unknown }): Promise<{ result: unknown; logs: unknown[] }> {
   if (isTauri()) return invokeTauri('run_plugin', { payload }) as Promise<{ result: unknown; logs: unknown[] }>
   if (window.scriptManagerDesktop?.runtime?.runPlugin) {
-    return window.scriptManagerDesktop.runtime.runPlugin(payload)
+    return window.scriptManagerDesktop.runtime.runPlugin(payload) as Promise<{ result: unknown; logs: unknown[] }>
   }
   throw new Error('Desktop runtime unavailable')
 }

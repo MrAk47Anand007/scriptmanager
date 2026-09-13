@@ -197,6 +197,9 @@ window.scriptManagerDesktop = {
     sftpWriteText: (payload: unknown) => invokeTauri('sftp_write_text_file', { payload: payload as Record<string, unknown> }),
     sftpDelete: (payload: unknown) => invokeTauri('sftp_delete_entry', { payload: payload as Record<string, unknown>, isDir: Boolean((payload as { isDir?: boolean }).isDir) }),
     listReportEntities: (kind: string) => invokeTauri('list_report_entities', { kind }),
+    exportWorkspace: () => invokeTauri('export_workspace_bundle'),
+    importWorkspace: (payload: unknown) => invokeTauri('import_workspace_bundle', { payload: payload as Record<string, unknown> }),
+    publishWorkspaceToGit: (payload: unknown) => invokeTauri('publish_workspace_to_git', { payload: payload as Record<string, unknown> }),
     getEntityReport: (payload: { kind: string; entityId: string; window?: number }) =>
       invokeTauri('get_entity_report', { kind: payload.kind, entityId: payload.entityId, window: payload.window ?? null }),
     onRemoteExecEvent: (listener: DesktopListener<ScriptManagerDesktopRemoteExecEvent>) =>

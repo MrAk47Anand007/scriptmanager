@@ -232,6 +232,9 @@ declare global {
         sftpDelete: (payload: { profileId: string; path: string; isDir?: boolean }) => Promise<{ deleted: boolean }>
         listReportEntities: (kind: string) => Promise<unknown[]>
         getEntityReport: (payload: { kind: string; entityId: string; window?: number }) => Promise<unknown>
+        exportWorkspace: () => Promise<unknown>
+        importWorkspace: (payload: unknown) => Promise<unknown>
+        publishWorkspaceToGit: (payload: { repoPath: string; commitMessage: string }) => Promise<{ committed: boolean; commitId: string; repoPath: string }>
         listStorageProviders?: () => Promise<unknown[]>
         saveStorageProvider?: (payload: unknown) => Promise<unknown>
         deleteStorageProvider?: (id: string) => Promise<unknown>
