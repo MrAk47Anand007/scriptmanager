@@ -144,6 +144,8 @@ pub fn run() {
             workflows::retry_workflow_node,
             workflows::cancel_workflow_run,
             workflows::resolve_workflow_approval,
+            workflows::draft_workflow_from_prompt,
+            workflows::diagnose_node_failure,
             workflows::list_workflow_triggers,
             workflows::save_workflow_trigger,
             workflows::delete_workflow_trigger,

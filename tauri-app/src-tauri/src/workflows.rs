@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::{FromRow, Row, SqlitePool};
 use std::collections::{HashMap, HashSet};
 
@@ -2061,6 +2062,272 @@ pub async fn cancel_workflow_run_core(
     get_run_detail(pool, run_id).await
 }
 
+// ---------- AI authoring (natural language -> workflow) ----------
+
+#[derive(Debug, Deserialize)]
+pub struct DraftWorkflowFromPromptPayload {
+    pub prompt: String,
+    #[serde(rename = "profileId", default)]
+    pub profile_id: Option<String>,
+}
+
+fn workflow_authoring_prompt(user_prompt: &str) -> String {
+    format!(
+        "You are a workflow author for ScriptManager. Convert the user's request into ONE workflow definition.
+
+Node types and their required config:
+- script: {{\"scriptId\": \"<existing script id or exact name>\"}}
+- api: {{\"requestId\": \"<existing api request id or exact name>\"}}
+- delay: {{\"durationMs\": <milliseconds>}}
+- condition: {{\"left\": \"{{{{nodes.<id>.<field>}}}}\", \"operator\": \"equals|contains|gt|lt\", \"right\": <value>}} (has true/false output ports)
+- transform: {{\"mappings\": {{\"outputField\": \"{{{{nodes.<id>.<field>}}}}\"}}}}
+- approval: {{\"prompt\": \"what a human should approve\"}} (pauses the run)
+- notification: {{\"channel\": \"desktop\", \"message\": \"text with {{{{placeholders}}}}\"}}
+- agent: {{\"profileId\": \"<agent profile id>\", \"prompt\": \"instruction\"}}
+- foreach: {{\"items\": <array or {{{{nodes.<id>.<field>}}}}>, \"maxIterations\": <1-100>}} — body must be a \"steps\" object with its own nodes/edges where each step config may use {{{{item}}}}
+
+Rules:
+- Return ONLY a JSON object, no prose, no markdown fences.
+- Schema: {{\"schemaVersion\": 1, \"name\": \"...\", \"description\": \"...\", \"variables\": {{}}, \"nodes\": [{{\"id\": \"n1\", \"type\": \"...\", \"config\": {{...}}}}], \"edges\": [{{\"id\": \"e1\", \"source\": \"n1\", \"target\": \"n2\"}}]}}
+- Node ids: short unique strings (n1, n2, ...). Edge ids: e1, e2, ... Edges must reference existing nodes.
+- Condition nodes may add \"sourcePort\": \"true\" or \"false\" on edges leaving them.
+- Do not invent script/API ids; if the user names one, use its exact name.
+- If the user mentions a schedule, ignore it (triggers are configured separately).
+User request:
+{user_prompt}
+"
+    )
+}
+
+/// Extract the first balanced JSON object from an agent reply (tolerates
+/// markdown fences and trailing prose).
+fn extract_json_object(text: &str) -> Option<String> {
+    let start = text.find('{')?;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, ch) in text[start..].char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_string => escaped = true,
+            '"' => in_string = !in_string,
+            '{' if !in_string => depth += 1,
+            '}' if !in_string => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(text[start..=start + offset].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+#[tauri::command]
+pub async fn draft_workflow_from_prompt(
+    pool: tauri::State<'_, SqlitePool>,
+    payload: DraftWorkflowFromPromptPayload,
+) -> Result<serde_json::Value, String> {
+    let prompt = payload.prompt.trim();
+    if prompt.is_empty() {
+        return Err("Prompt is required".to_string());
+    }
+    let profile: Option<(String,)> = match payload.profile_id.as_deref().filter(|p| !p.is_empty()) {
+        Some(id) => sqlx::query_as("SELECT id FROM agent_profiles WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&*pool)
+            .await
+            .map_err(|e| e.to_string())?,
+        None => sqlx::query_as("SELECT id FROM agent_profiles ORDER BY created_at LIMIT 1")
+            .fetch_optional(&*pool)
+            .await
+            .map_err(|e| e.to_string())?,
+    };
+    let (profile_id,) = profile.ok_or_else(|| {
+        "No agent profile configured. Create an agent profile in the Agents panel first.".to_string()
+    })?;
+    let provider: String = sqlx::query_scalar("SELECT provider FROM agent_profiles WHERE id = ?")
+        .bind(&profile_id)
+        .fetch_optional(&*pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Agent profile not found".to_string())?;
+
+    let scratch = std::env::temp_dir().join("scriptmanager-agent-nodes");
+    std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
+    let result = crate::agents::run_provider_collect(
+        &pool,
+        &provider,
+        &workflow_authoring_prompt(prompt),
+        &scratch.to_string_lossy(),
+    )
+    .await?;
+
+    let json_text = extract_json_object(&result.reply)
+        .ok_or_else(|| format!("The agent did not return a workflow JSON object. Reply was: {}", truncate_reply(&result.reply)))?;
+    let definition: serde_json::Value = serde_json::from_str(&json_text)
+        .map_err(|error| format!("Agent returned invalid JSON: {error}. Raw: {}", truncate_reply(&json_text)))?;
+    let raw_def = parse_definition(&definition).map_err(|error| {
+        format!("The agent's workflow is structurally invalid: {error}. Ask it to fix the schema.")
+    })?;
+    let def = WfDefinition {
+        name: raw_def.name.clone(),
+        description: raw_def.description.clone(),
+        variables: raw_def.variables.clone(),
+        nodes: raw_def.nodes.clone(),
+        edges: raw_def.edges.clone(),
+    };
+    let issues: Vec<serde_json::Value> = validate_graph(&def)
+        .into_iter()
+        .map(|(code, message)| serde_json::json!({ "code": code, "message": message }))
+        .collect();
+
+    Ok(serde_json::json!({
+        "definition": definition,
+        "issues": issues,
+        "provider": provider,
+        "profileId": profile_id,
+    }))
+}
+
+fn truncate_reply(text: &str) -> String {
+    if text.chars().count() <= 800 {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(800).collect();
+    format!("{truncated}…")
+}
+
+// ---------- AI diagnosis ----------
+
+#[derive(Debug, Deserialize)]
+pub struct DiagnoseNodePayload {
+    #[serde(rename = "runId")]
+    pub run_id: String,
+    #[serde(rename = "nodeId")]
+    pub node_id: String,
+    #[serde(rename = "profileId", default)]
+    pub profile_id: Option<String>,
+}
+
+/// Assemble a redacted, agent-ready context for a failed workflow node:
+/// node error/output/input, the run input, and the script content for script
+/// nodes. Diagnosis never mutates anything — the reply comes back to the UI.
+#[tauri::command]
+pub async fn diagnose_node_failure(
+    pool: tauri::State<'_, SqlitePool>,
+    payload: DiagnoseNodePayload,
+) -> Result<serde_json::Value, String> {
+    let detail = get_run_detail(&pool, &payload.run_id).await?;
+    let node = detail
+        .node_runs
+        .iter()
+        .find(|n| n.node_id == payload.node_id)
+        .ok_or_else(|| "Workflow node run not found".to_string())?;
+
+    // Definition for this run's version: node type + config summary.
+    let version_id: String = sqlx::query_scalar("SELECT version_id FROM workflow_runs WHERE id = ?")
+        .bind(&payload.run_id)
+        .fetch_optional(&*pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Workflow run not found".to_string())?;
+    let definition_json: Option<String> = sqlx::query_scalar(
+        "SELECT definition_json FROM workflow_versions WHERE id = ?",
+    )
+    .bind(&version_id)
+    .fetch_optional(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let node_config = definition_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|def| {
+            def.get("nodes")
+                .and_then(Value::as_array)
+                .and_then(|nodes| {
+                    nodes
+                        .iter()
+                        .find(|node| node.get("id").and_then(Value::as_str) == Some(payload.node_id.as_str()))
+                        .cloned()
+                })
+        });
+
+    // Script content for script nodes (agents need the code to explain a fix).
+    let mut script_section = String::new();
+    if node.node_type == "script" {
+        if let Some(config) = node_config.as_ref() {
+            if let Some(script_ref) = config.pointer("/config/scriptId").and_then(Value::as_str) {
+                let content: Option<String> = sqlx::query_scalar(
+                    "SELECT content FROM scripts WHERE id = ?1 OR name = ?1 ORDER BY (id = ?1) DESC LIMIT 1",
+                )
+                .bind(script_ref)
+                .fetch_optional(&*pool)
+                .await
+                .map_err(|e| e.to_string())?;
+                if let Some(content) = content {
+                    script_section = format!("
+== Script content ==
+{}", truncate_reply(&content));
+                }
+            }
+        }
+    }
+
+    let context = serde_json::json!({
+        "nodeId": payload.node_id,
+        "nodeType": node.node_type,
+        "nodeConfig": node_config,
+        "error": node.error_json.as_ref().and_then(|raw| serde_json::from_str::<Value>(raw).ok()),
+        "output": node.output_json.as_ref().and_then(|raw| serde_json::from_str::<Value>(raw).ok()),
+        "input": node.input_json.as_ref().and_then(|raw| serde_json::from_str::<Value>(raw).ok()),
+        "runStatus": detail.status,
+    });
+
+    let prompt = format!(
+        "You are diagnosing a failed workflow node in ScriptManager. Explain the likely root cause in 2-4 sentences, then give a concrete fix (numbered steps or a corrected script snippet). Be specific about the actual error values; do not invent data.
+== Failure context ==
+{}{}",
+        serde_json::to_string_pretty(&context).unwrap_or_default(),
+        script_section
+    );
+
+    let profile: Option<(String,)> = match payload.profile_id.as_deref().filter(|p| !p.is_empty()) {
+        Some(id) => sqlx::query_as("SELECT id FROM agent_profiles WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&*pool)
+            .await
+            .map_err(|e| e.to_string())?,
+        None => sqlx::query_as("SELECT id FROM agent_profiles ORDER BY created_at LIMIT 1")
+            .fetch_optional(&*pool)
+            .await
+            .map_err(|e| e.to_string())?,
+    };
+    let (profile_id,) = profile.ok_or_else(|| {
+        "No agent profile configured. Create an agent profile in the Agents panel first.".to_string()
+    })?;
+    let provider: String = sqlx::query_scalar("SELECT provider FROM agent_profiles WHERE id = ?")
+        .bind(&profile_id)
+        .fetch_optional(&*pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Agent profile not found".to_string())?;
+
+    let scratch = std::env::temp_dir().join("scriptmanager-agent-nodes");
+    std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
+    let result = crate::agents::run_provider_collect(&pool, &provider, &prompt, &scratch.to_string_lossy()).await?;
+
+    Ok(serde_json::json!({
+        "diagnosis": result.reply,
+        "provider": provider,
+        "profileId": profile_id,
+    }))
+}
+
 // ---------- Approval resolution ----------
 
 #[derive(Debug, Deserialize)]
@@ -3065,6 +3332,22 @@ mod tests {
             triggers[0].config["nextRunAt"].as_str().unwrap(),
             "2020-01-01T00:00:00Z"
         );
+    }
+
+    #[test]
+    fn extract_json_object_handles_fences_and_prose() {
+        let fenced = "Here you go:
+```json
+{\"schemaVersion\": 1, \"name\": \"X\", \"nodes\": [], \"edges\": []}
+```
+Done!";
+        assert_eq!(
+            extract_json_object(fenced).unwrap(),
+            "{\"schemaVersion\": 1, \"name\": \"X\", \"nodes\": [], \"edges\": []}"
+        );
+        let nested = "prefix {\"a\": {\"b\": 1}, \"c\": \"}\"} suffix";
+        assert_eq!(extract_json_object(nested).unwrap(), "{\"a\": {\"b\": 1}, \"c\": \"}\"}");
+        assert_eq!(extract_json_object("no json here"), None);
     }
 
     #[tokio::test]

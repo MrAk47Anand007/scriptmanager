@@ -262,3 +262,23 @@ export async function webhookListenerStatusRuntime(): Promise<number | null> {
   }
   return null
 }
+
+export async function draftWorkflowRuntime(payload: { prompt: string; profileId?: string | null }): Promise<{ definition: unknown; issues: Array<{ code: string; message: string }>; provider: string; profileId: string }> {
+  if (isTauri()) {
+    return invokeTauri('draft_workflow_from_prompt', { payload })
+  }
+  if (window.scriptManagerDesktop?.runtime?.draftWorkflow) {
+    return window.scriptManagerDesktop.runtime.draftWorkflow(payload)
+  }
+  throw new Error('Desktop runtime unavailable')
+}
+
+export async function diagnoseNodeRuntime(payload: { runId: string; nodeId: string; profileId?: string | null }): Promise<{ diagnosis: string; provider: string }> {
+  if (isTauri()) {
+    return invokeTauri('diagnose_node_failure', { payload })
+  }
+  if (window.scriptManagerDesktop?.runtime?.diagnoseNode) {
+    return window.scriptManagerDesktop.runtime.diagnoseNode(payload)
+  }
+  throw new Error('Desktop runtime unavailable')
+}

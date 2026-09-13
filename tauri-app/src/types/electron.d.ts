@@ -91,6 +91,8 @@ declare global {
         saveWorkflowTrigger: (payload: { workflowId: string; type?: string; cron?: string; enabled: boolean }) => Promise<unknown>
         deleteWorkflowTrigger: (triggerId: string) => Promise<boolean>
         rotateWorkflowWebhook: (workflowId: string) => Promise<{ token: string; secret: string }>
+        draftWorkflow: (payload: { prompt: string; profileId?: string | null }) => Promise<{ definition: unknown; issues: Array<{ code: string; message: string }>; provider: string; profileId: string }>
+        diagnoseNode: (payload: { runId: string; nodeId: string; profileId?: string | null }) => Promise<{ diagnosis: string; provider: string }>
         webhookListenerStatus: () => Promise<number | null>
         listNotificationChannels: () => Promise<unknown[]>
         createNotificationChannel: (payload: { name: string; kind: string; config?: unknown }) => Promise<unknown>
