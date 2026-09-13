@@ -1796,6 +1796,242 @@ pub async fn save_api_assertions(
     .map_err(|e| e.to_string())
 }
 
+fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn html_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// JUnit XML for a collection run: one testsuite per data row (or a single
+/// suite when the run was not data-driven), one testcase per request with
+/// <failure> entries from assertion/test results.
+pub(crate) fn collection_run_junit_xml(run: &ApiCollectionRunRecord, results: &[Value]) -> String {
+    let mut suites: Vec<(String, Vec<&Value>)> = Vec::new();
+    for result in results {
+        let key = match result.get("rowIndex").and_then(Value::as_u64) {
+            Some(index) => format!(
+                "row {} {}",
+                index + 1,
+                result.get("row").map(stringify_json).unwrap_or_default()
+            ),
+            None => "requests".to_string(),
+        };
+        match suites.last_mut() {
+            Some((last_key, group)) if *last_key == key => group.push(result),
+            _ => suites.push((key, vec![result])),
+        }
+    }
+    if suites.is_empty() {
+        suites.push(("requests".to_string(), Vec::new()));
+    }
+
+    let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    xml.push_str(&format!(
+        "<testsuites name=\"{}\" tests=\"{}\" failures=\"{}\" time=\"{}\">\n",
+        xml_escape(&run.collection_name),
+        run.total_requests,
+        run.failed_requests,
+        run.duration_ms.unwrap_or(0) as f64 / 1000.0
+    ));
+    for (suite_name, group) in &suites {
+        let failures: usize = group
+            .iter()
+            .map(|r| usize::from(r.get("passed").and_then(Value::as_bool) != Some(true)))
+            .sum();
+        let time: f64 = group
+            .iter()
+            .filter_map(|r| r.get("duration").and_then(Value::as_i64))
+            .sum::<i64>() as f64
+            / 1000.0;
+        xml.push_str(&format!(
+            "  <testsuite name=\"{}\" tests=\"{}\" failures=\"{}\" time=\"{}\">\n",
+            xml_escape(suite_name),
+            group.len(),
+            failures,
+            time
+        ));
+        for result in group {
+            let passed = result.get("passed").and_then(Value::as_bool).unwrap_or(false);
+            let duration = result.get("duration").and_then(Value::as_i64).unwrap_or(0);
+            xml.push_str(&format!(
+                "    <testcase name=\"{}\" classname=\"{}\" time=\"{}\">\n",
+                xml_escape(&result.get("request_name").and_then(Value::as_str).unwrap_or("request")),
+                xml_escape(&format!("{}", result.get("status").and_then(Value::as_i64).unwrap_or(0))),
+                duration as f64 / 1000.0
+            ));
+            if !passed {
+                let message = result
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .filter(|message| !message.is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| {
+                        let failed_tests: Vec<String> = result
+                            .get("test_results")
+                            .and_then(Value::as_array)
+                            .map(|tests| {
+                                tests
+                                    .iter()
+                                    .filter(|t| t.get("passed").and_then(Value::as_bool) != Some(true))
+                                    .filter_map(|t| t.get("message").and_then(Value::as_str).map(str::to_string))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if failed_tests.is_empty() {
+                            format!("HTTP status {}", result.get("status").and_then(Value::as_i64).unwrap_or(0))
+                        } else {
+                            failed_tests.join("; ")
+                        }
+                    });
+                xml.push_str(&format!(
+                    "      <failure message=\"{}\">{}</failure>\n",
+                    xml_escape(message.lines().next().unwrap_or("failed")),
+                    xml_escape(&message)
+                ));
+            }
+            xml.push_str("    </testcase>\n");
+        }
+        xml.push_str("  </testsuite>\n");
+    }
+    xml.push_str("</testsuites>\n");
+    xml
+}
+
+/// Standalone, theme-aware HTML report for a collection run.
+pub(crate) fn collection_run_html(run: &ApiCollectionRunRecord, results: &[Value]) -> String {
+    let mut rows_html = String::new();
+    for result in results {
+        let passed = result.get("passed").and_then(Value::as_bool).unwrap_or(false);
+        let row_index = result.get("rowIndex").and_then(Value::as_u64);
+        let tests: Vec<String> = result
+            .get("test_results")
+            .and_then(Value::as_array)
+            .map(|tests| {
+                tests
+                    .iter()
+                    .map(|t| {
+                        let ok = t.get("passed").and_then(Value::as_bool).unwrap_or(false);
+                        format!(
+                            "<li class=\"{}\">{}</li>",
+                            if ok { "pass" } else { "fail" },
+                            html_escape(&format!(
+                                "{}{}",
+                                t.get("name").and_then(Value::as_str).unwrap_or("test"),
+                                t.get("message")
+                                    .and_then(Value::as_str)
+                                    .filter(|m| !m.is_empty())
+                                    .map(|m| format!(" — {m}"))
+                                    .unwrap_or_default()
+                            ))
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        rows_html.push_str(&format!(
+            "<tr class=\"{}\"><td>{}</td><td>{}</td><td>{}</td><td>{}ms</td><td>{}</td></tr>\n",
+            if passed { "pass" } else { "fail" },
+            row_index
+                .map(|index| format!("<span class=\"chip\">row {}</span> ", index + 1))
+                .unwrap_or_default(),
+            html_escape(&result.get("request_name").and_then(Value::as_str).unwrap_or("request")),
+            result.get("status").and_then(Value::as_i64).unwrap_or(0),
+            result.get("duration").and_then(Value::as_i64).unwrap_or(0),
+            if tests.is_empty() {
+                "—".to_string()
+            } else {
+                format!("<ul class=\"tests\">{}</ul>", tests.join(""))
+            }
+        ));
+    }
+    format!(
+        r#"<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>{name} — run report</title>
+<style>
+  :root {{ color-scheme: light dark; }}
+  body {{ font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem auto; max-width: 60rem; padding: 0 1rem; background: #faf9f5; color: #21201c; }}
+  @media (prefers-color-scheme: dark) {{ body {{ background: #1c1b1a; color: #ededec; }} }}
+  h1 {{ font-size: 1.2rem; }} .cards {{ display: flex; gap: .75rem; margin: 1rem 0; flex-wrap: wrap; }}
+  .card {{ border: 1px solid rgba(128,128,128,.3); border-radius: .5rem; padding: .6rem 1rem; }}
+  .card b {{ display: block; font-size: 1.3rem; }}
+  table {{ border-collapse: collapse; width: 100%; font-size: .85rem; }}
+  th, td {{ text-align: left; border-bottom: 1px solid rgba(128,128,128,.25); padding: .5rem .6rem; vertical-align: top; }}
+  tr.fail td {{ background: rgba(220,38,38,.07); }}
+  .pass {{ color: #16a34a; }} .fail {{ color: #dc2626; }}
+  .chip {{ border: 1px solid rgba(128,128,128,.4); border-radius: .6rem; padding: 0 .45rem; font-family: ui-monospace, monospace; font-size: .72rem; }}
+  ul.tests {{ margin: 0; padding-left: 1rem; }}
+</style></head><body>
+<h1>{name} — run report</h1>
+<div class="cards">
+  <div class="card"><b>{total}</b>requests</div>
+  <div class="card"><b class="pass">{passed}</b>passed</div>
+  <div class="card"><b class="fail">{failed}</b>failed</div>
+  <div class="card"><b>{duration}ms</b>duration</div>
+  <div class="card"><b>{status}</b>status</div>
+</div>
+<table><thead><tr><th>Request</th><th>Status</th><th>Duration</th><th>Checks</th></tr></thead>
+<tbody>
+{rows}
+</tbody></table>
+<p style="opacity:.6;font-size:.75rem">Generated by ScriptManager · {finished}</p>
+</body></html>
+"#,
+        name = html_escape(&run.collection_name),
+        total = run.total_requests,
+        passed = run.passed_requests,
+        failed = run.failed_requests,
+        duration = run.duration_ms.unwrap_or(0),
+        status = html_escape(&run.status),
+        rows = rows_html,
+        finished = html_escape(&run.finished_at.clone().unwrap_or_default()),
+    )
+}
+
+async fn load_collection_run_results(
+    pool: &SqlitePool,
+    run_id: &str,
+) -> Result<(ApiCollectionRunRecord, Vec<Value>), String> {
+    let run = sqlx::query_as::<_, ApiCollectionRunRecord>(
+        "SELECT id, collection_id, collection_name, environment_id, environment_name, status,
+            total_requests, passed_requests, failed_requests, results, started_at,
+            finished_at, duration_ms
+         FROM api_collection_runs WHERE id = ?",
+    )
+    .bind(run_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Collection run not found".to_string())?;
+    let results: Vec<Value> = serde_json::from_str(&run.results).unwrap_or_default();
+    Ok((run, results))
+}
+
+#[tauri::command]
+pub async fn export_collection_run_junit(
+    pool: tauri::State<'_, SqlitePool>,
+    run_id: String,
+) -> Result<String, String> {
+    let (run, results) = load_collection_run_results(&pool, &run_id).await?;
+    Ok(collection_run_junit_xml(&run, &results))
+}
+
+#[tauri::command]
+pub async fn export_collection_run_html(
+    pool: tauri::State<'_, SqlitePool>,
+    run_id: String,
+) -> Result<String, String> {
+    let (run, results) = load_collection_run_results(&pool, &run_id).await?;
+    Ok(collection_run_html(&run, &results))
+}
+
 #[tauri::command]
 pub async fn list_api_collection_runs(
     pool: tauri::State<'_, SqlitePool>,
@@ -2716,5 +2952,70 @@ bruno,t2
         .await
         .unwrap();
         assert!(result.is_empty());
+    }
+
+    fn sample_run() -> ApiCollectionRunRecord {
+        ApiCollectionRunRecord {
+            id: "run-1".to_string(),
+            collection_id: "col-1".to_string(),
+            collection_name: "Smoke <suite>".to_string(),
+            environment_id: None,
+            environment_name: None,
+            status: "completed_with_failures".to_string(),
+            total_requests: 2,
+            passed_requests: 1,
+            failed_requests: 1,
+            results: "[]".to_string(),
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            finished_at: Some("2026-01-01T00:00:05Z".to_string()),
+            duration_ms: Some(5000),
+        }
+    }
+
+    #[test]
+    fn junit_export_groups_rows_and_escapes() {
+        let run = sample_run();
+        let results = vec![
+            serde_json::json!({
+                "rowIndex": 0, "row": {"who": "ana"}, "request_name": "login <ok>",
+                "status": 200, "duration": 100, "passed": true, "failed_tests": 0,
+                "test_results": [], "error": null
+            }),
+            serde_json::json!({
+                "rowIndex": 1, "row": {"who": "bruno"}, "request_name": "login fail",
+                "status": 500, "duration": 50, "passed": false, "failed_tests": 1,
+                "test_results": [{"name": "status", "passed": false, "message": "status 500, expected 200"}],
+                "error": null
+            }),
+        ];
+        let xml = collection_run_junit_xml(&run, &results);
+        assert!(xml.contains("<testsuites name=\"Smoke &lt;suite&gt;\" tests=\"2\" failures=\"1\""));
+        assert!(xml.contains("row 1"));
+        assert!(xml.contains("row 2"));
+        assert!(xml.contains("<failure message=\"status 500, expected 200\""));
+        assert_eq!(xml.matches("<testsuite ").count(), 2);
+    }
+
+    #[test]
+    fn junit_export_single_suite_without_rows() {
+        let run = sample_run();
+        let xml = collection_run_junit_xml(&run, &[]);
+        assert!(xml.contains("name=\"requests\""));
+        assert!(xml.contains("tests=\"0\""));
+    }
+
+    #[test]
+    fn html_export_contains_summary_and_rows() {
+        let run = sample_run();
+        let results = vec![serde_json::json!({
+            "rowIndex": 0, "request_name": "check", "status": 200,
+            "duration": 120, "passed": true, "failed_tests": 0,
+            "test_results": [{"name": "status", "passed": true, "message": ""}]
+        })];
+        let html = collection_run_html(&run, &results);
+        assert!(html.contains("Smoke &lt;suite&gt;"));
+        assert!(html.contains("row 1"));
+        assert!(html.contains("check"));
+        assert!(html.contains("prefers-color-scheme"));
     }
 }

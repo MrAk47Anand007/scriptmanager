@@ -1,5 +1,10 @@
 
+import { Download } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { exportCollectionRunHtmlRuntime, exportCollectionRunJunitRuntime } from '@/lib/apiRuntimeClient'
+import { getOperationError } from '@/lib/operationError'
+import { toast } from '@/components/ui/toast'
 import type { ApiCollectionRun } from '@/features/api/apiSlice'
 import { cn } from '@/lib/utils'
 
@@ -18,7 +23,35 @@ export function CollectionRunDialog({ open, onOpenChange, run }: CollectionRunDi
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl">
         <DialogHeader>
-          <DialogTitle>{run ? `${run.collection_name} Run` : 'Collection Run'}</DialogTitle>
+          <div className="flex items-center justify-between gap-2">
+            <DialogTitle>{run ? `${run.collection_name} Run` : 'Collection Run'}</DialogTitle>
+            {run && (
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  className="gap-1.5 h-8 text-xs"
+                  onClick={() => {
+                    void exportCollectionRunJunitRuntime(run.id, run.collection_name)
+                      .then(() => toast.success('JUnit XML downloaded'))
+                      .catch((error) => toast.error(getOperationError(error, 'Export failed')))
+                  }}
+                >
+                  <Download className="h-3.5 w-3.5" /> JUnit XML
+                </Button>
+                <Button
+                  variant="outline"
+                  className="gap-1.5 h-8 text-xs"
+                  onClick={() => {
+                    void exportCollectionRunHtmlRuntime(run.id, run.collection_name)
+                      .then(() => toast.success('HTML report downloaded'))
+                      .catch((error) => toast.error(getOperationError(error, 'Export failed')))
+                  }}
+                >
+                  <Download className="h-3.5 w-3.5" /> HTML report
+                </Button>
+              </div>
+            )}
+          </div>
           <DialogDescription>
             {run ? `${run.passed_requests}/${run.total_requests} requests passed${run.environment_name ? ` using ${run.environment_name}` : ''}.` : 'Run details'}
           </DialogDescription>

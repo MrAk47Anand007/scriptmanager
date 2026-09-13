@@ -49,6 +49,8 @@ declare global {
         getProviderPaths: () => Promise<unknown>
         onEvent: (listener: (payload: { sessionId: string; event: unknown }) => void) => () => void
       }
+      exportCollectionRunJunit?: (runId: string) => Promise<string>
+      exportCollectionRunHtml?: (runId: string) => Promise<string>
       getMcpStatus?: () => Promise<unknown>
       installMcpConfig?: (payload: { target: string }) => Promise<unknown>
       runtime?: {
@@ -181,6 +183,8 @@ declare global {
         deleteDataSet: (id: string) => Promise<boolean>
         runScriptDataDriven: (payload: { scriptId: string; rows: Record<string, string>[] }) => Promise<unknown>
         saveApiAssertions: (payload: { requestId: string; assertions: unknown[] }) => Promise<unknown[]>
+        exportCollectionRunJunit: (runId: string) => Promise<string>
+        exportCollectionRunHtml: (runId: string) => Promise<string>
         runApiCollection: (payload: { collectionId: string; environmentId: string | null }) => Promise<unknown>
         listProjects: () => Promise<unknown[]>
         saveProject: (payload: unknown) => Promise<unknown>

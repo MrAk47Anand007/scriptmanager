@@ -161,6 +161,8 @@ pub fn run() {
             api_client::run_api_collection,
             api_client::list_api_collection_runs,
             api_client::list_data_sets,
+            api_client::export_collection_run_junit,
+            api_client::export_collection_run_html,
             api_client::save_data_set,
             api_client::delete_data_set,
             api_client::list_api_assertions,

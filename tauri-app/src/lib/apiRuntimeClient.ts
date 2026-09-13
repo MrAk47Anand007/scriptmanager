@@ -266,3 +266,37 @@ export async function runScriptDataDrivenRuntime(payload: { scriptId: string; ro
   }
   throw new Error('Desktop runtime unavailable')
 }
+
+function downloadText(fileName: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  anchor.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+export async function exportCollectionRunJunitRuntime(runId: string, collectionName: string) {
+  let xml = ''
+  if (isTauri()) {
+    xml = await invokeTauri<string>('export_collection_run_junit', { runId })
+  } else if (window.scriptManagerDesktop?.exportCollectionRunJunit) {
+    xml = await window.scriptManagerDesktop.exportCollectionRunJunit(runId)
+  } else {
+    throw new Error('Desktop runtime unavailable')
+  }
+  downloadText(`${collectionName || 'collection'}-run.xml`, xml, 'application/xml')
+}
+
+export async function exportCollectionRunHtmlRuntime(runId: string, collectionName: string) {
+  let html = ''
+  if (isTauri()) {
+    html = await invokeTauri<string>('export_collection_run_html', { runId })
+  } else if (window.scriptManagerDesktop?.exportCollectionRunHtml) {
+    html = await window.scriptManagerDesktop.exportCollectionRunHtml(runId)
+  } else {
+    throw new Error('Desktop runtime unavailable')
+  }
+  downloadText(`${collectionName || 'collection'}-run-report.html`, html, 'text/html')
+}
