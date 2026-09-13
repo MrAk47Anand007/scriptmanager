@@ -263,6 +263,8 @@ window.scriptManagerDesktop = {
   // Top-level namespace per the bridge contract (src/types/electron.d.ts) —
   // the Agents panel reads window.scriptManagerDesktop.agents, so nesting it
   // inside runtime would make every agent feature invisible in the desktop app.
+  onWorkflowEvent: (listener: DesktopListener<{ type: string; runId: string; nodeId?: string; status?: string }>) =>
+    subscribe('workflow-event', listener),
   agents: {
     discover: () => invokeTauri('discover_agent_providers'),
     run: (payload: unknown) => invokeTauri('run_agent', { payload: payload as Record<string, unknown> }),

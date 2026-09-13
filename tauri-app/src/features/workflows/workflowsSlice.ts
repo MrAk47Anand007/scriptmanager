@@ -81,8 +81,8 @@ export const fetchWorkflowRuns = createAsyncThunk('workflows/fetchRuns', async (
 export const fetchWorkflowRun = createAsyncThunk('workflows/fetchRun', async (runId: string) => {
   return fetchWorkflowRunRuntime(runId)
 })
-export const retryWorkflowNode = createAsyncThunk('workflows/retryNode', async ({runId,nodeId}:{runId:string;nodeId:string}) => {
-  return retryWorkflowNodeRuntime({ runId, nodeId })
+export const retryWorkflowNode = createAsyncThunk('workflows/retryNode', async ({runId,nodeId,fromHere}:{runId:string;nodeId:string;fromHere?:boolean}) => {
+  return retryWorkflowNodeRuntime({ runId, nodeId, fromHere })
 })
 export const cancelWorkflowRun = createAsyncThunk('workflows/cancelRun', async (runId:string) => {
   return cancelWorkflowRunRuntime(runId)

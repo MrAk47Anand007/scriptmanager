@@ -56,6 +56,7 @@ declare global {
       stopMockServer?: (id: string) => Promise<unknown>
       listMockRequests?: (serverId: string) => Promise<unknown[]>
       clearMockRequests?: (serverId: string) => Promise<boolean>
+      onWorkflowEvent?: (listener: (event: { type: string; runId: string; nodeId?: string; status?: string }) => void) => () => void
       exportCollectionRunJunit?: (runId: string) => Promise<string>
       exportCollectionRunHtml?: (runId: string) => Promise<string>
       getMcpStatus?: () => Promise<unknown>

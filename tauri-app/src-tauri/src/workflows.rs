@@ -118,6 +118,10 @@ pub struct RetryNodePayload {
     pub run_id: String,
     #[serde(rename = "nodeId")]
     pub node_id: String,
+    /// Allow re-running a succeeded node (run-from-here debugging): resets the
+    /// node and everything downstream of it.
+    #[serde(rename = "fromHere", default)]
+    pub from_here: bool,
 }
 
 // ---------- Definition model ----------
@@ -859,6 +863,17 @@ async fn is_cancel_requested(pool: &SqlitePool, run_id: &str) -> bool {
     .await
     .unwrap_or(None);
     flag.map(|v| !v.is_empty()).unwrap_or(false)
+}
+
+fn emit_node_event(run_id: &str, node_id: &str, kind: &str, status: Option<&str>, attempt: i64) {
+    emit_run_event(serde_json::json!({
+        "type": kind,
+        "runId": run_id,
+        "nodeId": node_id,
+        "status": status,
+        "attempt": attempt,
+        "at": now_rfc3339(),
+    }));
 }
 
 async fn start_node(
@@ -1818,6 +1833,22 @@ async fn execute_node(
     }
 }
 
+// ---------- Live run events ----------
+
+/// Broadcast bus for live workflow progress. execute_layers publishes;
+/// the GUI forwards to the webview as `workflow-event` so the execution
+/// drawer updates instantly (2s polling remains as fallback).
+static WORKFLOW_EVENTS: std::sync::LazyLock<tokio::sync::broadcast::Sender<Value>> =
+    std::sync::LazyLock::new(|| tokio::sync::broadcast::channel(256).0);
+
+pub fn subscribe_workflow_events() -> tokio::sync::broadcast::Receiver<Value> {
+    WORKFLOW_EVENTS.subscribe()
+}
+
+fn emit_run_event(event: Value) {
+    let _ = WORKFLOW_EVENTS.send(event);
+}
+
 // ---------- Run driver ----------
 
 #[allow(clippy::too_many_arguments)]
@@ -1926,6 +1957,7 @@ async fn execute_layers(
             let outcome = loop {
                 attempt += 1;
                 start_node(pool, run_id, node_id, attempt, &input).await?;
+                emit_node_event(run_id, node_id, "nodeStarted", Some("running"), attempt);
                 let node_owned = node.clone();
                 let input_owned = input.clone();
                 let variables_owned = def.variables.clone();
@@ -1952,6 +1984,7 @@ async fn execute_layers(
             match outcome {
                 Ok(NodeOutcome::Succeeded { output, selected_port }) => {
                     finish_node(pool, run_id, node_id, attempt, STATUS_SUCCEEDED, Some(&output), None, selected_port.as_deref()).await?;
+                    emit_node_event(run_id, node_id, "nodeFinished", Some(STATUS_SUCCEEDED), attempt);
                     statuses.insert(node_id.clone(), STATUS_SUCCEEDED.to_string());
                     if let Some(port) = selected_port {
                         selected_ports.insert(node_id.clone(), port);
@@ -1960,6 +1993,7 @@ async fn execute_layers(
                 }
                 Ok(NodeOutcome::Paused { output }) => {
                     finish_node(pool, run_id, node_id, attempt, STATUS_WAITING_APPROVAL, Some(&output), None, None).await?;
+                    emit_node_event(run_id, node_id, "nodeFinished", Some(STATUS_WAITING_APPROVAL), attempt);
                     statuses.insert(node_id.clone(), STATUS_WAITING_APPROVAL.to_string());
                     outputs.insert(node_id.clone(), output);
                     finish_run(pool, run_id, STATUS_PAUSED, None, None).await?;
@@ -1978,6 +2012,7 @@ async fn execute_layers(
                     }
                     let error = serde_json::json!({ "message": message });
                     finish_node(pool, run_id, node_id, attempt, STATUS_FAILED, None, Some(&error), None).await?;
+                    emit_node_event(run_id, node_id, "nodeFinished", Some(STATUS_FAILED), attempt);
                     statuses.insert(node_id.clone(), STATUS_FAILED.to_string());
                     any_failed = true;
                     if !continue_on_failure {
@@ -1995,6 +2030,7 @@ async fn execute_layers(
     }
     let summary = serde_json::json!({ "nodes": outputs });
     finish_run(pool, run_id, STATUS_SUCCEEDED, Some(&summary), None).await?;
+    emit_run_event(serde_json::json!({ "type": "runFinished", "runId": run_id, "status": STATUS_SUCCEEDED, "at": now_rfc3339() }));
     Ok(summary)
 }
 
@@ -2234,6 +2270,7 @@ pub(crate) async fn retry_node_record(
     pool: &SqlitePool,
     run_id: &str,
     node_id: &str,
+    from_here: bool,
 ) -> Result<WorkflowRunDetail, String> {
     let detail = get_run_detail(pool, run_id).await?;
     let node = detail
@@ -2241,7 +2278,12 @@ pub(crate) async fn retry_node_record(
         .iter()
         .find(|n| n.node_id == node_id)
         .ok_or_else(|| "Workflow node run not found".to_string())?;
-    if !["failed", "cancelled", "skipped"].contains(&node.status.as_str()) {
+    let allowed = if from_here {
+        matches!(node.status.as_str(), "failed" | "cancelled" | "skipped" | "succeeded")
+    } else {
+        ["failed", "cancelled", "skipped"].contains(&node.status.as_str())
+    };
+    if !allowed {
         return Err("Only failed, cancelled, or skipped nodes can be retried".to_string());
     }
     let run_row: Option<(String, String)> = sqlx::query_as(
@@ -2305,7 +2347,7 @@ pub async fn retry_workflow_node(
     pool: tauri::State<'_, SqlitePool>,
     payload: RetryNodePayload,
 ) -> Result<WorkflowRunDetail, String> {
-    retry_node_record(&pool, &payload.run_id, &payload.node_id).await
+    retry_node_record(&pool, &payload.run_id, &payload.node_id, payload.from_here).await
 }
 
 #[tauri::command]

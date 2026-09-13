@@ -30,6 +30,23 @@ export function WorkflowExecutionDrawer() {
   const [diagnosis, setDiagnosis] = useState<string | null>(null)
   const [diagnosing, setDiagnosing] = useState(false)
   useEffect(()=>{if(workflow)void dispatch(fetchWorkflowRuns(workflow.id))},[dispatch,workflow?.id])
+  // Live progress: workflow-event pushes trigger an immediate refresh so the
+  // drawer tracks runs without waiting for the 2s poll.
+  useEffect(() => {
+    const subscribe = window.scriptManagerDesktop?.onWorkflowEvent
+    if (!subscribe) return
+    let inFlight = false
+    const unsubscribe = subscribe((event) => {
+      if (!workflow?.id || inFlight) return
+      if (event.type === 'runFinished' && detail && event.runId !== detail.id) return
+      inFlight = true
+      void Promise.all([
+        dispatch(fetchWorkflowRuns(workflow.id)),
+        detail ? dispatch(fetchWorkflowRun(detail.id)) : Promise.resolve(),
+      ]).finally(() => { inFlight = false })
+    })
+    return () => unsubscribe()
+  }, [dispatch, workflow?.id, detail?.id, detail])
   const shouldPoll = runs.some((run) => isWorkflowRunActive(run.status)) || isWorkflowRunActive(detail?.status) || detail?.status==='paused'
   useEffect(() => {
     if (!workflow?.id || !shouldPoll) return
@@ -56,9 +73,10 @@ export function WorkflowExecutionDrawer() {
       toast.error(getOperationError(error, 'Failed to cancel workflow run'))
     }
   }
-  const handleRetry = async (runId: string, nodeId: string) => {
+  const handleRetry = async (runId: string, nodeId: string, fromHere?: boolean) => {
     try {
-      await dispatch(retryWorkflowNode({ runId, nodeId })).unwrap()
+      await dispatch(retryWorkflowNode({ runId, nodeId, fromHere })).unwrap()
+      if (fromHere) toast.success('Re-running from this node')
     } catch (error) {
       toast.error(getOperationError(error, 'Failed to retry workflow node'))
     }
@@ -92,7 +110,7 @@ export function WorkflowExecutionDrawer() {
     {expanded&&<div className="flex h-[calc(100%-2.25rem)] border-t border-wb-border">
       <div className="w-52 shrink-0 overflow-y-auto border-r border-wb-border p-2">{runs.map((run)=><button key={run.id} onClick={()=>{dispatch(setSelectedExecution(run.id));void dispatch(fetchWorkflowRun(run.id))}} className={`mb-1 w-full rounded px-2 py-2 text-left ${detail?.id===run.id?'bg-muted':'hover:bg-muted/60'}`}><span className="flex items-center justify-between text-[11px] font-medium"><span>{labels[run.status]??run.status}</span><span className="text-[9px] text-muted-foreground">{new Date(run.createdAt).toLocaleTimeString()}</span></span><span className="mt-1 block truncate text-[9px] text-muted-foreground">{run.id}</span></button>)}{runs.length===0&&<p className="p-3 text-center text-[10px] text-muted-foreground">No runs yet.</p>}</div>
       <div className="min-w-0 flex-1 overflow-y-auto p-3">{!detail?<p className="text-xs text-muted-foreground">Select an execution to inspect it.</p>:!node?<div><div className="flex items-center gap-2"><span className="text-sm font-semibold">{labels[detail.status]??detail.status}</span><span className="text-[10px] text-muted-foreground">{duration(detail.startedAt, detail.finishedAt)!==null&&`ran in ${duration(detail.startedAt, detail.finishedAt)}`}</span></div>{detail.status==='paused'&&<div className="mt-2 flex items-center gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-700 dark:text-amber-300"><ShieldAlert className="h-3.5 w-3.5 shrink-0"/>Paused at an approval node — select it below to approve or reject.</div>}<p className="mt-1 text-[11px] text-muted-foreground">Select a node to inspect its execution data.</p><div className="mt-3 flex flex-wrap gap-1">{detail.nodeRuns.map((item)=><button key={item.nodeId} onClick={()=>dispatch(selectNode(item.nodeId))} className="rounded border border-wb-border px-2 py-1 text-[10px] hover:bg-muted">{item.nodeId} · {labels[item.status]??item.status}{item.status==='waiting_approval'&&' ⚠'}</button>)}</div></div>:!nodeRun?<p className="text-xs text-muted-foreground">This node has no data in the selected run.</p>:<div>
-        <div className="flex items-center gap-2"><span className="text-sm font-semibold">{node.name}</span><span className="text-[10px] text-muted-foreground">{labels[nodeRun.status]??nodeRun.status}</span><span className="text-[10px] text-muted-foreground">Attempt {nodeRun.attempt}</span>{duration(nodeRun.startedAt, nodeRun.finishedAt)!==null&&<span className="text-[10px] text-muted-foreground">· {duration(nodeRun.startedAt, nodeRun.finishedAt)}</span>}{nodeRun.status==='failed'&&<span className="ml-auto flex items-center gap-1"><button aria-label={`Diagnose ${node.name} with AI`} disabled={diagnosing} onClick={()=>void handleDiagnose(detail.id,node.id)} className="flex items-center gap-1 rounded border border-accent-brand/50 px-2 py-1 text-[10px] text-accent-brand hover:bg-accent-brand/10 disabled:opacity-50">{diagnosing?<LoaderCircle className="h-3 w-3 animate-spin"/>:<Bot className="h-3 w-3"/>}Diagnose</button><button aria-label={`Retry ${node.name}`} onClick={()=>void handleRetry(detail.id,node.id)} className="flex items-center gap-1 rounded bg-accent-brand px-2 py-1 text-[10px] text-white"><RotateCcw className="h-3 w-3"/>Retry</button></span>}{nodeRun.status==='waiting_approval'&&<span className="ml-auto flex items-center gap-1"><button aria-label={`Approve ${node.name}`} onClick={()=>void handleApproval(detail.id,node.id,true)} className="flex items-center gap-1 rounded bg-emerald-600 px-2 py-1 text-[10px] text-white hover:opacity-90"><Check className="h-3 w-3"/>Approve</button><button aria-label={`Reject ${node.name}`} onClick={()=>void handleApproval(detail.id,node.id,false)} className="flex items-center gap-1 rounded bg-destructive px-2 py-1 text-[10px] text-white hover:opacity-90"><X className="h-3 w-3"/>Reject</button></span>}</div>
+        <div className="flex items-center gap-2"><span className="text-sm font-semibold">{node.name}</span><span className="text-[10px] text-muted-foreground">{labels[nodeRun.status]??nodeRun.status}</span><span className="text-[10px] text-muted-foreground">Attempt {nodeRun.attempt}</span>{duration(nodeRun.startedAt, nodeRun.finishedAt)!==null&&<span className="text-[10px] text-muted-foreground">· {duration(nodeRun.startedAt, nodeRun.finishedAt)}</span>}{nodeRun.status==='failed'&&<span className="ml-auto flex items-center gap-1"><button aria-label={`Diagnose ${node.name} with AI`} disabled={diagnosing} onClick={()=>void handleDiagnose(detail.id,node.id)} className="flex items-center gap-1 rounded border border-accent-brand/50 px-2 py-1 text-[10px] text-accent-brand hover:bg-accent-brand/10 disabled:opacity-50">{diagnosing?<LoaderCircle className="h-3 w-3 animate-spin"/>:<Bot className="h-3 w-3"/>}Diagnose</button><button aria-label={`Retry ${node.name}`} onClick={()=>void handleRetry(detail.id,node.id)} className="flex items-center gap-1 rounded bg-accent-brand px-2 py-1 text-[10px] text-white"><RotateCcw className="h-3 w-3"/>Retry</button></span>}{nodeRun.status==='succeeded'&&<button aria-label={`Run from ${node.name}`} onClick={()=>void handleRetry(detail.id,node.id,true)} className="ml-auto flex items-center gap-1 rounded border border-wb-border px-2 py-1 text-[10px] hover:bg-muted" title="Reset this node and everything downstream, then re-run">Run from here</button>}{nodeRun.status==='waiting_approval'&&<span className="ml-auto flex items-center gap-1"><button aria-label={`Approve ${node.name}`} onClick={()=>void handleApproval(detail.id,node.id,true)} className="flex items-center gap-1 rounded bg-emerald-600 px-2 py-1 text-[10px] text-white hover:opacity-90"><Check className="h-3 w-3"/>Approve</button><button aria-label={`Reject ${node.name}`} onClick={()=>void handleApproval(detail.id,node.id,false)} className="flex items-center gap-1 rounded bg-destructive px-2 py-1 text-[10px] text-white hover:opacity-90"><X className="h-3 w-3"/>Reject</button></span>}</div>
         <div className="mt-2 flex gap-1">{(['output','input','logs','errors'] as const).map((item)=><button key={item} onClick={()=>setTab(item)} className={`rounded px-2 py-1 text-[10px] capitalize ${tab===item?'bg-muted font-semibold':'text-muted-foreground hover:bg-muted/60'}`}>{item}</button>)}</div>
         <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded border border-wb-border bg-background p-2 text-[10px]">{json(tabValue)}</pre>
         {errorMessage&&tab!=='errors'&&<p className="mt-2 text-[10px] text-destructive">{errorMessage}</p>}

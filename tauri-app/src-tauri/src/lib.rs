@@ -58,6 +58,21 @@ pub fn run() {
                 http_service::spawn_webhook_startup(handle.clone(), pool.clone());
                 handle.manage(pool);
 
+                // Forward live workflow progress to the webview.
+                let forward_handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut rx = workflows::subscribe_workflow_events();
+                    loop {
+                        match rx.recv().await {
+                            Ok(event) => {
+                                let _ = tauri::Emitter::emit(&forward_handle, "workflow-event", event);
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(_) => break,
+                        }
+                    }
+                });
+
                 let paths = state::AppPaths::resolve(&handle)
                     .expect("Failed to resolve app paths");
                 handle.manage(execution::ExecutionState::new(paths.builds_dir));

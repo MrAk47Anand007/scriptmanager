@@ -668,7 +668,7 @@ async fn retry_record(pool: &SqlitePool, kind: &str, id: &str, node_id: Option<&
             candidate.ok_or_else(|| "No failed node is eligible for retry".to_string())?
         }
     };
-    crate::workflows::retry_node_record(pool, id, &selected).await?;
+    crate::workflows::retry_node_record(pool, id, &selected, false).await?;
     Ok(serde_json::json!({ "ok": true, "id": id, "nodeId": selected }))
 }
 

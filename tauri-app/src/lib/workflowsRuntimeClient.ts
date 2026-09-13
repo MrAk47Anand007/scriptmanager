@@ -149,7 +149,7 @@ export async function fetchWorkflowRunRuntime(runId: string) {
   return normalizeWorkflowRunDetail(await response.json())
 }
 
-export async function retryWorkflowNodeRuntime(payload: { runId: string; nodeId: string }) {
+export async function retryWorkflowNodeRuntime(payload: { runId: string; nodeId: string; fromHere?: boolean }) {
   if (isTauri()) {
     const response = await invokeTauri<Record<string, any>>('retry_workflow_node', { payload })
     return normalizeWorkflowRunDetail(response)
