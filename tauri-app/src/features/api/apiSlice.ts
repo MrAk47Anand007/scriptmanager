@@ -439,11 +439,11 @@ export const fetchApiCollectionRuns = createAsyncThunk('api/fetchCollectionRuns'
 
 export const runApiCollection = createAsyncThunk<
   ApiCollectionRun,
-  { collectionId: string; environmentId: string | null }
+  { collectionId: string; environmentId: string | null; rows?: Array<Record<string, string>> }
 >(
   'api/runCollection',
-  async ({ collectionId, environmentId }) => {
-    return await runApiCollectionRuntime({ collectionId, environmentId }) as ApiCollectionRun
+  async ({ collectionId, environmentId, rows }) => {
+    return await runApiCollectionRuntime({ collectionId, environmentId, rows }) as ApiCollectionRun
   }
 )
 

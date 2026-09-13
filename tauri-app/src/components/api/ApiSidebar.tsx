@@ -86,6 +86,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { RunCollectionDataDialog } from './RunCollectionDataDialog'
 import { getOperationError } from '@/lib/operationError'
 
 function blankRow(): KeyValueRow {
@@ -263,7 +264,8 @@ interface CollectionItemProps {
   allCollections: ApiCollection[]
   activeRequestId: string | null
   onEditVariables: (collection: ApiCollection) => void
-  onRunCollection: (collection: ApiCollection) => void
+  onRunCollection: (collection: ApiCollection, rows?: Array<Record<string, string>>) => void
+  onRunCollectionWithData: (collection: ApiCollection) => void
   onAddRequest: (collection: ApiCollection) => void
   onExportCollection: (collection: ApiCollection) => void
   onDeleteRequest: (request: ApiRequest) => Promise<void>
@@ -278,6 +280,7 @@ const CollectionItem = memo(function CollectionItem({
   activeRequestId,
   onEditVariables,
   onRunCollection,
+  onRunCollectionWithData,
   onAddRequest,
   onExportCollection,
   onDeleteRequest,
@@ -410,6 +413,9 @@ const CollectionItem = memo(function CollectionItem({
         </ContextMenuItem>
         <ContextMenuItem className="text-xs" onClick={() => onRunCollection(collection)}>
           Run Collection
+        </ContextMenuItem>
+        <ContextMenuItem className="text-xs" onClick={() => onRunCollectionWithData(collection)}>
+          Run with data…
         </ContextMenuItem>
         <ContextMenuItem className="text-xs" onClick={() => onExportCollection(collection)}>
           Export as Postman
@@ -614,11 +620,13 @@ export function ApiSidebar() {
     }
   }
 
-  const handleRunCollection = async (collection: ApiCollection) => {
+  const [dataRunCollection, setDataRunCollection] = useState<ApiCollection | null>(null)
+  const handleRunCollection = async (collection: ApiCollection, rows?: Array<Record<string, string>>) => {
     try {
       const result = await dispatch(runApiCollection({
         collectionId: collection.id,
         environmentId: activeEnvironmentId,
+        rows,
       })).unwrap()
       dispatch(setActiveCollectionRun(result))
       setRunDialogOpen(true)
@@ -956,6 +964,7 @@ export function ApiSidebar() {
                 activeRequestId={activeRequestId}
                 onEditVariables={openCollectionVariablesDialog}
                 onRunCollection={handleRunCollection}
+                onRunCollectionWithData={(collection) => setDataRunCollection(collection)}
                 onAddRequest={handleAddRequestToCollection}
                 onExportCollection={handleExportSingleCollection}
                 onDeleteRequest={handleDeleteRequest}
@@ -1238,6 +1247,18 @@ export function ApiSidebar() {
         onOpenChange={setRunDialogOpen}
         run={activeCollectionRun}
       />
+      {dataRunCollection && (
+        <RunCollectionDataDialog
+          open
+          onOpenChange={(open) => { if (!open) setDataRunCollection(null) }}
+          collectionName={dataRunCollection.name}
+          onRun={(rows) => {
+            const target = dataRunCollection
+            setDataRunCollection(null)
+            void handleRunCollection(target, rows)
+          }}
+        />
+      )}
     </div>
   )
 }

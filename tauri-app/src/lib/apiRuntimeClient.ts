@@ -184,7 +184,9 @@ export async function listApiCollectionRunsRuntime() {
   return response.data
 }
 
-export async function runApiCollectionRuntime(payload: { collectionId: string; environmentId: string | null }) {
+export type DataRow = Record<string, string>
+
+export async function runApiCollectionRuntime(payload: { collectionId: string; environmentId: string | null; rows?: DataRow[] }) {
   if (isTauri()) {
     return invokeTauri('run_api_collection', { payload })
   }
@@ -223,6 +225,44 @@ export async function saveApiAssertionsRuntime(payload: { requestId: string; ass
   }
   if (window.scriptManagerDesktop?.runtime?.saveApiAssertions) {
     return window.scriptManagerDesktop.runtime.saveApiAssertions(payload) as Promise<ApiAssertionRuntime[]>
+  }
+  throw new Error('Desktop runtime unavailable')
+}
+
+export type DataSetRuntime = {
+  id: string
+  name: string
+  kind: 'csv' | 'json'
+  content: string
+  createdAt: string
+}
+
+export async function listDataSetsRuntime(): Promise<DataSetRuntime[]> {
+  if (isTauri()) return invokeTauri<DataSetRuntime[]>('list_data_sets')
+  if (window.scriptManagerDesktop?.runtime?.listDataSets) {
+    return window.scriptManagerDesktop.runtime.listDataSets() as Promise<DataSetRuntime[]>
+  }
+  return []
+}
+
+export async function saveDataSetRuntime(payload: { id?: string; name: string; kind: 'csv' | 'json'; content: string }): Promise<DataSetRuntime> {
+  if (isTauri()) return invokeTauri<DataSetRuntime>('save_data_set', { payload })
+  if (window.scriptManagerDesktop?.runtime?.saveDataSet) {
+    return window.scriptManagerDesktop.runtime.saveDataSet(payload) as Promise<DataSetRuntime>
+  }
+  throw new Error('Desktop runtime unavailable')
+}
+
+export async function deleteDataSetRuntime(id: string): Promise<boolean> {
+  if (isTauri()) return invokeTauri<boolean>('delete_data_set', { id })
+  if (window.scriptManagerDesktop?.runtime?.deleteDataSet) return window.scriptManagerDesktop.runtime.deleteDataSet(id)
+  return false
+}
+
+export async function runScriptDataDrivenRuntime(payload: { scriptId: string; rows: DataRow[] }): Promise<Array<{ index: number; buildId: string; status: string }>> {
+  if (isTauri()) return invokeTauri('run_script_data_driven', { payload })
+  if (window.scriptManagerDesktop?.runtime?.runScriptDataDriven) {
+    return window.scriptManagerDesktop.runtime.runScriptDataDriven(payload) as Promise<Array<{ index: number; buildId: string; status: string }>>
   }
   throw new Error('Desktop runtime unavailable')
 }

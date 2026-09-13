@@ -306,6 +306,67 @@ fn emit_started_event<E: tauri::Emitter<tauri::Wry>>(window: &E, build_id: &str)
     );
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct RunScriptDataDrivenPayload {
+    #[serde(rename = "scriptId")]
+    pub script_id: String,
+    pub rows: Vec<std::collections::HashMap<String, String>>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataDrivenRunRow {
+    pub index: usize,
+    pub build_id: String,
+    pub status: String,
+}
+
+/// Run one script once per data row: each row's keys become parameter env
+/// vars for that build. Sequential and cancel-aware (a cancel between rows
+/// stops the batch; the completed rows keep their builds).
+#[command]
+pub async fn run_script_data_driven(
+    pool: tauri::State<'_, sqlx::SqlitePool>,
+    window: Window,
+    exec_state: tauri::State<'_, ExecutionState>,
+    payload: RunScriptDataDrivenPayload,
+) -> Result<Vec<DataDrivenRunRow>, String> {
+    if payload.rows.is_empty() {
+        return Err("Data rows are required".to_string());
+    }
+    if payload.rows.len() > 200 {
+        return Err("Data-driven runs are capped at 200 rows".to_string());
+    }
+    let mut results = Vec::with_capacity(payload.rows.len());
+    for (index, row) in payload.rows.iter().enumerate() {
+        let build_id = uuid::Uuid::new_v4().to_string();
+        let run = run_script_core(
+            (*pool).clone(),
+            window.clone(),
+            &exec_state,
+            RunScriptPayload {
+                script_id: payload.script_id.clone(),
+                param_values: Some(row.clone()),
+                build_id: Some(build_id.clone()),
+                triggered_by: Some("data-driven".to_string()),
+            },
+        )
+        .await;
+        match run {
+            Ok(result) => results.push(DataDrivenRunRow {
+                index,
+                build_id: result.build_id,
+                status: result.status,
+            }),
+            Err(message) => {
+                results.push(DataDrivenRunRow { index, build_id, status: format!("failed: {message}") });
+                break;
+            }
+        }
+    }
+    Ok(results)
+}
+
 #[command]
 pub async fn run_script(
     pool: tauri::State<'_, sqlx::SqlitePool>,

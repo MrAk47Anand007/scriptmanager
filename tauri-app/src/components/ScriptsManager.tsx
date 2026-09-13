@@ -51,6 +51,7 @@ import { Input } from '@/components/ui/input';
 import { ScriptsSidebar } from './ScriptsSidebar';
 import { ParametersPanel } from './ParametersPanel';
 import { RunInputsDialog } from './RunInputsDialog';
+import { runScriptDataDrivenRuntime } from '@/lib/apiRuntimeClient';
 
 import { useTheme } from "next-themes";
 import type { ScriptParameter } from '@/lib/types';
@@ -1643,6 +1644,32 @@ export const ScriptsManager = ({ hideSidebar = false }: ScriptsManagerProps = {}
                     }
                 }}
                 onCancel={() => setShowRunDialog(false)}
+                onRunData={isDesktopRuntime ? (rows) => {
+                    setShowRunDialog(false);
+                    void (async () => {
+                        dispatch(setRunStatus('running'));
+                        setBuildOutput(`[Data-driven run: ${rows.length} rows]
+`);
+                        buildOutputBufferRef.current = '';
+                        try {
+                            const results = await runScriptDataDrivenRuntime({ scriptId: activeScriptId!, rows });
+                            const failed = results.filter((row) => row.status !== 'success').length;
+                            if (failed === 0) {
+                                setBuildOutput((current) => `${current}[Data-driven run finished: ${results.length}/${results.length} rows succeeded]
+`);
+                            } else {
+                                setBuildOutput((current) => `${current}[Data-driven run finished: ${results.length - failed}/${results.length} rows succeeded — open Builds for per-row logs]
+`);
+                            }
+                        } catch (error) {
+                            setBuildOutput((current) => `${current}[Data-driven run failed: ${error instanceof Error ? error.message : 'Unknown error'}]
+`);
+                        } finally {
+                            dispatch(setRunStatus('idle'));
+                            void dispatch(fetchBuilds(activeScriptId!));
+                        }
+                    })();
+                } : undefined}
             />
         </div>
     );

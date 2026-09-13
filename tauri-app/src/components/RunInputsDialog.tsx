@@ -13,15 +13,19 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { cn } from '@/lib/utils'
 
 interface Props {
     open: boolean
     parameters: ScriptParameter[]
     onRun: (values: Record<string, string>) => void
     onCancel: () => void
+    onRunData?: (rows: Record<string, string>[]) => void
 }
 
-export function RunInputsDialog({ open, parameters, onRun, onCancel }: Props) {
+export function RunInputsDialog({ open, parameters, onRun, onCancel, onRunData }: Props) {
+    const [dataMode, setDataMode] = useState(false)
+    const [dataText, setDataText] = useState('')
     const [values, setValues] = useState<Record<string, string>>(() => {
         const init: Record<string, string> = {}
         for (const p of parameters) {
@@ -56,6 +60,30 @@ export function RunInputsDialog({ open, parameters, onRun, onCancel }: Props) {
         setErrors(newErrors)
         return Object.keys(newErrors).length === 0
     }
+
+    const parsedRows = (() => {
+        if (!dataText.trim()) return { rows: [] as Record<string, string>[], error: '' }
+        try {
+            const trimmed = dataText.trim()
+            if (trimmed.startsWith('[')) {
+                const parsed = JSON.parse(trimmed) as unknown
+                if (!Array.isArray(parsed)) return { rows: [], error: 'JSON must be an array of objects' }
+                return { rows: parsed as Record<string, string>[], error: '' }
+            }
+            const lines = trimmed.split(/\r?\n/).filter((line) => line.trim())
+            if (lines.length < 2) return { rows: [], error: 'CSV needs a header row and at least one data row' }
+            const headers = lines[0].split(',').map((h) => h.trim())
+            const rows = lines.slice(1).map((line) => {
+                const cells = line.split(',').map((c) => c.trim())
+                const row: Record<string, string> = {}
+                headers.forEach((header, i) => { row[header] = cells[i] ?? '' })
+                return row
+            })
+            return { rows, error: '' }
+        } catch (error) {
+            return { rows: [], error: error instanceof Error ? error.message : 'Invalid data' }
+        }
+    })()
 
     const handleRun = () => {
         if (!validate()) return
@@ -102,14 +130,41 @@ export function RunInputsDialog({ open, parameters, onRun, onCancel }: Props) {
                                     type={p.type === 'number' ? 'number' : 'text'}
                                     value={values[p.name] ?? ''}
                                     onChange={(e) => setValue(p.name, e.target.value)}
-                                    placeholder={p.defaultValue ?? `Enter ${p.name}`}
                                 />
-                            )}
-                            {errors[p.name] && (
-                                <p className="text-[10px] text-red-500">{errors[p.name]}</p>
                             )}
                         </div>
                     ))}
+
+                    {onRunData && (
+                        <div className="space-y-2 rounded-md border border-wb-border p-3">
+                            <button
+                                type="button"
+                                className="flex items-center gap-2 text-xs font-medium text-foreground"
+                                onClick={() => setDataMode((value) => !value)}
+                            >
+                                <span className={cn('inline-flex h-4 w-7 items-center rounded-full transition-colors', dataMode ? 'bg-accent-brand' : 'bg-muted')}>
+                                    <span className={cn('h-3 w-3 rounded-full bg-white shadow transition-transform', dataMode ? 'translate-x-3.5' : 'translate-x-0.5')} />
+                                </span>
+                                Run with data (CSV)
+                            </button>
+                            {dataMode && (
+                                <div className="space-y-1.5">
+                                    <textarea
+                                        value={dataText}
+                                        onChange={(event) => setDataText(event.target.value)}
+                                        spellCheck={false}
+                                        placeholder={'username,password\nana,s3cret\nbruno,hunter2'}
+                                        className="h-24 w-full resize-none rounded-md border border-wb-border bg-background p-2 font-mono text-[11px] outline-none focus:border-accent-brand"
+                                    />
+                                    <p className={cn('text-[10px]', parsedRows.error ? 'text-red-500' : 'text-muted-foreground')}>
+                                        {parsedRows.error
+                                            ? parsedRows.error
+                                            : `${parsedRows.rows.length} row${parsedRows.rows.length === 1 ? '' : 's'} — one build per row, row keys become parameter values`}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 <DialogFooter>
@@ -121,13 +176,23 @@ export function RunInputsDialog({ open, parameters, onRun, onCancel }: Props) {
                     >
                         Cancel
                     </Button>
-                    <Button
-                        size="sm"
-                        className="text-xs bg-green-600 hover:bg-green-700 text-white"
-                        onClick={handleRun}
-                    >
-                        Run
-                    </Button>
+                    {onRunData && dataMode && parsedRows.rows.length > 0 ? (
+                        <Button
+                            size="sm"
+                            className="text-xs bg-green-600 hover:bg-green-700 text-white"
+                            onClick={() => onRunData(parsedRows.rows)}
+                        >
+                            Run {parsedRows.rows.length}×
+                        </Button>
+                    ) : (
+                        <Button
+                            size="sm"
+                            className="text-xs bg-green-600 hover:bg-green-700 text-white"
+                            onClick={handleRun}
+                        >
+                            Run
+                        </Button>
+                    )}
                 </DialogFooter>
             </DialogContent>
         </Dialog>

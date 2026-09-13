@@ -39,7 +39,17 @@ export function CollectionRunDialog({ open, onOpenChange, run }: CollectionRunDi
               {results.map((result, index) => (
                 <tr key={`${result.request_id as string}-${index}`} className="border-b border-slate-100 dark:border-slate-800 align-top">
                   <td className="py-2 px-3 font-medium text-slate-700 dark:text-slate-200">
+                    {result.rowIndex !== undefined && result.rowIndex !== null && (
+                      <span className="mr-1.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                        row {(result.rowIndex as number) + 1}
+                      </span>
+                    )}
                     {String(result.request_name ?? 'Unknown')}
+                    {result.row && typeof result.row === 'object' && (
+                      <span className="ml-1.5 text-[10px] text-slate-400 font-mono">
+                        {Object.entries(result.row as Record<string, unknown>).map(([k, v]) => `${k}=${String(v)}`).join(' ')}
+                      </span>
+                    )}
                   </td>
                   <td className="py-2 px-3">
                     <span className={cn(

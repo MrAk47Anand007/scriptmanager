@@ -176,6 +176,10 @@ declare global {
         clearApiHistory: () => Promise<unknown>
         listApiCollectionRuns: () => Promise<unknown[]>
         listApiAssertions: (requestId: string) => Promise<unknown[]>
+        listDataSets: () => Promise<unknown[]>
+        saveDataSet: (payload: unknown) => Promise<unknown>
+        deleteDataSet: (id: string) => Promise<boolean>
+        runScriptDataDriven: (payload: { scriptId: string; rows: Record<string, string>[] }) => Promise<unknown>
         saveApiAssertions: (payload: { requestId: string; assertions: unknown[] }) => Promise<unknown[]>
         runApiCollection: (payload: { collectionId: string; environmentId: string | null }) => Promise<unknown>
         listProjects: () => Promise<unknown[]>

@@ -166,7 +166,7 @@ pub struct SaveApiEnvironmentPayload {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SendApiRequestPayload {
     #[serde(rename = "requestId", default)]
     pub request_id: Option<String>,
@@ -208,7 +208,194 @@ pub struct RunApiCollectionPayload {
     pub collection_id: String,
     #[serde(rename = "environmentId", default)]
     pub environment_id: Option<String>,
+    /// Data-driven rows: each row's keys become the lowest-precedence
+    /// variable layer for one pass over the collection. Explicit rows win
+    /// over `dataSetId`.
+    #[serde(default)]
+    pub rows: Option<Vec<std::collections::HashMap<String, String>>>,
+    #[serde(rename = "dataSetId", default)]
+    pub data_set_id: Option<String>,
 }
+
+/// Parse a CSV body (header row + quoted-value-tolerant rows) into variable
+/// maps. Returns an error explaining the row/column problem when malformed.
+pub fn parse_csv_rows(content: &str) -> Result<Vec<std::collections::HashMap<String, String>>, String> {
+    let mut records: Vec<Vec<String>> = Vec::new();
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let mut fields = Vec::new();
+        let mut current = String::new();
+        let mut in_quotes = false;
+        let mut chars = line.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if in_quotes {
+                if ch == '"' {
+                    if chars.peek() == Some(&'"') {
+                        current.push('"');
+                        chars.next();
+                    } else {
+                        in_quotes = false;
+                    }
+                } else {
+                    current.push(ch);
+                }
+            } else if ch == '"' {
+                in_quotes = true;
+            } else if ch == ',' {
+                fields.push(current.trim().to_string());
+                current = String::new();
+            } else {
+                current.push(ch);
+            }
+        }
+        fields.push(current.trim().to_string());
+        records.push(fields);
+    }
+    let Some(headers) = records.first() else {
+        return Err("Data set is empty".to_string());
+    };
+    if headers.iter().any(|h| h.trim().is_empty()) {
+        return Err("Data set header row contains empty column names".to_string());
+    }
+    let mut rows = Vec::with_capacity(records.len().saturating_sub(1));
+    for (index, record) in records.iter().enumerate().skip(1) {
+        if record.len() != headers.len() {
+            return Err(format!(
+                "Data row {} has {} values but the header has {} columns",
+                index,
+                record.len(),
+                headers.len()
+            ));
+        }
+        rows.push(
+            headers
+                .iter()
+                .cloned()
+                .zip(record.iter().cloned())
+                .collect::<std::collections::HashMap<_, _>>(),
+        );
+    }
+    if rows.is_empty() {
+        return Err("Data set has no data rows".to_string());
+    }
+    Ok(rows)
+}
+
+fn parse_data_rows(kind: &str, content: &str) -> Result<Vec<std::collections::HashMap<String, String>>, String> {
+    match kind {
+        "csv" => parse_csv_rows(content),
+        "json" => {
+            let parsed: Value = serde_json::from_str(content)
+                .map_err(|error| format!("Data set is not valid JSON: {error}"))?;
+            let rows = parsed
+                .as_array()
+                .ok_or_else(|| "JSON data set must be an array of objects".to_string())?;
+            rows.iter()
+                .enumerate()
+                .map(|(index, row)| {
+                    row.as_object().map(|map| {
+                        map.iter()
+                            .map(|(k, v)| (k.clone(), stringify_json(v)))
+                            .collect::<std::collections::HashMap<_, _>>()
+                    }).ok_or_else(|| format!("JSON data row {} is not an object", index))
+                })
+                .collect()
+        }
+        other => Err(format!("Unknown data set kind: {other}")),
+    }
+}
+
+fn stringify_json(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
+#[derive(Debug, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct DataSetRecord {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub content: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct SaveDataSetPayload {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub name: String,
+    #[serde(default = "default_dataset_kind")]
+    pub kind: String,
+    #[serde(default)]
+    pub content: String,
+}
+
+fn default_dataset_kind() -> String {
+    "csv".to_string()
+}
+
+#[tauri::command]
+pub async fn list_data_sets(
+    pool: tauri::State<'_, SqlitePool>,
+) -> Result<Vec<DataSetRecord>, String> {
+    sqlx::query_as::<_, DataSetRecord>(
+        "SELECT id, name, kind, content, created_at FROM data_sets ORDER BY created_at DESC",
+    )
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_data_set(
+    pool: tauri::State<'_, SqlitePool>,
+    payload: SaveDataSetPayload,
+) -> Result<DataSetRecord, String> {
+    let name = payload.name.trim();
+    if name.is_empty() {
+        return Err("Data set name is required".to_string());
+    }
+    // Validate eagerly so a broken set can never be saved.
+    parse_data_rows(&payload.kind, &payload.content)?;
+    let id = payload.id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    sqlx::query(
+        "INSERT INTO data_sets (id, name, kind, content) VALUES (?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET name = excluded.name, kind = excluded.kind, content = excluded.content",
+    )
+    .bind(&id)
+    .bind(name)
+    .bind(&payload.kind)
+    .bind(&payload.content)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    sqlx::query_as::<_, DataSetRecord>(
+        "SELECT id, name, kind, content, created_at FROM data_sets WHERE id = ?",
+    )
+    .bind(&id)
+    .fetch_one(&*pool)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_data_set(
+    pool: tauri::State<'_, SqlitePool>,
+    id: String,
+) -> Result<bool, String> {
+    let result = sqlx::query("DELETE FROM data_sets WHERE id = ?")
+        .bind(&id)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(result.rows_affected() > 0)
+}
+
 
 // Response shape expected by apiSlice desktop branch (camelCase inside `response`).
 #[derive(Debug, Clone, Serialize)]
@@ -1446,6 +1633,28 @@ pub async fn save_api_globals(
     save_globals_record(&pool, &variables).await
 }
 
+/// Clone a send payload with a data-row merged into its request variables as
+/// enabled rows; data values win because they are appended after the stored
+/// rows and later duplicates override earlier keys in build_variable_map.
+fn send_payload_with_row(
+    payload: &SendApiRequestPayload,
+    row: &std::collections::HashMap<String, String>,
+) -> SendApiRequestPayload {
+    let mut cloned = payload.clone();
+    if row.is_empty() {
+        return cloned;
+    }
+    let mut rows = match cloned.variables {
+        Some(Value::Array(array)) => array,
+        _ => Vec::new(),
+    };
+    for (key, value) in row {
+        rows.push(serde_json::json!({ "key": key, "value": value, "enabled": true }));
+    }
+    cloned.variables = Some(Value::Array(rows));
+    cloned
+}
+
 #[tauri::command]
 pub async fn send_api_request(
     pool: tauri::State<'_, SqlitePool>,
@@ -1607,7 +1816,14 @@ pub async fn run_api_collection(
     pool: tauri::State<'_, SqlitePool>,
     payload: RunApiCollectionPayload,
 ) -> Result<ApiCollectionRunRecord, String> {
-    let collection = get_collection_record(&pool, &payload.collection_id)
+    run_api_collection_core(&pool, payload).await
+}
+
+pub(crate) async fn run_api_collection_core(
+    pool: &SqlitePool,
+    payload: RunApiCollectionPayload,
+) -> Result<ApiCollectionRunRecord, String> {
+    let collection = get_collection_record(pool, &payload.collection_id)
         .await?
         .ok_or_else(|| "Collection not found".to_string())?;
 
@@ -1637,13 +1853,29 @@ pub async fn run_api_collection(
     )
     .bind(WORKSPACE_ID)
     .bind(&collection.id)
-    .fetch_all(&*pool)
+    .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
 
     if requests.is_empty() {
         return Err("Collection has no requests".to_string());
     }
+
+    let data_rows: Vec<std::collections::HashMap<String, String>> =
+        if payload.rows.as_ref().map(|rows| !rows.is_empty()).unwrap_or(false) {
+            payload.rows.clone().unwrap()
+        } else if let Some(set_id) = payload.data_set_id.as_deref() {
+            let row: Option<(String, String)> =
+                sqlx::query_as("SELECT kind, content FROM data_sets WHERE id = ?")
+                    .bind(set_id)
+                    .fetch_optional(pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            let (kind, content) = row.ok_or_else(|| "Data set not found".to_string())?;
+            parse_data_rows(&kind, &content)?
+        } else {
+            vec![std::collections::HashMap::new()]
+        };
 
     let run_id = uuid::Uuid::new_v4().to_string();
     let started = chrono::Utc::now();
@@ -1659,7 +1891,7 @@ pub async fn run_api_collection(
     .bind(&collection.name)
     .bind(&environment_id)
     .bind(&environment_name)
-    .bind(requests.len() as i64)
+    .bind((requests.len() as i64) * (data_rows.len() as i64))
     .bind(&started_str)
     .execute(&*pool)
     .await
@@ -1669,26 +1901,32 @@ pub async fn run_api_collection(
     let mut passed = 0i64;
     let mut failed = 0i64;
 
+    // Row-outer loop: every data row gets a full pass over the collection
+    // with its values merged as the winning variable layer.
+    for (row_index, data_row) in data_rows.iter().enumerate() {
     for request in &requests {
-        let send_payload = SendApiRequestPayload {
-            request_id: Some(request.id.clone()),
-            collection_id: request.collection_id.clone(),
-            environment_id: environment_id.clone(),
-            method: Some(request.method.clone()),
-            url: Some(request.url.clone()),
-            headers: serde_json::from_str(&request.headers).ok(),
-            query_params: serde_json::from_str(&request.query_params).ok(),
-            variables: serde_json::from_str(&request.variables).ok(),
-            request_options: serde_json::from_str(&request.request_options).ok(),
-            pre_request_script: Some(request.pre_request_script.clone()),
-            test_script: Some(request.test_script.clone()),
-            response_mappings: serde_json::from_str(&request.response_mappings).ok(),
-            body_type: Some(request.body_type.clone()),
-            body: Some(request.body.clone()),
-            auth_type: Some(request.auth_type.clone()),
-            auth_config: serde_json::from_str(&request.auth_config).ok(),
-        };
-        match execute_api_request_full(&pool, &send_payload).await {
+        let send_payload = send_payload_with_row(
+            &SendApiRequestPayload {
+                request_id: Some(request.id.clone()),
+                collection_id: request.collection_id.clone(),
+                environment_id: environment_id.clone(),
+                method: Some(request.method.clone()),
+                url: Some(request.url.clone()),
+                headers: serde_json::from_str(&request.headers).ok(),
+                query_params: serde_json::from_str(&request.query_params).ok(),
+                variables: serde_json::from_str(&request.variables).ok(),
+                request_options: serde_json::from_str(&request.request_options).ok(),
+                pre_request_script: Some(request.pre_request_script.clone()),
+                test_script: Some(request.test_script.clone()),
+                response_mappings: serde_json::from_str(&request.response_mappings).ok(),
+                body_type: Some(request.body_type.clone()),
+                body: Some(request.body.clone()),
+                auth_type: Some(request.auth_type.clone()),
+                auth_config: serde_json::from_str(&request.auth_config).ok(),
+            },
+            data_row,
+        );
+        match execute_api_request_full(pool, &send_payload).await {
             Ok((_prepared, response)) => {
                 let status_ok = response.status >= 200 && response.status < 400;
                 let failed_tests = response
@@ -1703,6 +1941,8 @@ pub async fn run_api_collection(
                     failed += 1;
                 }
                 results.push(serde_json::json!({
+                    "rowIndex": row_index,
+                    "row": data_row,
                     "request_id": request.id,
                     "request_name": request.name,
                     "status": response.status,
@@ -1718,6 +1958,8 @@ pub async fn run_api_collection(
             Err(message) => {
                 failed += 1;
                 results.push(serde_json::json!({
+                    "rowIndex": row_index,
+                    "row": data_row,
                     "request_id": request.id,
                     "request_name": request.name,
                     "status": 500,
@@ -1731,6 +1973,7 @@ pub async fn run_api_collection(
                 }));
             }
         }
+    }
     }
 
     let finished = chrono::Utc::now();
@@ -1753,20 +1996,21 @@ pub async fn run_api_collection(
     .bind(&finished_str)
     .bind(duration_ms)
     .bind(&run_id)
-    .execute(&*pool)
+    .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
 
-    sqlx::query_as::<_, ApiCollectionRunRecord>(
+    let run = sqlx::query_as::<_, ApiCollectionRunRecord>(
         "SELECT id, collection_id, collection_name, environment_id, environment_name, status,
             total_requests, passed_requests, failed_requests, results, started_at,
             finished_at, duration_ms
          FROM api_collection_runs WHERE id = ?",
     )
     .bind(&run_id)
-    .fetch_one(&*pool)
+    .fetch_one(pool)
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    Ok(run)
 }
 
 // ---------- Tests ----------
@@ -1983,6 +2227,93 @@ mod tests {
         assert!(saved.variables.contains("\"T\""));
         let reread = read_globals_record(&pool).await.unwrap();
         assert_eq!(reread.variables, saved.variables);
+    }
+
+    #[test]
+    fn csv_rows_parse_with_quotes_and_headers() {
+        let rows = parse_csv_rows("name,token
+ana,\"t,1\"
+bruno,t2
+").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].get("name").map(String::as_str), Some("ana"));
+        assert_eq!(rows[0].get("token").map(String::as_str), Some("t,1"));
+        assert_eq!(rows[1].get("token").map(String::as_str), Some("t2"));
+        assert!(parse_csv_rows("").is_err());
+        assert!(parse_csv_rows("a,b
+1
+").is_err());
+    }
+
+    #[tokio::test]
+    async fn collection_run_fans_out_over_data_rows() {
+        let pool = test_pool().await;
+        let col = save_collection_record(
+            &pool,
+            SaveApiCollectionPayload {
+                id: None,
+                name: "DD".to_string(),
+                description: None,
+                variables: None,
+            },
+        )
+        .await
+        .unwrap();
+        let (base_url, _rx) = spawn_capture_server(4);
+        for who in ["ana", "bruno"] {
+            save_request_record(
+                &pool,
+                SaveApiRequestPayload {
+                    id: None,
+                    name: format!("greet {who}"),
+                    method: Some("GET".to_string()),
+                    url: Some(format!("{base_url}/hello?who={{{{who}}}}")),
+                    headers: None,
+                    query_params_snake: None,
+                    query_params_camel: None,
+                    variables: None,
+                    request_options_snake: None,
+                    request_options_camel: None,
+                    pre_request_script_snake: None,
+                    pre_request_script_camel: None,
+                    test_script_snake: None,
+                    test_script_camel: None,
+                    response_mappings_snake: None,
+                    response_mappings_camel: None,
+                    body_type_snake: Some("none".to_string()),
+                    body_type_camel: None,
+                    body: Some(String::new()),
+                    auth_type_snake: Some("none".to_string()),
+                    auth_type_camel: None,
+                    auth_config_snake: None,
+                    auth_config_camel: None,
+                    collection_id_snake: Some(col.id.clone()),
+                    collection_id_camel: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let run = run_api_collection_core(
+            &pool,
+            RunApiCollectionPayload {
+                collection_id: col.id.clone(),
+                environment_id: None,
+                rows: Some(vec![
+                    [("who".to_string(), "ana".to_string())].into_iter().collect(),
+                    [("who".to_string(), "bruno".to_string())].into_iter().collect(),
+                ]),
+                data_set_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(run.total_requests, 4);
+        assert_eq!(run.passed_requests, 4);
+        let results: Vec<Value> = serde_json::from_str(&run.results).unwrap();
+        assert_eq!(results.len(), 4);
+        assert_eq!(results[0]["rowIndex"], serde_json::json!(0));
+        assert_eq!(results[2]["rowIndex"], serde_json::json!(1));
     }
 
     #[tokio::test]
