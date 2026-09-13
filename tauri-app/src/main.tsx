@@ -211,6 +211,9 @@ window.scriptManagerDesktop = {
     listAgentRuns: () => invokeTauri('list_agent_runs'),
     readAgentRun: (id: string) => invokeTauri('read_agent_run', { id }),
     listPlugins: () => invokeTauri('list_plugins'),
+    getPluginSource: (pluginId: string) => invokeTauri('get_plugin_source', { pluginId }),
+    savePluginSource: (payload: { pluginId: string; entryPoint: string }) => invokeTauri('save_plugin_source', { pluginId: payload.pluginId, entryPoint: payload.entryPoint }),
+    runPlugin: (payload: unknown) => invokeTauri('run_plugin', { payload: payload as Record<string, unknown> }),
     updatePlugin: (payload: { id: string; action: string; settings?: unknown }) =>
       invokeTauri('update_plugin', { payload: payload as Record<string, unknown> }),
     removePlugin: (id: string) => invokeTauri('remove_plugin', { id }),

@@ -272,6 +272,27 @@ pub async fn ensure_schema(pool: &SqlitePool) -> AppResult<()> {
     .await?;
 
     sqlx::query(
+        "CREATE TABLE IF NOT EXISTS plugin_sources (
+            plugin_id TEXT PRIMARY KEY REFERENCES plugin_installations(id) ON DELETE CASCADE,
+            entry_point TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS plugin_storage (
+            plugin_id TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (plugin_id, key)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS storage_providers (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,

@@ -274,6 +274,8 @@ pub fn run() {
             plugins::remove_plugin,
             plugins::save_plugin,
             plugins::run_plugin,
+            plugins::get_plugin_source,
+            plugins::save_plugin_source,
             workspace_access::list_workspace_access,
             workspace_access::create_workspace_invitation,
             workspace_access::revoke_workspace_grants,
