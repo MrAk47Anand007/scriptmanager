@@ -19,6 +19,7 @@ mod openapi;
 mod observability;
 mod projects;
 mod plugins;
+mod reports;
 mod remote_exec;
 mod schema;
 mod scheduler;
@@ -244,6 +245,8 @@ pub fn run() {
             fleet::start_fleet_run,
             fleet::approve_fleet_run,
             fleet::list_fleet_runs,
+            reports::get_entity_report,
+            reports::list_report_entities,
             sftp_browser::sftp_list_dir,
             sftp_browser::sftp_read_text_file,
             sftp_browser::sftp_write_text_file,

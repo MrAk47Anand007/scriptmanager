@@ -227,6 +227,8 @@ declare global {
         sftpReadText: (payload: { profileId: string; path: string }) => Promise<{ path: string; content: string; binary?: boolean; truncated?: boolean }>
         sftpWriteText: (payload: { profileId: string; path: string; content: string }) => Promise<{ saved: boolean }>
         sftpDelete: (payload: { profileId: string; path: string; isDir?: boolean }) => Promise<{ deleted: boolean }>
+        listReportEntities: (kind: string) => Promise<unknown[]>
+        getEntityReport: (payload: { kind: string; entityId: string; window?: number }) => Promise<unknown>
         listStorageProviders?: () => Promise<unknown[]>
         saveStorageProvider?: (payload: unknown) => Promise<unknown>
         deleteStorageProvider?: (id: string) => Promise<unknown>

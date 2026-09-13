@@ -38,6 +38,9 @@ const FleetPanel = lazy(
 const ExecutionDashboard = lazy(
     () => import('@/components/observability/ExecutionDashboard').then((mod) => ({ default: mod.ExecutionDashboard }))
 )
+const StabilityReports = lazy(
+    () => import('@/components/observability/StabilityReports').then((mod) => ({ default: mod.StabilityReports }))
+)
 
 function PaneSkeleton({ label }: { label: string }) {
     return (
@@ -178,6 +181,7 @@ export function OpsView() {
                     <TabsTrigger value="execute" className="text-xs">Execute</TabsTrigger>
                     <TabsTrigger value="servers" className="text-xs">Servers</TabsTrigger>
                     <TabsTrigger value="runs" className="text-xs">Runs</TabsTrigger>
+                    <TabsTrigger value="reports" className="text-xs">Reports</TabsTrigger>
                     <TabsTrigger value="audit" className="text-xs">Audit</TabsTrigger>
                 </TabsList>
                 <TabsContent value="execute" className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
@@ -193,6 +197,11 @@ export function OpsView() {
                 </TabsContent>
                 <TabsContent value="runs" className="min-h-0 flex-1 overflow-hidden px-0 pb-0">
                     <ExecutionDashboard />
+                </TabsContent>
+                <TabsContent value="reports" className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
+                    <div className="mx-auto max-w-4xl pt-4">
+                        <StabilityReports />
+                    </div>
                 </TabsContent>
                 <TabsContent value="audit" className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
                     <div className="mx-auto max-w-4xl">

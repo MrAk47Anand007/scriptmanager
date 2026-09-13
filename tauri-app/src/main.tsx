@@ -196,6 +196,9 @@ window.scriptManagerDesktop = {
     sftpReadText: (payload: unknown) => invokeTauri('sftp_read_text_file', { payload: payload as Record<string, unknown> }),
     sftpWriteText: (payload: unknown) => invokeTauri('sftp_write_text_file', { payload: payload as Record<string, unknown> }),
     sftpDelete: (payload: unknown) => invokeTauri('sftp_delete_entry', { payload: payload as Record<string, unknown>, isDir: Boolean((payload as { isDir?: boolean }).isDir) }),
+    listReportEntities: (kind: string) => invokeTauri('list_report_entities', { kind }),
+    getEntityReport: (payload: { kind: string; entityId: string; window?: number }) =>
+      invokeTauri('get_entity_report', { kind: payload.kind, entityId: payload.entityId, window: payload.window ?? null }),
     onRemoteExecEvent: (listener: DesktopListener<ScriptManagerDesktopRemoteExecEvent>) =>
       subscribe('remote-exec-event', listener),
     listStorageProviders: () => invokeTauri('list_storage_providers'),
