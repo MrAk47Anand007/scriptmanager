@@ -187,10 +187,8 @@ export function OpsView() {
                         <ServerProfilesPanel />
                     </div>
                 </TabsContent>
-                <TabsContent value="runs" className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
-                    <div className="mx-auto max-w-5xl">
-                        <ExecutionDashboard />
-                    </div>
+                <TabsContent value="runs" className="min-h-0 flex-1 overflow-hidden px-0 pb-0">
+                    <ExecutionDashboard />
                 </TabsContent>
                 <TabsContent value="audit" className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
                     <div className="mx-auto max-w-4xl">

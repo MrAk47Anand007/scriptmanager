@@ -43,7 +43,9 @@ const contractAgents = extractBlock(contractTop, 'agents?:')
 
 const bridgeTop = extractBlock(main, 'window.scriptManagerDesktop =')
 const bridgeRuntime = extractBlock(bridgeTop, 'runtime:')
-const bridgeAgents = extractBlock(bridgeRuntime, 'agents:')
+// agents lives at the top level of the bridge (next to runtime), matching the
+// type contract — nesting it inside runtime hid every agent feature.
+const bridgeAgents = extractBlock(bridgeTop, 'agents:')
 
 const checks = [
   ['scriptManagerDesktop', requiredContractKeys(contractTop), exposedObjectKeys(bridgeTop)],

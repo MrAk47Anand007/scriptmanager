@@ -184,19 +184,6 @@ window.scriptManagerDesktop = {
     createAgentProfile: (payload: unknown) => invokeTauri('create_agent_profile', { payload: payload as Record<string, unknown> }),
     listAgentRuns: () => invokeTauri('list_agent_runs'),
     readAgentRun: (id: string) => invokeTauri('read_agent_run', { id }),
-    agents: {
-      discover: () => invokeTauri('discover_agent_providers'),
-      run: (payload: unknown) => invokeTauri('run_agent', { payload: payload as Record<string, unknown> }),
-      interruptRun: (id: string) => invokeTauri('interrupt_agent_run', { id }),
-      resumeRun: (payload: unknown) => invokeTauri('resume_agent_run', { payload: payload as Record<string, unknown> }),
-      terminateRun: (id: string) => invokeTauri('terminate_agent_run', { id }),
-      setProviderPath: (payload: { provider: string; path: string }) => invokeTauri('set_agent_provider_path', { payload }),
-      getProviderPaths: () => invokeTauri('get_agent_provider_paths'),
-      onEvent: (listener: DesktopListener<{ sessionId: string; event: unknown }>) =>
-        subscribe('agent-event', listener),
-    },
-    getMcpStatus: () => invokeTauri('get_mcp_status'),
-    installMcpConfig: (payload: { target: string }) => invokeTauri('install_mcp_config', { payload }),
     listPlugins: () => invokeTauri('list_plugins'),
     updatePlugin: (payload: { id: string; action: string; settings?: unknown }) =>
       invokeTauri('update_plugin', { payload: payload as Record<string, unknown> }),
@@ -252,7 +239,23 @@ window.scriptManagerDesktop = {
     onBuildEvent: (listener: DesktopListener<ScriptManagerDesktopBuildEvent>) =>
       subscribe('build-event', listener),
     onCanonicalFolderChange: (listener) => subscribe('canonical-folder-change', listener),
-  }
+  },
+  // Top-level namespace per the bridge contract (src/types/electron.d.ts) —
+  // the Agents panel reads window.scriptManagerDesktop.agents, so nesting it
+  // inside runtime would make every agent feature invisible in the desktop app.
+  agents: {
+    discover: () => invokeTauri('discover_agent_providers'),
+    run: (payload: unknown) => invokeTauri('run_agent', { payload: payload as Record<string, unknown> }),
+    interruptRun: (id: string) => invokeTauri('interrupt_agent_run', { id }),
+    resumeRun: (payload: unknown) => invokeTauri('resume_agent_run', { payload: payload as Record<string, unknown> }),
+    terminateRun: (id: string) => invokeTauri('terminate_agent_run', { id }),
+    setProviderPath: (payload: { provider: string; path: string }) => invokeTauri('set_agent_provider_path', { payload }),
+    getProviderPaths: () => invokeTauri('get_agent_provider_paths'),
+    onEvent: (listener: DesktopListener<{ sessionId: string; event: unknown }>) =>
+      subscribe('agent-event', listener),
+  },
+  getMcpStatus: () => invokeTauri('get_mcp_status'),
+  installMcpConfig: (payload: { target: string }) => invokeTauri('install_mcp_config', { payload }),
 };
 
 createRoot(document.getElementById('root')!).render(

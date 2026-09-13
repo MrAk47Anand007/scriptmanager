@@ -5,6 +5,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { selectActiveWorkflow, selectSelectedExecution, selectSelectedWorkflowNode, selectWorkflowRuns } from '@/features/workflows/selectors'
 import { cancelWorkflowRun, fetchWorkflowRun, fetchWorkflowRuns, resolveWorkflowApproval, retryWorkflowNode, selectNode, setSelectedExecution } from '@/features/workflows/workflowsSlice'
 import { isWorkflowRunActive } from '@/lib/workflows/runStatus'
+import { formatDurationMs } from '@/lib/observability/formatDuration'
 import { getOperationError } from '@/lib/operationError'
 import { toast } from '@/components/ui/toast'
 
@@ -14,7 +15,7 @@ const duration = (start?: string|null, end?: string|null) => {
   if(!start||!end)return null
   const ms = new Date(end).getTime()-new Date(start).getTime()
   if(Number.isNaN(ms)||ms<0)return null
-  return ms<1000?`${ms}ms`:`${(ms/1000).toFixed(1)}s`
+  return formatDurationMs(ms)
 }
 
 export function WorkflowExecutionDrawer() {
