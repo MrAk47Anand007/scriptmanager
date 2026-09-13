@@ -9,6 +9,7 @@ mod execution;
 mod fs_ops;
 mod gist;
 mod git_ops;
+mod js_engine;
 mod mcp;
 mod models;
 mod notifications;
