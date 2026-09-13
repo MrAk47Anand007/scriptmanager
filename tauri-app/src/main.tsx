@@ -192,6 +192,10 @@ window.scriptManagerDesktop = {
     startFleetRun: (payload: { profileIds: string[]; command: string; note?: string }) => invokeTauri('start_fleet_run', { payload }),
     approveFleetRun: (fleetRunId: string) => invokeTauri('approve_fleet_run', { fleetRunId }),
     listFleetRuns: (limit?: number) => invokeTauri('list_fleet_runs', { payload: { limit: limit ?? 20 } }),
+    sftpListDir: (payload: unknown) => invokeTauri('sftp_list_dir', { payload: payload as Record<string, unknown> }),
+    sftpReadText: (payload: unknown) => invokeTauri('sftp_read_text_file', { payload: payload as Record<string, unknown> }),
+    sftpWriteText: (payload: unknown) => invokeTauri('sftp_write_text_file', { payload: payload as Record<string, unknown> }),
+    sftpDelete: (payload: unknown) => invokeTauri('sftp_delete_entry', { payload: payload as Record<string, unknown>, isDir: Boolean((payload as { isDir?: boolean }).isDir) }),
     onRemoteExecEvent: (listener: DesktopListener<ScriptManagerDesktopRemoteExecEvent>) =>
       subscribe('remote-exec-event', listener),
     listStorageProviders: () => invokeTauri('list_storage_providers'),

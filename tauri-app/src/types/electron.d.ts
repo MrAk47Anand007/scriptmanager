@@ -223,6 +223,10 @@ declare global {
         startFleetRun: (payload: { profileIds: string[]; command: string; note?: string }) => Promise<unknown>
         approveFleetRun: (fleetRunId: string) => Promise<unknown>
         listFleetRuns: (limit?: number) => Promise<unknown[]>
+        sftpListDir: (payload: { profileId: string; path: string }) => Promise<{ path: string; entries: unknown[] }>
+        sftpReadText: (payload: { profileId: string; path: string }) => Promise<{ path: string; content: string; binary?: boolean; truncated?: boolean }>
+        sftpWriteText: (payload: { profileId: string; path: string; content: string }) => Promise<{ saved: boolean }>
+        sftpDelete: (payload: { profileId: string; path: string; isDir?: boolean }) => Promise<{ deleted: boolean }>
         listStorageProviders?: () => Promise<unknown[]>
         saveStorageProvider?: (payload: unknown) => Promise<unknown>
         deleteStorageProvider?: (id: string) => Promise<unknown>

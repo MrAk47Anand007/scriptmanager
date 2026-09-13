@@ -24,6 +24,7 @@ mod schema;
 mod scheduler;
 mod scan;
 mod security;
+mod sftp_browser;
 mod settings;
 mod state;
 mod storage;
@@ -243,6 +244,10 @@ pub fn run() {
             fleet::start_fleet_run,
             fleet::approve_fleet_run,
             fleet::list_fleet_runs,
+            sftp_browser::sftp_list_dir,
+            sftp_browser::sftp_read_text_file,
+            sftp_browser::sftp_write_text_file,
+            sftp_browser::sftp_delete_entry,
             storage::list_storage_providers,
             storage::save_storage_provider,
             storage::delete_storage_provider,

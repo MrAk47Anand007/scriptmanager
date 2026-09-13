@@ -31,6 +31,8 @@ import {
     KeyRound, Eye, EyeOff,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { FolderOpen } from 'lucide-react'
+import { SftpBrowserDialog } from './SftpBrowserDialog'
 
 const ENV_BADGE_COLORS: Record<string, { bg: string; text: string }> = {
     development: { bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-700 dark:text-green-400' },
@@ -70,6 +72,7 @@ function getOperationError(value: unknown, fallback: string): string {
 }
 
 export function ServerProfilesPanel() {
+    const [sftpTarget, setSftpTarget] = useState<{ id: string; name: string } | null>(null)
     const dispatch = useAppDispatch()
     const serverProfiles = useAppSelector(selectServerProfiles)
     const selectedProfileId = useAppSelector(selectSelectedProfileId)
@@ -325,6 +328,15 @@ export function ServerProfilesPanel() {
                                             variant="ghost"
                                             size="icon"
                                             className="h-5 w-5"
+                                            title="Browse files (SFTP)"
+                                            onClick={() => setSftpTarget({ id: profile.id, name: profile.name })}
+                                        >
+                                            <FolderOpen className="h-2.5 w-2.5 text-slate-400" />
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-5 w-5"
                                             title="Edit"
                                             onClick={() => startEdit(profile)}
                                         >
@@ -376,6 +388,15 @@ export function ServerProfilesPanel() {
             )}
         </div>
     )
+
+    {sftpTarget && (
+        <SftpBrowserDialog
+            open
+            onOpenChange={(open) => { if (!open) setSftpTarget(null) }}
+            profileId={sftpTarget.id}
+            profileName={sftpTarget.name}
+        />
+    )}
 }
 
 // Extracted form to avoid duplication between add and edit
