@@ -1,8 +1,8 @@
 # ScriptManager
 
-> **Release status:** The desktop app has been rewritten in **Tauri 2 + Rust** — one lightweight native executable with a built-in SQLite store, SSH/SFTP transport, MCP server, and workflow engine. The self-hosted web edition (Next.js + Electron) remains fully supported. Start with [the operator guide](docs/operator-guide.md).
+A local-first automation workbench for scripts, APIs, workflows, and AI agents — built as a fast native desktop app with **Tauri 2 + Rust**. Think of it as **n8n for scripts**: serious automation without the complexity.
 
-A self-hosted, local-first script manager — write, run, schedule, and organize scripts with a professional UI, on desktop or in the browser. Think of it as **n8n for scripts**: automation without the complexity.
+Everything runs on your machine. No server, no browser tabs, no login — just launch the app.
 
 ![Scripts & API Workbench](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/scriptandapi.png)
 
@@ -10,27 +10,38 @@ A self-hosted, local-first script manager — write, run, schedule, and organize
 
 ## Table of Contents
 
-- [Desktop App (Tauri)](#desktop-app-tauri)
-- [What's New in the Tauri Rewrite](#whats-new-in-the-tauri-rewrite)
-- [Building the Desktop App](#building-the-desktop-app)
-- [Features](#features)
+- [Highlights](#highlights)
+- [Screenshots](#screenshots)
+- [Feature Tour](#feature-tour)
+  - [Scripts](#scripts)
+  - [API Client](#api-client)
+  - [Visual Workflows](#visual-workflows)
+  - [AI Agents & MCP](#ai-agents--mcp)
+  - [Ops Console & Remote Execution](#ops-console--remote-execution)
+  - [Git Repository Workspace](#git-repository-workspace)
+  - [Executions & Observability](#executions--observability)
+  - [Secret Vault & Security](#secret-vault--security)
+  - [Settings & Configuration](#settings--configuration)
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Usage Guide](#usage-guide)
-- [CLI Usage](#cli-usage)
-- [Desktop App (Electron)](#desktop-app-electron)
-- [API Reference](#api-reference)
-- [Database Schema](#database-schema)
+- [Getting Started](#getting-started)
 - [Contributing](#contributing)
 - [License](#license)
 
 ---
 
-## Desktop App (Tauri)
+## Highlights
 
-The desktop edition is a native app built with Tauri 2 (Rust backend + web UI). Everything runs locally — no server, no browser, no login. Data lives in a local SQLite database and a workspace folder on your machine.
+- **Truly local** — an embedded SQLite database and a workspace folder on your disk; your scripts and secrets never leave your machine unless you send them somewhere yourself.
+- **One lightweight executable** — a Rust core instead of a bundled browser-plus-Node runtime, so it starts instantly and sips memory.
+- **Script runner** — Monaco editor, live streaming output, per-script parameters, environment variables, timeouts, version history, and an integrated terminal.
+- **Visual workflows** — drag-and-drop DAG builder with versioned publishes, live run events, per-node inspection, and cron/webhook-style triggers.
+- **API testing suite** — collections, environments, OpenAPI 3 import, no-code assertions, data-driven runs, mock servers, and JUnit/HTML reports.
+- **AI agents** — run Codex or Claude agent sessions locally with approval gates, and expose your saved scripts, workflows, and requests to AI apps through a built-in MCP server.
+- **Remote ops** — SSH/SFTP execution, server profiles, fleet runs (one command, many servers), stability reports, and a full audit trail.
+- **Git built in** — stage, diff, commit, push/pull, and browse history for any linked project folder without leaving the app.
+
+## Screenshots
 
 | | |
 |---|---|
@@ -38,105 +49,86 @@ The desktop edition is a native app built with Tauri 2 (Rust backend + web UI). 
 | ![Repository Management](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/repomanagement.png) | ![Executions Monitoring](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/exemoni.png) |
 | ![Settings & Configuration](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/settingsconfig.png) | |
 
-- **Scripts & API workbench** — Monaco editor with live output, collections, tags, and a built-in API client (collections, environments, history, runs, mock servers).
-- **Visual workflow automation** — drag-and-drop DAG builder with live run events, per-node inspection, and versioned publishes.
-- **AI agents & DevOps** — run Codex/Claude agent sessions locally with approval gates, plus an Ops console for remote execution, server profiles, fleet runs, and audit.
-- **Repository management** — stage, diff, commit, push/pull, and browse history for any linked project folder.
-- **Executions monitoring** — one dashboard for workflow, script, API, and remote runs with health metrics and causal timelines.
-- **Settings** — workspace storage, appearance (working dark & light mode), secret vault, notifications, plugins, and cloud storage.
-
-## What's New in the Tauri Rewrite
-
-- **Native performance** — Rust backend with an embedded SQLite store; git subprocesses kept off the async runtime; single lightweight executable instead of an Electron + Node bundle.
-- **SSH/SFTP remote execution** — server profiles with banner-verified connections, an SFTP file browser, and remote operations inside workflows.
-- **Fleet execution** — fan one command out to many servers at once from the Ops console.
-- **Advanced workflow nodes** — `foreach`, sub-workflows, and `try/catch` nodes, plus run-from-node and live streaming run events.
-- **AI workflow authoring** — generate workflows from a prompt and get failure diagnosis on broken runs.
-- **MCP everywhere** — built-in MCP stdio server so AI apps can call your saved workflows, scripts, and API requests; access levels enforced with human approvals for writes.
-- **Webhook & cron triggers** — trigger scripts and workflows from HTTP webhooks or schedules.
-- **API testing suite** — OpenAPI 3 import (JSON/YAML), declarative no-code assertions, pre/post scripts with a Boa JS engine, data-driven runs, response mappings, JUnit XML & HTML report export, and local mock servers.
-- **Plugin sandbox runtime** — capability-scoped plugin host for the desktop.
-- **Stability reports** — flake scoring across your run history.
-- **Git-backed workspace sync** — keep your whole workspace (scripts, collections, workflows) in a git repository, with settings UI and agent discovery improvements.
-- **Working dark and light mode**, redesigned agents bridge, humanized durations, and on-demand terminal sessions for script runs.
-
-## Building the Desktop App
-
-```bash
-cd tauri-app
-npm install
-
-# Development (hot reload)
-npm run tauri dev
-
-# Production build (Windows NSIS installer + executable)
-npm run tauri:build
-```
-
-Artifacts are output to `tauri-app/src-tauri/target/release/` (executable) and `tauri-app/src-tauri/target/release/bundle/` (installer).
-
 ---
 
-## Features
+## Feature Tour
 
-The feature set below covers the self-hosted web edition; the Tauri desktop app shares the same core (scripts, workflows, API client, ops, secrets) with the additions listed [above](#whats-new-in-the-tauri-rewrite).
+### Scripts
 
-### Plugin SDK and local marketplace
+- **Monaco editor** — full VS Code-powered editing with syntax highlighting and autocomplete for Python, JavaScript/Node.js, Shell/Bash, and custom interpreters.
+- **Live output streaming** — script output streams to the console pane as it runs; no refresh needed.
+- **Parameters & env vars** — typed, named parameters injected as environment variables at runtime; per-script env vars with masked secret values.
+- **Execution controls** — configurable per-script timeout with global default, kill/cancel of running scripts, and on-demand terminal sessions.
+- **Version history** — the last saved snapshots of every script, restorable from the Versions panel.
+- **Organization** — collections with drag-and-drop, color-coded tags, templates, one-click duplication, and a command palette (`Ctrl+P`).
 
-- Versioned manifests with declared capabilities, settings schemas, workflow-node contributions, lifecycle hooks, compatibility metadata, and optional update URLs.
-- Explicit workspace-scoped install, trust, enable, disable, settings, health, update-check, and uninstall flows.
-- Ed25519 signature verification; unsigned packages require a visible local-development opt-in.
-- Restricted host APIs for HTTP, execution events, opaque vault references, storage, notifications, and approved desktop capabilities—never Prisma, Electron internals, or raw secret plaintext.
-- Namespaced `plugin:<plugin-id>:<node-type>` workflow nodes, public SDK types, a plugin generator, and tested workflow-node and notification examples. See [Plugin SDK](docs/plugins/SDK.md).
+### API Client
 
-### Reliability foundation
-- **Correlated execution events** — Script, API, webhook, scheduled, and remote runs emit redacted durable lifecycle events under one correlation ID.
-- **Automated verification** — Vitest security/regression tests and GitHub Actions run unit tests and production builds.
-- **Production encryption guard** — Production credential encryption requires an administrator-supplied secret and will not silently use the development fallback.
+- **Collections & environments** — organize requests, share values through environments and global variables.
+- **OpenAPI 3 import** — bring in JSON/YAML specs to scaffold collections instantly (Postman JSON import too).
+- **Declarative assertions** — no-code response checks alongside pre/post scripts powered by an embedded JS engine.
+- **Data-driven runs** — run a request or whole collection against a dataset and inspect per-iteration results.
+- **Reports** — export collection runs as JUnit XML or styled HTML.
+- **Mock servers** — spin up local mocks to develop against before the real API exists.
 
-### Core
-- **Monaco Editor** — Full VS Code-powered editor with syntax highlighting, autocomplete, and multi-language support (Python, JavaScript/Node.js, Shell/Bash, and custom interpreters).
-- **Real-time Output Streaming** — Script output streams live to the console via Server-Sent Events (SSE) and WebSockets; no page refresh needed.
-- **Build History** — Every execution is logged with status (`pending`, `running`, `success`, `failure`, `timeout`), duration, exit code, and full output. Logs are stored on disk and queryable via API.
-- **Integrated Web Terminal** — A full xterm.js + node-pty terminal (PowerShell on Windows, Bash on Linux/macOS) accessible directly in the browser. Install dependencies, run git commands, or manage your system — all without leaving the app.
+### Visual Workflows
 
-### Organization
-- **Collections** — Group scripts into named folders. Scripts can be moved between collections with drag-and-drop.
-- **Tags** — Color-coded labels for filtering and categorizing scripts. Tags are created on the fly and reusable across scripts.
-- **Script Templates** — Built-in and custom starter templates (Python, JavaScript, Bash) to scaffold new scripts instantly.
-- **Script Duplication** — Clone any script with one click.
+- **Drag-and-drop DAG builder** — script, API, condition, transform, delay, approval, parallel branch, remote, and notification nodes — plus `foreach`, sub-workflow, and `try/catch`.
+- **Versioned publishes** — saved and published workflow versions with validation before release.
+- **Live run events** — watch nodes execute in real time, inspect per-node output, retry failed nodes, or resume from any node.
+- **AI authoring** — generate a workflow from a plain-language prompt and get failure diagnosis when a run breaks.
+- **Triggers** — start runs manually, on a schedule, or from webhook events.
 
-### Automation
-- **Visual Workflows** — Build versioned DAG workflows from scripts, API requests, conditions, transforms, delays, approvals, parallel branches, remote operations, and notifications.
-- **Durable Workflow Runs** — Database-backed runs persist node attempts, outputs, retries, cancellation, approval pauses, and restart reconciliation.
-- **Workflow Triggers** — Start published workflows manually, with cron schedules, or through encrypted HMAC-signed webhooks with replay protection.
-- **Workflow Templates** — Start from script pipeline, API-to-script, approval deploy, or remote maintenance templates.
-- **Webhooks** — Every script gets a unique HTTP POST endpoint. Send a request from IFTTT, Zapier, GitHub Actions, or any HTTP client to trigger execution. Supports optional HMAC-SHA256 signature verification (GitHub-compatible).
-- **Cron Scheduling** — Built-in cron scheduler. Enter any standard cron expression and the server executes your script automatically. Next-run time displayed in the UI.
-- **Execution Observability** — One operational dashboard for workflow, script, API, and remote runs with health metrics, filters, redacted causal timelines, correlation IDs, cancellation, targeted failed-node retry, and configurable execution-event retention.
-- **Approval Inbox** — Review actor, risk, exact redacted operation, affected resource, expiry, and audit history; decide with Allow once, Allow for run, Always for workspace, or Reject.
-- **Event Notifications** — Route typed execution and approval events to desktop, generic webhook, Slack, SMTP, or Teams channels using filters, templates, throttling, deduplication, audited delivery, and bounded retry state.
-- **Shared Secret Vault** — Store versioned ciphertext behind opaque references with rotation, disable, scoped bindings, reveal-once access, audit history, server master-key encryption, and Electron OS-backed encryption. Script environments, Ops SSH, storage providers, API authentication, webhook signing, and notification transports resolve credentials only inside their authorized runtimes.
-- **ACP Agent Workbench** — Run provider-neutral Codex or Claude agents from the Electron desktop, choose Observe, Develop, or Full access on first connection, inspect redacted transcripts and artifacts, interrupt/resume sessions, and use the same agent contract inside workflows.
-- **Agent Approval Boundary** — Commands, file writes, Git operations, secret reads, remote execution, and deployments route through scoped approvals. Protected actions require a fresh decision even with Full access; browser-only sessions remain inspect-only.
-- **Script Parameters** — Define typed, named parameters per script. Parameters are injected as environment variables at runtime and can be supplied via the UI, CLI, or webhook payload.
-- **Environment Variables** — Per-script environment variables; secret values are vault-backed and resolve only for the bound script at execution time.
-- **Execution Timeout** — Configurable timeout per script (or global default) to prevent runaway processes.
+![Workflow Automation](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/workflowautomation.png)
 
-### Sync & Backup
-- **GitHub Gist Sync** — Automatically sync any script to a private or public GitHub Gist on every save. One-click force-sync and the ability to unlink Gists are also supported.
-- **Version History** — Keeps the last 10 snapshots of each script's content. Restore any prior version from the UI.
+### AI Agents & MCP
 
-### Auth & Security
-- **Password Authentication** — Session-based login with HMAC-signed cookies (`sm_session`). Sessions have configurable expiry.
-- **Electron Desktop Bypass** — A secure ephemeral `DESKTOP_AUTH_SECRET` token is used when running as a packaged desktop app, so no login prompt appears.
-- **Webhook Signature Verification** — Optional HMAC-SHA256 request signing (compatible with GitHub webhook format) to validate incoming webhook calls.
+- **Local agent sessions** — run Codex or Claude agents (via ACP) against a workspace folder you choose, with Observe/Develop/Full access levels.
+- **Approval boundary** — commands, file writes, git operations, secret reads, and remote execution route through scoped approvals; protected actions always require a fresh decision.
+- **Built-in MCP server** — your AI apps (e.g. Claude Desktop) can call your saved workflows, scripts, and API requests — only when you ask.
+- **Live session control** — inspect redacted transcripts and artifacts, interrupt and resume sessions.
 
-### UI & UX
-- **Dark Mode** — Sleek dark-first interface built with Shadcn UI + Tailwind CSS.
-- **Drag-and-drop** — Reorder scripts and move them between collections using `@dnd-kit`.
-- **Responsive Layout** — Works on desktop and tablet viewports.
-- **Context Menus** — Right-click on any script for quick actions (run, rename, duplicate, delete, move).
+![AI Agents & DevOps](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/aianddevops.png)
+
+### Ops Console & Remote Execution
+
+- **Server profiles** — store SSH connections with banner-verified transport and vault-backed credentials.
+- **Remote execution** — run commands on any profile, with an SFTP browser for remote files.
+- **Fleet execution** — fan one command out to many selected servers in a single run.
+- **Reports & stability scoring** — flake detection and stability reports across your run history.
+- **Audit trail** — every remote and fleet run is recorded with who/what/when and full output.
+
+### Git Repository Workspace
+
+- **Connect any folder** — link a project directory and manage it without leaving the app.
+- **Stage & diff** — review additions and deletions in a visual diff view, then commit with a message.
+- **Sync** — fetch, pull, and push against your remote; browse the commit history graph.
+- **Workspace sync** — keep your whole ScriptManager workspace (scripts, collections, workflows) in a git repository.
+
+![Repository Management](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/repomanagement.png)
+
+### Executions & Observability
+
+- **One dashboard** — workflow, script, API, and remote runs unified with health metrics and filters.
+- **Causal timelines** — correlated, redacted lifecycle events under a single correlation ID per run.
+- **Approval inbox** — review actor, risk, affected resource, and expiry; decide with Allow once, Allow for run, Always, or Reject.
+
+![Executions Monitoring](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/exemoni.png)
+
+### Secret Vault & Security
+
+- **Encrypted vault** — versioned ciphertext behind opaque references, with rotation, scoped bindings, reveal-once access, and audit history.
+- **Scoped resolution** — script environments, SSH profiles, API authentication, and notification transports resolve credentials only inside their authorized runtimes.
+- **Plugin sandbox** — plugins run against capability-scoped host APIs and signed manifests; nothing gets raw secrets by default.
+
+### Settings & Configuration
+
+- **Workspace storage** — pick your workspace root; scripts and API collections are organized into folders inside it.
+- **Appearance** — working dark and light mode.
+- **Cloud storage & Gist sync** — sync scripts to S3/GCS/WebDAV/OneDrive-style providers or GitHub Gists.
+- **Security, notifications, plugins, workspace access** — all managed in-app.
+
+![Settings & Configuration](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/settingsconfig.png)
 
 ---
 
@@ -144,423 +136,77 @@ The feature set below covers the self-hosted web edition; the Tauri desktop app 
 
 | Layer | Technology |
 |---|---|
-| Framework | [Next.js 15](https://nextjs.org/) (App Router) |
-| Language | TypeScript |
-| Database | SQLite via [Prisma ORM](https://www.prisma.io/) |
-| State Management | [Redux Toolkit](https://redux-toolkit.js.org/) |
-| Editor | [@monaco-editor/react](https://github.com/suren-atoyan/monaco-react) |
-| Terminal | [xterm.js](https://xtermjs.org/) + [node-pty](https://github.com/microsoft/node-pty) |
-| WebSocket Server | [ws](https://github.com/websockets/ws) |
-| UI Components | [Radix UI](https://www.radix-ui.com/) + [Shadcn UI](https://ui.shadcn.com/) |
-| Styling | Tailwind CSS |
-| Icons | [Lucide React](https://lucide.dev/) |
-| Drag & Drop | [@dnd-kit](https://dndkit.com/) |
-| Desktop | [Tauri 2](https://tauri.app/) + Rust (desktop app) · [Electron](https://www.electronjs.org/) + [electron-builder](https://www.electron.build/) (web edition packaging) |
-| Scheduling | [node-cron](https://www.npmjs.com/package/node-cron) |
-| HTTP Client | [axios](https://axios-http.com/) |
-
----
+| Desktop shell | [Tauri 2](https://tauri.app/) |
+| Backend | Rust (Tokio async runtime, sqlx + SQLite, russh SSH/SFTP) |
+| Frontend | React 19 + TypeScript + Vite |
+| State | Redux Toolkit |
+| Editor | Monaco (`@monaco-editor/react`) |
+| Terminal | xterm.js |
+| Workflows | React Flow + Rust workflow engine |
+| Scripting engine | Boa (embedded JavaScript for API assertions) |
+| UI | Radix UI + Shadcn UI + Tailwind CSS |
+| Icons | Lucide |
 
 ## Project Structure
 
 ```
 scriptmanager/
-├── cli/
-│   └── sm.mjs                  # CLI entry point (sm run, sm list, sm logs, sm config)
-├── electron/                   # Desktop main process, preload, IPC runtimes, OAuth flow
-├── prisma/
-│   ├── schema.prisma           # Database schema (~50 models)
-│   └── migrations/             # SQL migration history
-├── sdk/                        # Public plugin SDK types
-├── src/
-│   ├── app/                    # Next.js App Router pages & API routes
-│   │   └── api/                # scripts, builds, collections, env, tags, templates,
-│   │                           # settings, webhooks, workflows, workflow-runs,
-│   │                           # api-client (collections/requests/env/history),
-│   │                           # ops, secrets, approvals, agents, notifications,
-│   │                           # observability, plugins, projects, storage-providers,
-│   │                           # workspaces, bootstrap, export
-│   ├── components/             # React UI (scripts manager, workflows editor, API client, ops…)
-│   ├── features/               # Redux slices: scripts, workflows, api, ops, settings
-│   ├── lib/
-│   │   ├── workflows/          # Durable engine: schema, graph planner, mappings, policy,
-│   │   │                       # worker + workerLoop, repository, triggers, node registry
-│   │   ├── schedulerService.ts # Cron scheduler (scripts + workflow triggers)
-│   │   ├── scriptRunner.ts     # Script execution engine (streaming, timeout, kill)
-│   │   ├── socketService.ts    # WebSocket terminal server (node-pty)
-│   │   ├── storage/            # Cloud sync providers (S3/GCS/WebDAV/GDrive/OneDrive)
-│   │   ├── secrets/            # Encrypted vault with bindings and audit
-│   │   ├── rbac/               # Workspace roles, permissions, request context
-│   │   ├── plugins/            # Signed plugin host and capability-scoped APIs
-│   │   ├── approvals/          # Approval requests, decisions, grants, policy
-│   │   └── observability/      # Correlated execution events and dashboards
-│   └── middleware.ts           # Auth middleware (sessions, API tokens, RBAC routing)
-├── server.ts                   # Custom HTTP server (Next.js + WebSockets + scheduler + worker)
-├── tests/                      # Vitest unit / integration / performance suites
-├── docker-compose.yml          # Self-hosted deployment
-└── package.json
+├── tauri-app/                  # The desktop application
+│   ├── src/                    # React UI (scripts, workflows, API client, ops, agents, settings)
+│   │   ├── components/         # Feature components and views
+│   │   ├── features/           # Redux slices
+│   │   └── lib/                # Client-side engines (workflow worker, notifications, bridge)
+│   └── src-tauri/              # Rust backend
+│       ├── src/                # Commands, workflow engine, SSH transport, MCP server,
+│       │                       # scheduler, notifications, secrets, git integration
+│       ├── tests/              # Rust test suites
+│       └── tauri.conf.json     # Window, bundle, and build configuration
+├── images/                     # README screenshots
+└── docs/                       # Operator guide and design docs
 ```
 
----
-
-## Quick Start
+## Getting Started
 
 ### Prerequisites
 
-- **Node.js 18+**
-- **Python 3** — required if you plan to run Python scripts
-- **Windows, Linux, or macOS** — all supported
+- **Node.js 18+** and npm
+- **Rust** (stable toolchain) — [rustup.rs](https://rustup.rs)
+- Platform requirements for Tauri on your OS (WebView2 on Windows is auto-installed by the installer)
+- **Python 3** / interpreters you want your scripts to use
 
-> **Windows note:** If you see errors related to `node-pty` during `npm install`, run:
-> ```bash
-> npm install --global --production windows-build-tools
-> ```
-
-### 1. Install Dependencies
+### Run in Development
 
 ```bash
+cd tauri-app
 npm install
+npm run dev        # frontend only (Vite, hot reload)
 ```
 
-### 2. Set Up the Database
+### Build the Desktop App
 
 ```bash
-# Generate the Prisma client
-npm run db:generate
-
-# Apply migrations (creates ./data/scriptmanager.db)
-npm run db:migrate
+cd tauri-app
+npm run tauri:build
 ```
 
-### 3. Configure Environment
+Artifacts land in `tauri-app/src-tauri/target/release/` (executable) and `tauri-app/src-tauri/target/release/bundle/` (Windows NSIS installer).
 
-Create a `.env` file in the project root:
+### Useful Scripts
 
-```env
-# Required: SQLite database path
-DATABASE_URL="file:./data/scriptmanager.db"
-
-# Optional: change the port (default: 3000)
-PORT=3000
-
-# Optional: session secret for cookie signing (change in production!)
-SESSION_SECRET="your-secret-here"
-```
-
-### 4. Start the Development Server
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) in your browser. You'll be prompted to log in.
-
-### Production Build
-
-```bash
-npm run build
-npm start
-```
-
----
-
-## Configuration
-
-### Application Settings (UI)
-
-Navigate to the **Settings** tab in the UI to configure:
-
-| Setting | Description |
+| Command | Description |
 |---|---|
-| Admin Password | Password used to log into the web UI |
-| GitHub Token | Personal access token for GitHub Gist sync (`gist` scope required) |
-| Script Storage Path | Directory where script files are saved (default: `./user_scripts`) |
-| Default Gist Sync | Whether new scripts sync to Gist by default |
-| Global Execution Timeout | Default script timeout in milliseconds |
-
-### Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `DATABASE_URL` | `file:./data/scriptmanager.db` | Prisma database connection string |
-| `PORT` | `3000` | HTTP server port |
-| `SESSION_SECRET` | `scriptmanager-dev-secret-change-me` | HMAC secret for session cookies |
-| `DESKTOP_AUTH_SECRET` | _(auto-generated)_ | Electron desktop authentication secret |
-| `SCRIPTS_DIR` | `./user_scripts` | Override script storage directory |
-| `BUILDS_DIR` | `./builds` | Override build log directory |
-
----
-
-## Usage Guide
-
-### Writing & Running Scripts
-
-1. Click **New Script** in the sidebar.
-2. Choose a language (Python, JavaScript, Shell, or Custom interpreter).
-3. Write your code in the Monaco editor.
-4. Click **Run** — output streams live to the Console pane below the editor.
-5. Click **Save** (or use `Ctrl+S`) to persist your changes.
-
-### Script Parameters
-
-Parameters allow you to pass dynamic values to scripts at runtime:
-
-1. Open the **Parameters** panel in the sidebar.
-2. Add parameters with a name, type (`string`, `number`, `boolean`), and optional default value.
-3. When running manually, a dialog prompts for parameter values.
-4. Parameters are injected as environment variables (e.g., a param named `my_input` becomes `$MY_INPUT`).
-
-### Environment Variables
-
-Per-script environment variables are stored in the database:
-
-1. Open **Env Vars** in the sidebar for the active script.
-2. Add key/value pairs. Mark sensitive values as **Secret** to mask them in the UI.
-3. All env vars are automatically available to the script at runtime.
-
-### Build History
-
-- Every run (manual, scheduled, or webhook-triggered) creates a **Build** record.
-- View past builds in the **Build History** panel.
-- Click any build to see its full output log.
-- Builds display status, triggered-by source, start/end times, and exit code.
-
-### Integrated Terminal
-
-- Click **Open Terminal** in the Console header.
-- A full interactive terminal (PowerShell/Bash) appears in the browser.
-- Use it to install packages (`pip install pandas`, `npm install axios`), run git, or debug your environment.
-- The terminal persists across script switches and can be minimized.
-
-### Collections & Tags
-
-- **Collections:** Click the folder icon or right-click a script to move it to a collection. Create and delete collections from the sidebar.
-- **Tags:** Add color-coded tags to any script. Filter the sidebar by tag to find scripts quickly.
-
-### Webhooks
-
-Each script has a unique webhook URL:
-
-```
-POST http://your-host:3000/api/webhooks/{token}
-```
-
-- Trigger the script from any external service (IFTTT, Zapier, GitHub Actions, etc.).
-- The webhook endpoint is **unauthenticated** by design — the token acts as the secret.
-- **Signature Verification:** Enable HMAC-SHA256 signing in the script's Webhook panel. Send the `X-Hub-Signature-256` header (compatible with GitHub's webhook format) to validate requests.
-- **Payload:** The raw JSON body is passed to the script via `WEBHOOK_PAYLOAD` env var.
-- Regenerate the webhook token or secret at any time from the UI.
-
-### Cron Scheduling
-
-1. Open the **Schedule** panel for a script.
-2. Enter a valid cron expression (e.g., `*/15 * * * *` for every 15 minutes).
-3. Toggle **Enable**.
-4. The scheduler runs server-side; scripts execute automatically while the server is running.
-
-### GitHub Gist Sync
-
-1. Add your GitHub Personal Access Token in **Settings** (requires `gist` scope).
-2. Toggle **Sync to Gist** on any script.
-3. The script is pushed to a private Gist on every save.
-4. Use **Force Sync** to push immediately, or **Unlink Gist** to detach.
-
-### Version History
-
-- ScriptManager keeps the last 10 saved snapshots of every script.
-- Open the **Versions** panel to browse and restore any previous version.
-
----
-
-## CLI Usage
-
-ScriptManager ships with `sm`, a command-line interface for running and managing scripts from your terminal.
-
-### Installation
-
-```bash
-# Run directly from the project
-node ./cli/sm.mjs --help
-
-# Or use the npm script alias
-npm run cli -- --help
-```
-
-### Configure the CLI
-
-```bash
-# Point the CLI at your running ScriptManager instance
-sm config set baseUrl http://localhost:3000
-sm config set apiKey <your-session-token>
-```
-
-### Commands
-
-```bash
-# List all scripts
-sm list
-
-# Run a script (streams output to stdout)
-sm run "My Script Name"
-
-# Run with parameters
-sm run "My Script" --param KEY=value --param OTHER=value
-
-# View the latest build log for a script
-sm logs "My Script Name"
-```
-
-The CLI authenticates using the same session mechanism as the web UI and streams SSE output directly to your terminal.
-
----
-
-## Desktop App (Electron)
-
-ScriptManager can be packaged as a native desktop application using Electron.
-
-### Development Mode
-
-```bash
-npm run electron:dev
-```
-
-This starts both the Next.js server and Electron concurrently. The desktop window bypasses web authentication using a shared `DESKTOP_AUTH_SECRET`.
-
-### Build a Distributable
-
-```bash
-# Package without installer (for local testing)
-npm run electron:pack
-
-# Build full installers (NSIS on Windows, DMG on macOS, AppImage on Linux)
-npm run electron:build
-```
-
-Built artifacts are output to the `release/` directory.
-
-### How it Works
-
-- In production, Electron spawns the standalone Next.js server on port `3141`.
-- An ephemeral `DESKTOP_AUTH_SECRET` is generated each launch and injected as a session cookie, bypassing the password login screen.
-- The SQLite database and scripts are stored in the OS user data directory (`app.getPath('userData')`), so data persists across app updates.
-
----
-
-## API Reference
-
-All routes (except `/api/webhooks/`, `/api/workflow-webhooks/`, and `/api/auth/`) require a valid session cookie. Bearer API tokens are also accepted.
-
-### Scripts
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/scripts` | List all scripts |
-| `POST` | `/api/scripts` | Create or update a script |
-| `GET` | `/api/scripts/:id` | Get script with content |
-| `DELETE` | `/api/scripts/:id` | Delete a script |
-| `POST` | `/api/scripts/:id/run` | Trigger a manual run |
-| `POST` | `/api/scripts/:id/duplicate` | Duplicate a script |
-| `GET` | `/api/scripts/:id/schedule` | Get schedule |
-| `PUT` | `/api/scripts/:id/schedule` | Save/update schedule |
-| `DELETE` | `/api/scripts/:id/schedule` | Delete schedule |
-| `GET` | `/api/scripts/:id/tags` | List script tags |
-| `POST` | `/api/scripts/:id/tags` | Add a tag |
-| `DELETE` | `/api/scripts/:id/tags?tagId=` | Remove a tag |
-| `GET` | `/api/scripts/:id/versions` | List version snapshots |
-| `GET` | `/api/scripts/:id/versions/:versionId` | Get a version's content |
-| `POST` | `/api/scripts/:id/gist/sync` | Force Gist sync |
-| `DELETE` | `/api/scripts/:id/gist` | Unlink Gist |
-| `POST` | `/api/scripts/:id/webhook/regenerate` | Regenerate webhook token |
-| `POST` | `/api/scripts/:id/webhook/secret` | Regenerate HMAC secret |
-| `PUT` | `/api/scripts/:id/webhook/secret` | Toggle signature requirement |
-| `PUT` | `/api/scripts/:id/move` | Move to a collection |
-
-### Builds
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/builds/:scriptId` | List builds for a script |
-| `GET` | `/api/builds/output/:scriptId/:buildId` | Get build output |
-| `GET` | `/api/builds/:buildId/stream` | Stream live output (SSE) |
-
-### Collections
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/collections` | List all collections |
-| `POST` | `/api/collections` | Create a collection |
-| `DELETE` | `/api/collections/:id` | Delete a collection |
-
-### Environment Variables
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/env/:scriptId` | List env vars for a script |
-| `POST` | `/api/env/:scriptId` | Create an env var |
-| `PUT` | `/api/env/:scriptId/:id` | Update an env var |
-| `DELETE` | `/api/env/:scriptId/:id` | Delete an env var |
-
-### Templates, Tags & Settings
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/templates` | List script templates |
-| `POST` | `/api/templates` | Create a template |
-| `GET` | `/api/tags` | List all tags |
-| `GET` | `/api/settings` | Get all settings |
-| `PUT` | `/api/settings` | Update settings |
-
-### Webhooks (unauthenticated)
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/webhooks/:token` | Trigger a script by webhook token |
-| `GET` | `/api/webhooks/:token` | Check webhook info |
-
-### Auth
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/auth/login` | Log in (returns session cookie) |
-| `POST` | `/api/auth/logout` | Log out (clears session cookie) |
-
----
-
-## Database Schema
-
-ScriptManager uses **SQLite** via Prisma with the following models:
-
-- **`Script`** — Core entity. Stores name, filename, language, interpreter, parameters (JSON), webhook token/secret, schedule cron, Gist metadata, collection link, and timeout.
-- **`Build`** — Execution record. Tracks status, triggered-by, log file path, start/finish times, and exit code.
-- **`Collection`** — Named folder for grouping scripts.
-- **`Tag`** / **`ScriptTag`** — Color-coded labels with a many-to-many join to scripts.
-- **`ScriptEnvVar`** — Per-script environment variables with optional secret masking.
-- **`ScriptVersion`** — Snapshot of script content at save time. Keeps last 10 per script.
-- **`ScriptTemplate`** — Reusable starter templates (built-in and user-created).
-- **`Setting`** — Key/value store for global application settings.
-- **`User`**, **`Workspace`**, and **`Membership`** — Optional multi-user identity and workspace tenancy. Local desktop installs bootstrap one administrator-owned default workspace.
-- **`Role`** / **`RolePermission`** — Server-enforced `resource:action` permissions with owner, admin, developer, operator, approver, and viewer presets plus custom roles.
-- **`WorkspaceInvitation`** / **`UserSession`** — Expiring invitations and hashed, expiring, individually revocable sessions.
-
-### Workspace access and RBAC
-
-Authenticated API requests are checked in the Node middleware against the current membership before protected routes run. Script, workflow, secret, agent, approval, Ops, and Git resources are workspace-scoped; ID-based access rejects a resource owned by another workspace. Agent actions additionally intersect the initiating user's permissions, the selected agent access profile, workspace policy, and protected-action approval rules.
-
-Workspace owners and authorized administrators can manage members, invitations, custom roles, active sessions, reusable approval/agent grants, and workspace audit history from **Settings → Workspace Access**.
+| `npm run dev` | Vite dev server with hot reload |
+| `npm run tauri:build` | Full production build + installer |
+| `npm run tauri:build:no-bundle` | Build the executable without the installer |
+| `npm run lint` | Oxlint checks |
+| `npm run guard:desktop-bridge` | Verify the desktop bridge contract |
 
 ---
 
 ## Contributing
 
-1. Fork the repository and create a feature branch.
-2. Install dependencies: `npm install`
-3. Set up the database: `npm run db:migrate`
-4. Start the dev server: `npm run dev`
-5. Make your changes and add tests where appropriate.
-6. Open a pull request with a clear description of the change.
-
----
+Issues and pull requests are welcome. For larger changes, please open an issue first to discuss what you would like to change.
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+This project is licensed under the terms of the [LICENSE](LICENSE) file.
