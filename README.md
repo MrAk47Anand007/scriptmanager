@@ -1,15 +1,18 @@
 # ScriptManager
 
-> **Release status:** The 1.0 production path supports signed desktop installers and self-hosted Node.js 22 deployments with migration preflight, verified backup/restore, upgrade compatibility, security regression, accessibility, performance, Electron packaging, and cross-subsystem acceptance gates. Start with [the operator guide](docs/operator-guide.md).
+> **Release status:** The desktop app has been rewritten in **Tauri 2 + Rust** — one lightweight native executable with a built-in SQLite store, SSH/SFTP transport, MCP server, and workflow engine. The self-hosted web edition (Next.js + Electron) remains fully supported. Start with [the operator guide](docs/operator-guide.md).
 
-A self-hosted, local-first script manager — write, run, schedule, and organize scripts with a professional web UI. Think of it as **n8n for scripts**: automation without the complexity.
+A self-hosted, local-first script manager — write, run, schedule, and organize scripts with a professional UI, on desktop or in the browser. Think of it as **n8n for scripts**: automation without the complexity.
 
-![ScriptManager UI](docs/screenshot.png)
+![Scripts & API Workbench](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/scriptandapi.png)
 
 ---
 
 ## Table of Contents
 
+- [Desktop App (Tauri)](#desktop-app-tauri)
+- [What's New in the Tauri Rewrite](#whats-new-in-the-tauri-rewrite)
+- [Building the Desktop App](#building-the-desktop-app)
 - [Features](#features)
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
@@ -25,7 +28,58 @@ A self-hosted, local-first script manager — write, run, schedule, and organize
 
 ---
 
+## Desktop App (Tauri)
+
+The desktop edition is a native app built with Tauri 2 (Rust backend + web UI). Everything runs locally — no server, no browser, no login. Data lives in a local SQLite database and a workspace folder on your machine.
+
+| | |
+|---|---|
+| ![Workflow Automation](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/workflowautomation.png) | ![AI Agents & DevOps](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/aianddevops.png) |
+| ![Repository Management](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/repomanagement.png) | ![Executions Monitoring](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/exemoni.png) |
+| ![Settings & Configuration](https://raw.githubusercontent.com/MrAk47Anand007/scriptmanager/main/images/settingsconfig.png) | |
+
+- **Scripts & API workbench** — Monaco editor with live output, collections, tags, and a built-in API client (collections, environments, history, runs, mock servers).
+- **Visual workflow automation** — drag-and-drop DAG builder with live run events, per-node inspection, and versioned publishes.
+- **AI agents & DevOps** — run Codex/Claude agent sessions locally with approval gates, plus an Ops console for remote execution, server profiles, fleet runs, and audit.
+- **Repository management** — stage, diff, commit, push/pull, and browse history for any linked project folder.
+- **Executions monitoring** — one dashboard for workflow, script, API, and remote runs with health metrics and causal timelines.
+- **Settings** — workspace storage, appearance (working dark & light mode), secret vault, notifications, plugins, and cloud storage.
+
+## What's New in the Tauri Rewrite
+
+- **Native performance** — Rust backend with an embedded SQLite store; git subprocesses kept off the async runtime; single lightweight executable instead of an Electron + Node bundle.
+- **SSH/SFTP remote execution** — server profiles with banner-verified connections, an SFTP file browser, and remote operations inside workflows.
+- **Fleet execution** — fan one command out to many servers at once from the Ops console.
+- **Advanced workflow nodes** — `foreach`, sub-workflows, and `try/catch` nodes, plus run-from-node and live streaming run events.
+- **AI workflow authoring** — generate workflows from a prompt and get failure diagnosis on broken runs.
+- **MCP everywhere** — built-in MCP stdio server so AI apps can call your saved workflows, scripts, and API requests; access levels enforced with human approvals for writes.
+- **Webhook & cron triggers** — trigger scripts and workflows from HTTP webhooks or schedules.
+- **API testing suite** — OpenAPI 3 import (JSON/YAML), declarative no-code assertions, pre/post scripts with a Boa JS engine, data-driven runs, response mappings, JUnit XML & HTML report export, and local mock servers.
+- **Plugin sandbox runtime** — capability-scoped plugin host for the desktop.
+- **Stability reports** — flake scoring across your run history.
+- **Git-backed workspace sync** — keep your whole workspace (scripts, collections, workflows) in a git repository, with settings UI and agent discovery improvements.
+- **Working dark and light mode**, redesigned agents bridge, humanized durations, and on-demand terminal sessions for script runs.
+
+## Building the Desktop App
+
+```bash
+cd tauri-app
+npm install
+
+# Development (hot reload)
+npm run tauri dev
+
+# Production build (Windows NSIS installer + executable)
+npm run tauri:build
+```
+
+Artifacts are output to `tauri-app/src-tauri/target/release/` (executable) and `tauri-app/src-tauri/target/release/bundle/` (installer).
+
+---
+
 ## Features
+
+The feature set below covers the self-hosted web edition; the Tauri desktop app shares the same core (scripts, workflows, API client, ops, secrets) with the additions listed [above](#whats-new-in-the-tauri-rewrite).
 
 ### Plugin SDK and local marketplace
 
@@ -101,7 +155,7 @@ A self-hosted, local-first script manager — write, run, schedule, and organize
 | Styling | Tailwind CSS |
 | Icons | [Lucide React](https://lucide.dev/) |
 | Drag & Drop | [@dnd-kit](https://dndkit.com/) |
-| Desktop | [Electron](https://www.electronjs.org/) + [electron-builder](https://www.electron.build/) |
+| Desktop | [Tauri 2](https://tauri.app/) + Rust (desktop app) · [Electron](https://www.electronjs.org/) + [electron-builder](https://www.electron.build/) (web edition packaging) |
 | Scheduling | [node-cron](https://www.npmjs.com/package/node-cron) |
 | HTTP Client | [axios](https://axios-http.com/) |
 
