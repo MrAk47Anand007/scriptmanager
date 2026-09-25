@@ -205,7 +205,7 @@ Artifacts land in `tauri-app/src-tauri/target/release/` (executable) and `tauri-
 
 ## Contributing
 
-Issues and pull requests are welcome. For larger changes, please open an issue first to discuss what you would like to change.
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and checks, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations. For larger changes, please open an issue first to discuss what you would like to change.
 
 ## License
 
